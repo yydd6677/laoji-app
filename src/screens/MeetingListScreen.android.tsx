@@ -202,7 +202,11 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     refresh: refreshRecycleCapability,
   } = useMeetingRecycleCapability();
   const { showDialog } = useAppDialog();
-  const { busy: mediaImporting, selectMeetingMedia } = useMeetingMediaImport();
+  const {
+    blocked: mediaImportBlocked,
+    blockedLabel: mediaImportBlockedLabel,
+    selectMeetingMedia,
+  } = useMeetingMediaImport();
   const isFocused = useIsFocused();
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState('');
@@ -577,7 +581,10 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           && orderedMeetings.length > 1,
         searching: recycleBinVisible ? false : searching,
         query: recycleBinVisible ? '' : query,
-        mediaImporting: recycleBinVisible ? false : mediaImporting,
+        // The upload action stays available while the first import prepares.
+        // Native loading/disable treatment is reserved for the two-task cap.
+        mediaImporting: recycleBinVisible ? false : mediaImportBlocked,
+        mediaImportStatusLabel: recycleBinVisible ? undefined : mediaImportBlockedLabel ?? undefined,
         phase: recycleBinVisible
           ? recycleBinLoading && recycleBinEntries.length === 0
             ? 'loading'
@@ -600,7 +607,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           : activeSearch ? searchMeetingSnapshots : normalMeetingSnapshots,
       },
     };
-  }, [activeSearch, error, loading, mediaImporting, meetings.length, normalMeetingSnapshots, orderedMeetings, permanentlyDeletingMeetingId, query, recycleBinEmptying, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, reorderSaving, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
+  }, [activeSearch, error, loading, mediaImportBlocked, mediaImportBlockedLabel, meetings.length, normalMeetingSnapshots, orderedMeetings, permanentlyDeletingMeetingId, query, recycleBinEmptying, recycleBinEntries, recycleBinError, recycleBinLoading, recycleBinVisible, reorderSaving, restoringMeetingId, retentionDays, searchError, searchLoading, searchMeetingSnapshots, searching]);
 
   const confirmDelete = async (id: string) => {
     const target = meetings.find(meeting => meeting.id === id);

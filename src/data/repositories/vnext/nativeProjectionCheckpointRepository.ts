@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../../db/openDatabase';
+import { openScheduleDatabase, withScheduleDatabaseTransaction } from '../../db/openScheduleDatabase';
 
 export interface NativeProjectionCheckpoint {
   deviceEpochId: string;
@@ -40,6 +41,30 @@ type CheckpointRow = {
 };
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
+const CALENDAR_SURFACE_KEY = 'calendar';
+const MEETING_CHECKPOINT_TABLE = 'native_projection_checkpoints';
+const SCHEDULE_CHECKPOINT_TABLE = 'native_schedule_projection_checkpoints';
+
+function checkpointTable(surfaceKey: string): string {
+  return surfaceKey === CALENDAR_SURFACE_KEY
+    ? SCHEDULE_CHECKPOINT_TABLE
+    : MEETING_CHECKPOINT_TABLE;
+}
+
+function openProjectionDatabase(surfaceKey: string): Promise<SQLiteDatabase> {
+  return surfaceKey === CALENDAR_SURFACE_KEY
+    ? openScheduleDatabase()
+    : openMeetingDatabase();
+}
+
+function withProjectionDatabaseTransaction<T>(
+  surfaceKey: string,
+  work: (database: SQLiteDatabase) => Promise<T>,
+): Promise<T> {
+  return surfaceKey === CALENDAR_SURFACE_KEY
+    ? withScheduleDatabaseTransaction(work)
+    : withMeetingDatabaseTransaction(work);
+}
 
 function required(value: string, field: string, maxLength: number): string {
   const normalized = value.trim();
@@ -110,10 +135,11 @@ async function readCheckpoint(
   surfaceKey: string,
   entityId: string,
 ): Promise<NativeProjectionCheckpoint | null> {
+  const table = checkpointTable(surfaceKey);
   return checkpointFromRow(await database.getFirstAsync<CheckpointRow>(
     `SELECT device_epoch_id, surface_key, entity_id, entity_revision, view_revision,
             surface_instance_id, payload_sha256, accepted_at_ms
-       FROM native_projection_checkpoints
+       FROM ${table}
       WHERE device_epoch_id = ? AND surface_key = ? AND entity_id = ?`,
     deviceEpochId,
     surfaceKey,
@@ -129,7 +155,7 @@ export async function getNativeProjectionCheckpoint(input: {
   const deviceEpochId = required(input.deviceEpochId, 'deviceEpochId', 128);
   const surfaceKey = required(input.surfaceKey, 'surfaceKey', 96);
   const entityId = required(input.entityId, 'entityId', 256);
-  return readCheckpoint(await openMeetingDatabase(), deviceEpochId, surfaceKey, entityId);
+  return readCheckpoint(await openProjectionDatabase(surfaceKey), deviceEpochId, surfaceKey, entityId);
 }
 
 /**
@@ -142,7 +168,7 @@ export async function acceptNativeProjectionCheckpoint(
   input: NativeProjectionCheckpointInput,
 ): Promise<NativeProjectionCheckpointAcceptResult> {
   const normalized = normalizeInput(input);
-  return withMeetingDatabaseTransaction(async database => {
+  return withProjectionDatabaseTransaction(normalized.surfaceKey, async database => {
     const current = await readCheckpoint(
       database,
       normalized.deviceEpochId,
@@ -162,7 +188,7 @@ export async function acceptNativeProjectionCheckpoint(
     }
 
     await database.runAsync(
-      `INSERT INTO native_projection_checkpoints(
+      `INSERT INTO ${checkpointTable(normalized.surfaceKey)}(
          device_epoch_id, surface_key, entity_id, entity_revision, view_revision,
          surface_instance_id, payload_sha256, accepted_at_ms
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -197,11 +223,21 @@ export async function acceptNativeProjectionCheckpoint(
 
 export async function deleteNativeProjectionCheckpointsForEpoch(deviceEpochId: string): Promise<number> {
   const normalized = required(deviceEpochId, 'deviceEpochId', 128);
-  return withMeetingDatabaseTransaction(async database => {
-    const result = await database.runAsync(
-      'DELETE FROM native_projection_checkpoints WHERE device_epoch_id = ?',
-      normalized,
-    );
-    return Number(result.changes ?? 0);
-  });
+  const [meetingChanges, scheduleChanges] = await Promise.all([
+    withMeetingDatabaseTransaction(async database => {
+      const result = await database.runAsync(
+        'DELETE FROM native_projection_checkpoints WHERE device_epoch_id = ?',
+        normalized,
+      );
+      return Number(result.changes ?? 0);
+    }),
+    withScheduleDatabaseTransaction(async database => {
+      const result = await database.runAsync(
+        'DELETE FROM native_schedule_projection_checkpoints WHERE device_epoch_id = ?',
+        normalized,
+      );
+      return Number(result.changes ?? 0);
+    }),
+  ]);
+  return meetingChanges + scheduleChanges;
 }

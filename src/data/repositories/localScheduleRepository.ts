@@ -1,6 +1,5 @@
-import type { SQLiteDatabase } from 'expo-sqlite';
 import type { CalEvent } from '../../types';
-import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../db/openDatabase';
+import { openScheduleDatabase, withScheduleDatabaseTransaction } from '../db/openScheduleDatabase';
 
 type LocalScheduleRow = {
   id: string;
@@ -11,33 +10,8 @@ function normalize(event: CalEvent): CalEvent {
   return { ...event, id: String(event.id) };
 }
 
-async function ensureTable(database: SQLiteDatabase): Promise<void> {
-  await database.execAsync(`
-    CREATE TABLE IF NOT EXISTS local_schedule_events (
-      id TEXT PRIMARY KEY,
-      source_event_id TEXT,
-      start_date TEXT NOT NULL,
-      end_date TEXT,
-      start_time TEXT,
-      end_time TEXT,
-      title TEXT NOT NULL DEFAULT '',
-      event_json TEXT NOT NULL,
-      event_revision INTEGER NOT NULL DEFAULT 1,
-      draft_source_sha256 TEXT,
-      producer_revision TEXT NOT NULL DEFAULT 'legacy-v1',
-      graph_schema_revision TEXT NOT NULL DEFAULT 'mention-graph-v1',
-      deleted_at_ms INTEGER,
-      created_at_ms INTEGER NOT NULL,
-      updated_at_ms INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_local_schedule_date_runtime
-      ON local_schedule_events(start_date, end_date, id);
-  `);
-}
-
 export async function loadLocalScheduleEvents(): Promise<CalEvent[]> {
-  const database = await openMeetingDatabase();
-  await ensureTable(database);
+  const database = await openScheduleDatabase();
   const rows = await database.getAllAsync<LocalScheduleRow>(
     'SELECT id, event_json FROM local_schedule_events ORDER BY start_date, start_time, id',
   );
@@ -53,8 +27,7 @@ export async function loadLocalScheduleEvents(): Promise<CalEvent[]> {
 
 export async function replaceLocalScheduleEvents(events: readonly CalEvent[]): Promise<void> {
   const normalized = events.map(normalize);
-  await withMeetingDatabaseTransaction(async database => {
-    await ensureTable(database);
+  await withScheduleDatabaseTransaction(async database => {
     await database.runAsync('DELETE FROM local_schedule_events');
     const now = Date.now();
     for (const event of normalized) {
@@ -87,8 +60,7 @@ export async function replaceLocalScheduleEvents(events: readonly CalEvent[]): P
 
 export async function upsertLocalScheduleEvent(event: CalEvent): Promise<void> {
   const normalized = normalize(event);
-  await withMeetingDatabaseTransaction(async database => {
-    await ensureTable(database);
+  await withScheduleDatabaseTransaction(async database => {
     const now = Date.now();
     await database.runAsync(
       `INSERT INTO local_schedule_events (
@@ -133,8 +105,7 @@ export async function upsertLocalScheduleEvent(event: CalEvent): Promise<void> {
 export async function deleteLocalScheduleEvent(eventId: string): Promise<void> {
   const normalizedId = String(eventId).trim();
   if (!normalizedId) throw new Error('日程标识不能为空');
-  await withMeetingDatabaseTransaction(async database => {
-    await ensureTable(database);
+  await withScheduleDatabaseTransaction(async database => {
     await database.runAsync('DELETE FROM local_schedule_events WHERE id = ?', normalizedId);
   });
 }

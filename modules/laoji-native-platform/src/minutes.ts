@@ -199,6 +199,7 @@ export interface MinutesListSnapshot {
   searching?: boolean;
   query?: string;
   mediaImporting?: boolean;
+  mediaImportStatusLabel?: string;
   phase?: MinutesContentPhase;
   message?: string;
   showingCachedData?: boolean;

@@ -49,3 +49,7 @@ __pycache__/
 /modules/**/android/build/
 /modules/**/build/
 /tools/**/build/
+
+# Local release and runtime artifacts
+/artifacts/vnext-releases/
+/services/laoji-api/local.db

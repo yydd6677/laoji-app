@@ -35,6 +35,7 @@ def main() -> None:
     coordinator = ROOT / "src/native/nativeTransferCoordinator.ts"
     operations = ROOT / "src/data/repositories/vnext/deviceOperationsRepository.ts"
     transcript_tasks = ROOT / "src/services/deviceTranscriptTasks.ts"
+    stage_mirror = ROOT / "src/services/meetingStageMirror.ts"
     recording = ROOT / "src/services/meetingRecording.ts"
     completion = ROOT / "src/components/DeviceMeetingCompletionProvider.tsx"
     upload_migration = ROOT / "src/data/db/migrations/0046DeviceUploadExecutor.ts"
@@ -43,6 +44,7 @@ def main() -> None:
     media_import_provider = ROOT / "src/components/MeetingMediaImportProvider.tsx"
     app_config = ROOT / "app.config.js"
     cleartext_plugin = ROOT / "plugins/withAndroidCleartextTraffic.js"
+    release_plugin = ROOT / "plugins/withAndroidReleaseOptimizations.js"
 
     require(
         app_config,
@@ -55,17 +57,53 @@ def main() -> None:
         "allowCleartext ? 'true' : 'false'",
     )
     require(
+        release_plugin,
+        "@generated-by-laoji-release-contract-verification",
+        'tasks.register("verifyLaojiReleaseContract", Exec)',
+        'tools/verify_compact_apk_config.py',
+        'finalizedBy(verifyLaojiReleaseContract)',
+        'laoji.allowNonProductionRelease',
+    )
+    require(
         media_ingestor,
         'state = "staged"',
         '"staged", "copying", "extracting" -> ingest(',
         'current.state in setOf("staged", "copying", "extracting", "prepared")',
+        "ConcurrentHashMap<String, Any>()",
+        "computeIfAbsent(meetingId)",
+        "mediaImportLockFor(meetingId.trim())",
     )
     require(
         media_import_provider,
         "await stageMeetingMediaImport({",
         "await saveMeetingMediaImportDraft(request.meetingId, activeDraft);",
         "recoveredTargetMeetingId",
+        "MAX_ACTIVE_MEDIA_PREPARATIONS = 3",
+        "preparationWaitersRef",
+        "await acquirePreparationSlot();",
+        "blocked: recoveringImports",
+        "meetingsRef.current.some",
     )
+    provider_text = media_import_provider.read_text(encoding="utf-8")
+    if "MAX_CONCURRENT_MEDIA_IMPORTS" in provider_text or "已有两条录音正在准备" in provider_text:
+        raise AssertionError("accepted imports must not be rejected by a user-visible preparation cap")
+    if provider_text.index("await acquirePreparationSlot();") < provider_text.index(
+        "await stageMeetingMediaImport({"
+    ):
+        raise AssertionError("an accepted import must be durable before it waits for preparation capacity")
+    if "[initializing, meetings, mode, persistIngestedMedia" in provider_text:
+        raise AssertionError("meeting list changes must not restart the exclusive import recovery pass")
+    if "private val mediaImportIoLock = Any()" in media_ingestor.read_text(encoding="utf-8"):
+        raise AssertionError("media preparation must not regress to one global I/O lock")
+    media_ingestor_text = media_ingestor.read_text(encoding="utf-8")
+    if media_ingestor_text.count("if (!videoSource && size > maximumBytes)") != 2:
+        raise AssertionError("video source bytes must not be compared with the extracted-audio limit")
+    if media_ingestor_text.count(
+        "ensureSpace(if (videoSource) null else metadata.byteSize, maximumBytes)"
+    ) != 2:
+        raise AssertionError("video preparation must reserve for extracted audio, not duplicate the source video")
+    if 'if (size > maximumBytes) throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE"' in media_ingestor_text:
+        raise AssertionError("unqualified source-size gates reject large video containers before extraction")
 
     require(
         transfer,
@@ -128,6 +166,7 @@ def main() -> None:
     )
     require(
         operations,
+        "queued: ['queued', 'running', 'success', 'failure', 'cancelled']",
         "executor_kind",
         "listPendingDeviceUploadOperations",
         "listPendingDeviceOperations",
@@ -135,6 +174,8 @@ def main() -> None:
         "operation.remote_state IN ('queued', 'running')",
         "listTerminalDeviceUploadAssetIds",
         "asset.remote_asset_id IS NOT NULL",
+        "asset.remote_object_revision AS asset_remote_object_revision",
+        "remoteObjectRevision: row.asset_remote_object_revision",
     )
     require(
         transcript_tasks,
@@ -142,6 +183,16 @@ def main() -> None:
         "resolveCanonicalMeetingId(normalized, 'guest')",
         "deviceEpochId: identity.epochId",
         "meetingId: aggregate?.note.legacySourceId?.trim() || operation.entityId",
+        "mirrorDeviceTranscriptTaskProgress",
+        "phase === 'running' ? 'running' : 'queued'",
+    )
+    require(
+        stage_mirror,
+        "mirrorDeviceTranscriptTaskTerminal",
+        "terminal transcript task has no readable final revision",
+        "status: TranscriptStatus = outcome === 'text' ? 'ready' : 'no_speech'",
+        "jobId: null",
+        "advanceCanonicalWrite(scopeKey, nowMs)",
     )
     require(upload_migration, "idx_device_upload_pending_asset", "version: 46")
     require(
@@ -156,6 +207,7 @@ def main() -> None:
         "listTerminalDeviceUploadAssetIds('guest')",
         "const canonicalIds = new Set",
         "const records = await listPendingMeetingAudioUploads(storageScope);",
+        "remoteAssetRevision: snapshot.asset.remoteObjectRevision ?? undefined",
         "nativeWorkId:",
     )
     meetings_store = ROOT / "src/store/MeetingsStore.tsx"
@@ -166,6 +218,8 @@ def main() -> None:
         "await clearPendingMeetingAudioUpload('guest'",
         "await markDeviceUploadOperationSuccess(operationId)",
         "guestCanonicalUploadCommitted",
+        "derivePendingMeetingAudioUploadInspection(uploaded, null)",
+        "observed success commit deferred",
         "await loadCanonicalOwnedScope()",
         "orphaned success commit deferred",
         "rerunRequested\n        && !shouldPollPendingUploads",
@@ -178,6 +232,8 @@ def main() -> None:
         "hasTranscript` becomes true as soon as the first stable segment is saved",
         "activeState.kind !== 'realtime_draft' && !activeState.completing",
         "processingStatuses.transcript,",
+        "const canonicalUploadPending = processingStatuses.upload === 'queued'",
+        "pendingAudioUpload && canonicalUploadPending",
     )
     require(
         completion,
@@ -190,9 +246,14 @@ def main() -> None:
         "const byStableKey = new Map",
         "textState: finalEvent?.outcome === 'text' ? 'final' : 'stable'",
         "stableEvents.some(event => !storedKeys.has",
+        "remoteRevisionId: finalEvent ? `${task.taskId}:final` : null",
         "const durableTasks = await listPendingDeviceTranscriptTasks(64)",
+        "if (changed) await refreshMeetings();",
         "await refreshMeetings()",
         "cancelDeviceTranscriptTask(id)",
+        "terminalProjectionAuditRef",
+        "mirrorDeviceTranscriptTaskTerminal(",
+        "Retire the durable operation only after both terminal",
     )
     require(
         live_screen,

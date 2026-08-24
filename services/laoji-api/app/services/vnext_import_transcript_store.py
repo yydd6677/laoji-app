@@ -243,7 +243,8 @@ def mark_running(
     now = utc_now()
     with control_connection() as connection:
         cursor = connection.execute(
-            """UPDATE vnext_import_transcript_runs SET state = 'running', updated_at = ?
+            """UPDATE vnext_import_transcript_runs
+                    SET state = 'running', error_code = NULL, terminal_at = NULL, updated_at = ?
                  WHERE task_id = ? AND device_id = ? AND epoch_id = ?
                    AND state IN ('queued','running')
                    AND EXISTS (

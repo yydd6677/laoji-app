@@ -21,7 +21,10 @@ import {
   transcriptProjectionSha256,
 } from '../services/deviceV2ImportTranscript';
 import { applyDeviceV2ImportSpeakerOverlay } from '../services/deviceV2SpeakerOverlay';
-import { mirrorLegacyTranscriptProcessingFailure } from '../services/meetingStageMirror';
+import {
+  mirrorDeviceTranscriptTaskTerminal,
+  mirrorLegacyTranscriptProcessingFailure,
+} from '../services/meetingStageMirror';
 import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
 import type { TranscriptLine } from '../types';
@@ -66,6 +69,7 @@ export function DeviceMeetingCompletionProvider(): null {
   const meetingsRef = useRef(meetings);
   meetingsRef.current = meetings;
   const retryRef = useRef<Record<string, RetryState>>({});
+  const terminalProjectionAuditRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (mode !== 'guest' || loading) return undefined;
@@ -88,6 +92,26 @@ export function DeviceMeetingCompletionProvider(): null {
         visiblePendingChecks
           .filter(([, pending]) => pending)
           .forEach(([meeting]) => pendingIds.add(meeting.id));
+
+        // Repair a final transcript whose earlier client acknowledged the
+        // server result but was interrupted between content activation and
+        // clearing the list-stage spinner. Pending tasks are excluded so an
+        // older final revision cannot hide a genuine reprocessing operation.
+        let repairedTerminalProjection = false;
+        for (const [meeting, pending] of visiblePendingChecks) {
+          if (pending) {
+            terminalProjectionAuditRef.current.delete(meeting.id);
+            continue;
+          }
+          if (!meeting.hasTranscript || terminalProjectionAuditRef.current.has(meeting.id)) continue;
+          terminalProjectionAuditRef.current.add(meeting.id);
+          repairedTerminalProjection = await mirrorDeviceTranscriptTaskTerminal(
+            'guest',
+            meeting.id,
+            'text',
+          ).catch(() => false) || repairedTerminalProjection;
+        }
+        if (repairedTerminalProjection) await refreshMeetings();
 
         if ([...pendingIds].some(id => !meetingsRef.current.some(meeting => meeting.id === id))) {
           await refreshMeetings();
@@ -125,10 +149,11 @@ export function DeviceMeetingCompletionProvider(): null {
                   continue;
                 }
                 if (snapshot.state === 'failed' || snapshot.state === 'cancelled') {
-                  await markDeviceTranscriptTaskFailed(
+                  const changed = await markDeviceTranscriptTaskFailed(
                     meeting.id,
                     snapshot.error_code ?? 'transcription_failed',
-                  ).catch(() => undefined);
+                  ).catch(() => false);
+                  if (changed) await refreshMeetings();
                   continue;
                 }
                 if (snapshot.last_acked_event_seq < task.eventCursor) {
@@ -209,7 +234,13 @@ export function DeviceMeetingCompletionProvider(): null {
                     await saveCachedTranscript(meeting.id, lines, {
                       candidateKind: finalEvent ? 'final' : 'realtime_draft',
                       serverCompleteness: finalEvent ? 'complete' : 'incomplete',
-                      remoteRevisionId: finalEvent ? `${task.taskId}:final` : `${task.taskId}:live`,
+                      // A stable event prefix is a mutable local projection,
+                      // not an immutable remote revision. Reusing one
+                      // `${taskId}:live` identity caused the second prefix to
+                      // be rejected as changed remote content, so the device
+                      // acknowledged only its first batch forever. The final
+                      // event is the first immutable remote revision.
+                      remoteRevisionId: finalEvent ? `${task.taskId}:final` : null,
                     });
                     const canonicalId = await sqliteMeetingNoteRepository
                       .resolveCanonicalMeetingId(meeting.id, 'guest');
@@ -259,14 +290,21 @@ export function DeviceMeetingCompletionProvider(): null {
                         new Error('no_speech'),
                       );
                     }
-                    await markDeviceTranscriptTaskProgress(meeting.id, 'running').catch(() => undefined);
-                    await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
+                    await mirrorDeviceTranscriptTaskTerminal(
+                      'guest',
+                      meeting.id,
+                      finalEvent.outcome,
+                    );
                     await updateMeetingStatus(
                       meeting.id,
                       'ended',
                       { hasTranscript: finalEvent.outcome === 'text' || Boolean(meeting.hasTranscript) },
                       { remoteSync: 'background' },
                     );
+                    // Retire the durable operation only after both terminal
+                    // content and its list projection are committed.
+                    await clearDeviceTranscriptTask(meeting.id);
+                    await refreshMeetings();
                     if (transcriptRevisionId) {
                       void applyDeviceV2ImportSpeakerOverlay({
                         taskId: task.taskId,
@@ -279,10 +317,11 @@ export function DeviceMeetingCompletionProvider(): null {
                   }
                 } else if (snapshot.state === 'queued' || snapshot.state === 'running') {
                   hasActivePartialTask = true;
-                  await markDeviceTranscriptTaskProgress(
+                  const changed = await markDeviceTranscriptTaskProgress(
                     meeting.id,
                     snapshot.state,
-                  ).catch(() => undefined);
+                  ).catch(() => false);
+                  if (changed) await refreshMeetings();
                 } else if (
                   snapshot.last_event_seq === task.eventCursor
                   && ['succeeded', 'no_content'].includes(snapshot.state)
@@ -295,8 +334,13 @@ export function DeviceMeetingCompletionProvider(): null {
                       new Error('no_speech'),
                     );
                   }
-                  await markDeviceTranscriptTaskProgress(meeting.id, 'running').catch(() => undefined);
-                  await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
+                  await mirrorDeviceTranscriptTaskTerminal(
+                    'guest',
+                    meeting.id,
+                    snapshot.state === 'no_content' ? 'no_speech' : 'text',
+                  );
+                  await clearDeviceTranscriptTask(meeting.id);
+                  await refreshMeetings();
                 }
                 delete retryRef.current[meeting.id];
                 continue;
@@ -319,10 +363,11 @@ export function DeviceMeetingCompletionProvider(): null {
             }
             const taskState = String(taskStatus?.status ?? '').trim().toLowerCase();
             if (taskState === 'failed' || taskState === 'failure') {
-              await markDeviceTranscriptTaskFailed(
+              const changed = await markDeviceTranscriptTaskFailed(
                 meeting.id,
                 typeof taskStatus?.error_code === 'string' ? taskStatus.error_code : 'transcription_failed',
-              ).catch(() => undefined);
+              ).catch(() => false);
+              if (changed) await refreshMeetings();
               continue;
             }
             const payload = await getDeviceTranscript(meeting.id);
@@ -333,10 +378,11 @@ export function DeviceMeetingCompletionProvider(): null {
             if (taskStillRunning || payloadComplete === false) {
               hasActivePartialTask = true;
               if (task?.state === 'pending') {
-                await markDeviceTranscriptTaskProgress(
+                const changed = await markDeviceTranscriptTaskProgress(
                   meeting.id,
                   taskState === 'running' ? 'running' : 'queued',
-                ).catch(() => undefined);
+                ).catch(() => false);
+                if (changed) await refreshMeetings();
               }
             }
             if (!Array.isArray(payload?.items) || payload.items.length === 0) {

@@ -2,7 +2,7 @@
 
 - status: `global development baseline; frozen for implementation`
 - baseline release: `1.1.10 (118)`
-- architecture revision: `vnext-2-owner-waived-stage5a`
+- architecture revision: `vnext-6-unified-adaptive-summary`
 - scope: Android/React Native 客户端、`laoji-api`、`laoji-asr`、Ollama、R2
 - excluded systems: GPU1、PCB、Smart Meeting 及同机其他用户服务
 - production mutation during design: `none`
@@ -25,6 +25,14 @@
 Stage 5A 期间 legacy 源码、表和运行资产只作为冷回滚资产保留。vNext 候选不得双写、不得在单次请求
 中静默 fallback、不得让两个 owner 同时提交 current result。回滚只能显式切换版本化 handler。该豁免
 不授权生产发布、公网切换或 legacy 物理删除。
+
+### 0.2 整理产品模型修订（2026-08-23）
+
+真机记录 `1436403866` 和 active projector 交叉审计证明，四个可见模板会把同一批 `context` 事实换标题
+重复展示，“访谈”还会把任意带 speaker 的普通转写当作观点。vNext 因此取消面向用户的四模板，改为
+一份统一、自适应、证据驱动的整理；板块显隐只属于本机视图偏好，图和表必须通过确定性证据准入，
+普通条目的重复讲话人/时间收纳到板块依据 sheet。完整协议见
+[统一自适应会议整理](revisions/0033-unified-adaptive-meeting-summary-20260823.md)。
 
 ## 1. 产品边界
 
@@ -53,7 +61,7 @@ Stage 5A 期间 legacy 源码、表和运行资产只作为冷回滚资产保留
 | 播放、倍速、搜索、时间跳转、音频片段 | 本地 Transcript/MediaAsset；片段是本地派生资产 |
 | 标记、附件、我的笔记、会议系列 | 本地 meeting aggregate；以 immutable SourceRef revision 参与生成 |
 | 讲话人登记、匹配、人工修正、撤销 | 手机拥有登记/撤销；服务端只缓存加密 embedding，不留样本音频 |
-| 整理、行动候选、四模板、编辑、版本历史 | Facts V3 + 本地投影/覆盖层；候选不覆盖既有 ActionItem |
+| 整理、行动候选、自适应板块、编辑、版本历史 | Knowledge V4 + 本地自适应组装/覆盖层；V3 历史兼容；候选不覆盖既有 ActionItem |
 | 本场待办：手动新建/编辑、负责人、截止、完成/删除、提醒、后续日程 | 本机 ActionItem 聚合；系统通知为可重建投影 |
 | 会议问答、追问、引用跳转 | Q2 + 本地 thread/turn/citation |
 | 标签、人物派生查看、列表手动排序、搜索、回收站 | 显式标签与本地 FTS；人物只来自 speaker overlay，不成为分类 owner |
@@ -65,12 +73,12 @@ Stage 5A 期间 legacy 源码、表和运行资产只作为冷回滚资产保留
 
 | 领域 | 状态 | vNext 决策 |
 | --- | --- | --- |
-| 本机数据、设备、隐私、删除 | SELECTED | 手机 SQLite 是唯一业务真相；设备身份只授权远端任务；删除本机提交、远端异步清理 |
+| 本机数据、设备、隐私、删除 | SELECTED | 手机的日程库与会议库分别是领域真相；设备身份只授权远端任务；删除本机提交、远端异步清理 |
 | 日程文字/语音解析 | STAGED | `ScheduleMentionGraph -> Validator -> Draft` 唯一合同；本机快速 producer，复杂输入只调用服务端模型 producer |
 | 实时录音、导入、上传 | STAGED | 原始资产本机先落盘；原生 WorkManager 直传 R2；服务端 staging 校验后原子激活 |
 | ASR 与讲话人 | SELECTED | VAD 后 ASR 与 CAM++ 分队列；文字优先发布，讲话人以可撤销 overlay 迟到更新 |
 | Transcript、搜索、播放、笔记、附件 | SELECTED | 不可变 TranscriptRevision + 稳定 segment ID + 独立人工 overlay；本地 FTS5 搜索 |
-| 整理、行动、模板、编辑 | SELECTED | MeetingFacts V3；候选只提供来源，本场待办由本机 ActionItem 聚合拥有；模板和编辑只在本地投影 |
+| 整理、行动、自适应板块、编辑 | SELECTED | 1.1.63 先采用 Facts V3 + AdaptiveSummaryComposer；一份整理按证据显示板块，布局偏好只在本地；MeetingKnowledge V4 经 shadow 后再取代兼容层 |
 | 会议问答 | SELECTED | Q2 单次 attributed reader；原始来源引用；无验证/编辑/恢复第二次模型调用 |
 | 标签、分类、回收站、分享、更新 | RETAINED | 保留用户流程；数据全部本地权威；分类只按显式标签；当前更新校验合同继续使用 |
 | 页面状态与 JS/native 投影 | STAGED | JS repository 拥有持久业务状态；native 拥有系统能力运行态和 surface 瞬时态；跨边界都带 revision envelope |
@@ -83,8 +91,9 @@ Stage 5A 期间 legacy 源码、表和运行资产只作为冷回滚资产保留
 
 ```text
 Android / React Native
-  Local SQLite + app-private media
-      |-- schedule/events/tags/trash are local-only
+  laoji-schedule.db
+      |-- schedule/events/recurrence/calendar projection are local-only
+  laoji-meeting-memory.db + app-private media
       |-- immutable meeting/transcript/summary/question revisions
       |-- device_operations records remote intent, never business truth
       |
@@ -110,13 +119,13 @@ provider，也不直接接触 R2 长期凭据。
 
 | 数据 | 权威所有者 | 服务器/R2 允许内容 | 删除语义 |
 | --- | --- | --- | --- |
-| 日程、重复规则、颜色类型 | 手机 SQLite | 复杂解析的加密临时输入和 Draft 输出 | 本机事务立即生效；临时载荷随任务删除 |
-| 会议元数据、标签、顺序、回收站 | 手机 SQLite | opaque meeting binding、任务 revision/hash | 本机 soft delete；30 天或用户永久删除后清理 |
+| 日程、重复规则、颜色类型 | 手机 `laoji-schedule.db` | 复杂解析的加密临时输入和 Draft 输出 | 本机事务立即生效；会议清理/重建不得访问该库 |
+| 会议元数据、标签、顺序、回收站 | 手机 `laoji-meeting-memory.db` | opaque meeting binding、任务 revision/hash | 本机 soft delete；30 天或用户永久删除后清理 |
 | 原始录音/导入音频 | 手机 app-private storage | R2 staging object，处理所需 TTL 内存在 | 用户删除前本机保留；R2 成功后 24 小时内清除 |
 | Transcript | 手机不可变 revision | 任务期加密来源；可选保留生成 artifact | 新 revision 原子激活；旧 revision 保留到本机清理策略 |
 | 讲话人自动结果 | 手机 speaker overlay | CAM++ embedding/cluster 仅任务期存在 | 可重新生成；不能覆盖人工 overlay |
 | 声纹登记 | 手机登记状态和撤销 revision | 服务端可保存 device/epoch scoped 加密 embedding；不保存样本音频 | 手机撤销立即升 revision；服务端缓存异步删除且旧 revision 禁止匹配；orphan epoch 90 天无 token 活动后清理 |
-| 人工讲话人修正、笔记、附件 | 手机 SQLite/私有文件 | 明确请求时的加密临时来源 | 本机删除权威；服务端载荷立即撤销并 TTL 清理 |
+| 人工讲话人修正、笔记、附件 | 手机会议库/私有文件 | 明确请求时的加密临时来源 | 本机删除权威；服务端载荷立即撤销并 TTL 清理 |
 | 整理事实、行动候选、用户编辑 | 手机版本表 | 可选保留生成 artifact，不是用户真相 | 新版本不覆盖旧编辑；用户可删除本机版本 |
 | 本场待办、负责人、截止与提醒 | 手机 `action_items` 聚合；系统通知仅是派生投影 | 生成时可返回带来源的候选，不保存可变待办副本 | 候选经用户采用后创建本机待办；编辑、完成、删除和提醒均以本机 revision 为准 |
 | 问答历史与引用 | 手机 Q2 thread/turn/citation 表 | 可选保留当前请求结果用于恢复 | pending turn 可恢复；同 request replay；删除会议时随本机聚合删除 |
@@ -185,8 +194,8 @@ vNext 只共享五个技术合同：
 | 媒体上传 | MediaAsset generation -> verified remote asset | device epoch + asset + generation + size/hash | WorkManager/server probe 续传；取消后 cleanup obligation | STORAGE_LOW、UPLOAD_EXPIRED、OBJECT_VERIFY_FAILED |
 | 实时/导入 ASR | stable audio ranges -> text segment patches/final revision | asset generation + source ranges + ASR model revision | 段检查点恢复；取消不删除已提交稳定段 | decode/provider 错误；NO_SPEECH 为零段 final 成功结果 |
 | 讲话人 | VAD ranges + scoped voiceprints -> speaker overlay | transcript revision + CAM++/profile revisions | 独立任务恢复；撤销 profile fences late result | unknown/low-confidence 是匿名结果，不是失败 |
-| 整理 | source manifest + encrypted sources -> Facts V3 | source fingerprint + schema/prompt/model revisions | pack/章检查点；取消保留上一结果；失败 pack 自动新 attempt | protocol/input 错误；EVIDENCE_INCOMPLETE 为 limited 结果 |
-| 行动候选 | Facts V3 action facts -> provenance candidates | summary version + fact/source IDs | 随 summary 原子保存；采用后创建独立 ActionItem | negated/completed/broad 作为低适配或不显示 |
+| 整理 | source manifest + encrypted sources -> Knowledge V4 -> adaptive view | source fingerprint + schema/prompt/model/reducer revisions | pack/章检查点；取消保留上一结果；失败 pack 自动新 attempt | protocol/input 错误；EVIDENCE_INCOMPLETE 为 limited 结果 |
+| 行动候选 | Knowledge V4 action facts -> provenance candidates | summary version + fact/source IDs | 随 summary 原子保存；采用后创建独立 ActionItem | negated/completed/broad 作为低适配或不显示 |
 | 本场待办 | candidate/manual/marker -> ActionItem -> optional schedule | action ID + revision + provenance | 本机 CAS 编辑、完成、删除；通知从待办重建 | 负责人/期限可空；提醒权限或过期是可操作结果 |
 | 会议问答 | authoritative snapshot + question + prior refs -> cited answer | snapshot/view/question/task/attempt/provider revisions | 同 task replay；自动重试新 attempt，用户重试新 task；拒绝 late commit | citation/provider 错误；未提及/无法确认是内容结果 |
 | 分享 | local projection + explicit selection -> file/token | content hash + share revision + TTL | token 可撤销；本地文件不依赖服务端恢复 | unsupported format、expired/revoked token |
@@ -256,6 +265,8 @@ capture/import -> app-private MediaAsset -> optional local audio extraction
 ```
 
 - 视频在手机提取音轨后上传；不上传视频画面。提取失败保留原文件并给出可重试错误。
+- 本机媒体准备按会议身份隔离；所有确认的会议录音先以 asset generation/journal 持久化并立即接纳，
+  内部最多 3 条不同会议录音同时复制或提取。同一会议仍串行，内部容量不得禁用上传入口。
 - `<32 MiB` 可使用 presigned single PUT；更大对象使用 5 MiB 非末 multipart part。
 - 单个远端资产最大 `1 GiB`；每 device 最多 2 个、全局最多 4 个未完成上传，R2 outstanding reservation
   每 device `<=2 GiB`、全局 `<=4 GiB`。超单对象返回 413，超会话/字节水位返回 429，不签发 presign。
@@ -289,27 +300,37 @@ manual correction -> manual overlay with expected transcript revision CAS
 - 搜索使用手机 FTS5，索引 transcript、笔记、Facts 和问答；播放跳转只使用原始 segment/time。
 - `no_speech` 是成功分析后的内容结果，不显示为“处理失败”。
 
-## 9. 整理、行动候选与模板
+## 9. 整理、行动候选与自适应板块
 
-短/中会议使用一次 `MeetingFactsDocumentV3` 结构化生成。超过输入预算的会议按确定性的时间和
-主题边界分章，每章只调用一次事实生成，最后由代码合并同源事实、冲突组、关系和行动候选；
-不生成递归中间摘要，也不再调用模型写第二份模板总结。
+短/中会议使用一次 `MeetingKnowledgeDocumentV4` 结构化生成。超过输入预算的会议按确定性的时间和
+主题边界分章，每章只调用一次语义生成，最后由代码合并主题、事实、冲突组、关系、数据、观点和行动
+候选；不生成递归中间摘要，也不调用模型写第二份模板、观点或图表结果。
 
 ```text
 authoritative sources -> evidence pack/chapter packs
-  -> facts-v3 generation (one call per pack)
+  -> knowledge-v4 generation (one call per pack)
   -> schema + exact-source verification
   -> deterministic document merge
-  -> local general/1:1/project/interview projections
+  -> local adaptive composition
+  -> one report + one action area + collapsed evidence
 ```
 
-- overview 对短会由模型输出；长会由证据分数、主题覆盖和时间顺序确定性选取确认事实生成，避免
-  无来源的第二次模型综合。
+- overview、主题和观点必须是有事实 ID 支撑的综合表达；逐字来源只进入依据。长会由主题覆盖、证据
+  分数和时间顺序确定性合并，不增加第二次模型综合。
 - 行动候选完全由模型语义产生，代码只校验来源、否定/已完成状态、重复和日程适配字段；不使用
   关键词否决。用户确认后才创建日程。
-- 模板不参与生成；切换模板不联网、不创建版本。用户编辑保存为模板覆盖层，不修改共享事实。
+- 用户只在“板块”sheet 控制已经通过准入的可选板块显隐；不再选择通用/1:1/项目同步/访谈。显隐不
+  联网、不创建版本；用户编辑按稳定 block key 保存覆盖层，不修改共享事实。
+- 时间线、流程、对比表、数据表或条形图只在来源明确支持时间、关系、共享比较维度或同单位数值时
+  出现；失败退化为列表，不为丰富样式伪造结构。观点不能由“存在 speaker”触发。
+- 每个板块只有一个去重后的“依据 N 处”入口。普通条目不重复显示讲话人和时间；显式引用才显示一次
+  归属和时间并支持跳转。
 - 任意长度会议都可处理。单章失败只重试该章；所有章成功前继续显示上一可用结果，不提交部分
   文档冒充完整整理。
+
+V3 当前结果通过 compatibility adapter 进入同一自适应页面，不要求立即重生成。V3 reader、旧模板
+偏好和历史版本保留为冷兼容资产；此次修订不授权 Stage 5B 删除。完整 schema、组装优先级、图表准入、
+迁移和回滚以 [revision 0033](revisions/0033-unified-adaptive-meeting-summary-20260823.md) 为准。
 
 ### 9.1 本场待办
 
@@ -345,7 +366,9 @@ authoritative sources -> evidence pack/chapter packs
   返回 410，再删除分享 payload/R2；公开内容的字节只经撤销感知的 API 网关返回，不签发可绕过
   该栅栏的对象 URL。公开分享不能脱离 binding generation 的清理栅栏。
 - 保留当前 `latest.json + versionCode + SHA-256 + byte size + verified APK install` 更新合同。每次
-  发布同时递增 `version/name` 和 `versionCode`，旧 APK 不覆盖。
+  发布同时递增 `version/name` 和 `versionCode`，旧 APK 不覆盖。凡已提升正式版本号并作为当前可安装
+  版本交付的修改，须在同一交付轮次及时发布 APK 和原子清单并完成公网全包哈希回读；实验候选必须明确
+  标为 candidate，不能以未发布正式版本长期停留。
 
 ## 12. 页面与状态投影
 
@@ -385,7 +408,7 @@ AsyncStorage 只允许非敏感偏好、短期 UI state 和更新检查时间；
 | summary/QA running | 上一整理继续可读；问题以 pending turn 显示 | 新结果一次原子插入；失败保留上一结果并显示独立错误 |
 | 首次整理/讲话人失败 | 首次整理使用固定 skeleton；讲话人失败只在讲话人入口说明 | 不把 Transcript、其他 tab 或整场会议标为失败 |
 | retryable_failure（UI 可显示“等待重试”）/cancel_requested | 保留当前结果与 operation identity，显示下一次尝试/取消中 | 不回退 phase；新用户重试创建新 generation |
-| regenerate success | 新不可变版本成为 current | 用户编辑和旧版本保留；模板切换只改本地投影 |
+| regenerate success | 新不可变版本成为 current | 用户编辑和旧版本保留；板块显隐只改本地投影 |
 
 固定 tab、标题、日期、播放器和用户滚动位置在水位推进时保持不动；只有用户主动导航才改变页面。
 
@@ -451,7 +474,8 @@ purge 重试继续工作，绝不丢弃义务或阻塞本机清除。
 | ASR 质量 | 真实中文会议字符错误率 CER 中位数 `<=8%`、p95 `<=18%`；数字/时间专集准确率 `>=95%` |
 | 讲话人 | 不阻塞文字；final text 后 speaker overlay p95 `<=30s`；已登记样本 attribution F1 `>=90%`；未知人强行命名率 `0` |
 | 整理 | 单 pack p50 `<=20s`、p95 `<=45s`；不超过 1 小时的长会端到端 p95 `<=90s`；更长会议不设长度拒绝门，每新增 chapter p95 `<=45s` 且至少每 5 秒更新进度；事实人工支持率 `>=95%` |
-| 整理引用 | 显示引用解析和原文匹配率 `100%`；重复行动 `0` |
+| 整理结构 | 可见模板数 `0`；同一正文重复 `0`；每个 fact 只有一个 primary block；观点 precision `>=95%`；图表错误准入 `0`；板块切换 p95 `<100ms` 且网络请求 `0` |
+| 整理引用 | 显示引用解析和原文匹配率 `100%`；每板块一个去重依据入口；普通条目重复讲话人/时间 `0`；重复行动 `0` |
 | 问答 | 暖态 p95 `<=15s`；显示引用原文匹配 `100%`、人工相关率 `>=95%` |
 | UI 稳定 | 状态出现不移动固定控件；无重复 loading、文字截断、跨页状态分歧 |
 | 隐私 | 正文日志命中 `0`；成功/永久失败后临时载荷删除，最迟 TTL `24h` |
@@ -480,6 +504,7 @@ purge 重试继续工作，绝不丢弃义务或阻塞本机清除。
 
 本基线已经选定所有开发关键路线。实施阶段仍需验证性能、迁移、恢复、资源和隐私门禁；人工质量与
 公开观察门按 0.1 节明确记录为 `waived`，不是已验证事实。不得重新选择数据
-所有权、领域边界、上传拓扑、Transcript 版本模型、Facts V3、Q2 或三进程服务拓扑。若真实证据
+所有权、领域边界、上传拓扑、Transcript 版本模型、Knowledge V4 + V3 compatibility、自适应整理、
+Q2 或三进程服务拓扑。若真实证据
 证明任一选定路线不可行，必须形成新的全局 revision，说明对其他领域和删除计划的影响；不得在
 局部添加第三个 owner、fallback 或长期兼容层。

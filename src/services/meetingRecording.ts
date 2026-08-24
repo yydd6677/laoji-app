@@ -241,6 +241,7 @@ export async function listPendingMeetingAudioUploads(
         sourceSha256: snapshot.asset.sourceSha256 ?? undefined,
         assetGeneration: snapshot.asset.assetGeneration,
         remoteAssetId: snapshot.asset.remoteAssetId ?? undefined,
+        remoteAssetRevision: snapshot.asset.remoteObjectRevision ?? undefined,
         createdAt: new Date(snapshot.operation.createdAtMs).toISOString(),
         lastAttemptAt: new Date(snapshot.operation.updatedAtMs).toISOString(),
         attemptCount: Math.max(0, snapshot.operation.operationRevision - 1),

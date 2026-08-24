@@ -3,7 +3,7 @@
 - architecture: [VNEXT.md](VNEXT.md)
 - decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
 - baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; Stage 2 production 8030-v2 deployment, direct candidate use and interrupted import recovery are closed, while independent ASR/speaker quality, public zero-cycle and capability adoption remain open; Stage 3 source-stream/Facts-V3, legacy-upgrade recovery and emulator-5562 summary plus direct-Q2 recovery/citation verticals implemented, not adopted; Stage 4 schedule provenance, bounded replaceable voice preview and the sealed 30-run warm voice performance envelope are implemented, while independent natural-schedule quality, public zero-cycle and capability adoption remain open; Stage 5 deletion-gate observability and immutable reader-removal proof are implemented in candidate only`
+- implementation status: `Stage 0/1 completed; prior Stage 2-4 infrastructure/recovery evidence retained; Stage 3 Slice A adaptive Facts V3 presentation released in 1.1.63; Knowledge V4 semantic composition remains shadow-pending; legacy physical deletion remains deferred`
 
 本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
 任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
@@ -221,7 +221,7 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 | `src/services/localScheduleParser.ts` | local MentionGraph producer | 拆出 recognizers；不再拥有最终 Draft 规则和服务路由 |
 | `src/services/deviceApi.ts` schedule methods | `src/services/remote/scheduleApi.ts` | v2 graph API；删除服务端规则回退 |
 | `VoiceInputModal*.tsx` / `ScheduleVoiceHostView.kt` | ScheduleVoiceSession | 先录音缓冲、后连 WSS；同一 clarification state |
-| `meetingMediaImport*` / `MediaAudioExtractor.kt` | MediaAsset ingest | 保留；导入事务先创建本机 asset generation |
+| `meetingMediaImport*` / `MediaAudioExtractor.kt` | MediaAsset ingest | 保留；导入事务先创建本机 asset generation 并全部接纳；按会议隔离且内部本机准备 lane 为 3 |
 | `MeetingUploadWorker.kt` / `nativeTransferCoordinator.ts` | UploadExecutor | 改为 direct R2 single/multipart + server probe |
 | `recordingAssets.ts` 旧 content API | v1 compatibility adapter | 一个发布周期后删除 |
 | `realtimeAsr.ts` / `RealtimeAsrSocket.kt` | realtime ASR adapter | 保留 WSS，统一 partial/stable/final schema |
@@ -263,12 +263,15 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 | `qwen_asr_service/server.py` | `services/laoji-asr` | 保留 8030，增加 stable batch/stream schema |
 | `app/services/r2_upload_service.py` / `r2_storage_service.py` | UploadSession/CleanupService | staging generation、完整性校验、独立 cleanup obligation |
 | `app/services/schedule_parser_service.py` | ScheduleGraphProvider | 删除 quick/fallback 和模型后 full-text normalizer |
-| `app/services/summary_v3_*` | FactsV3Service | 修血缘/原子提交，增加 deterministic chapter builder/merger |
+| `app/services/summary_v3_*` | V3 compatibility reader | 冻结生成新能力；保留历史 artifact/read/rollback，不再拥有 active 四模板投影 |
+| `app/schemas/meeting_knowledge_v4.py` / `app/services/summary_v4_*` | MeetingKnowledgeV4Service | 单 pack/章有界生成、来源/逐字复制校验、主题/数据/观点合并和 artifact 原子提交 |
 | `app/services/vnext_source_stream_store.py` | source stream + bounded checkpoint owner | 加密章节来源、manifest/group 配额、双槽恢复点和 artifact 原子提交；默认关闭 |
-| `app/services/summary_v3_chapter_merge.py` | deterministic Facts V3 reducer | 事实/关系/行动有界合并；不调用模型、不使用样本专用规则 |
+| `app/services/summary_v3_chapter_merge.py` | V3 history reducer | 只服务已存在/未完成 V3 兼容任务；不扩展 active 产品语义 |
+| `app/services/summary_v4_chapter_merge.py` | deterministic Knowledge V4 reducer | 主题/事实/关系/数据/观点/行动有界合并；不调用模型、不使用样本专用规则 |
 | `app/services/vnext_summary_chapter_pipeline.py` | generic Task/Attempt summary adapter | 每次最多处理一章；provider 适配、checkpoint 提升和最终 artifact 提交 |
 | `app/services/vnext_summary_worker.py` | source-stream summary worker | 单并发扫描 active generic task；租约心跳、重启恢复和一章一让出；默认关闭 |
-| `src/services/meetingSummaryV3SourceStream.ts` | mobile source-stream summary orchestrator | 由 immutable transcript/note/授权附件构造分章来源；幂等上传、task/artifact 恢复和本地模板投影；双开关候选 |
+| `src/services/meetingSummaryV3SourceStream.ts` | source-stream compatibility orchestrator | 保留 immutable source、幂等上传和 task/artifact 恢复；V3 结果转入统一 compatibility adapter |
+| `src/services/meetingSummaryAdaptive.ts` / `src/domain/meeting/summaryComposition.ts` | AdaptiveSummaryComposerV1 | V4/V3 兼容输入、唯一 fact primary owner、富块准入、板块偏好和依据去重；纯本地函数 |
 | `src/services/questionQ2Candidate.ts` / `meetingQuestionsQ2.ts` | Q2 single-reader candidate | source snapshot、单次 reader、grounding、Q2 operation retry 和现有问答页只读投影；默认双开关关闭，等待语义 holdout |
 | `src/services/questionQ2DeviceProvider.ts` | Device Q2 Provider | capability/binding fence、严格 response normalization；不回退旧问答 |
 | `app/services/vnext_question_reader.py` | server Q2 reader candidate | 单次 Ollama reader、结构协议、UTF-8 引用完整性和来源 hash 校验；默认 capability 关闭 |
@@ -276,10 +279,29 @@ tools/vnext/                  Linux/Windows portable migration and audit tools
 | `app/models/meeting_*sync.py` | none after v1 drain | 账号/跨设备同步模型按 Stage 5 删除 |
 | `app/api/location.py` | LocationProxy | 保留缓存/限流/日志脱敏 |
 
-## 3. 手机 canonical schema
+## 3. 手机 canonical schemas
 
-不新建第二业务数据库。继续使用当前 Expo SQLite `laoji-meeting-memory.db`（WAL、foreign keys、
-5 秒 busy timeout），在 `0039` 后增加迁移：
+手机使用两个互不 `ATTACH`、无跨库外键的 Expo SQLite 领域库；二者均启用 WAL、foreign keys 和
+5 秒 busy timeout：
+
+| 数据库 | 唯一职责 | 禁止事项 |
+| --- | --- | --- |
+| `laoji-schedule.db` | `local_schedule_events`、日程 provenance、日历 ProjectionEnvelope checkpoint | 会议清理、媒体任务和会议恢复器不得访问 |
+| `laoji-meeting-memory.db` | 会议聚合、媒体引用、转写、整理、问答、待办、设备 operation 和非日历投影 | 不得新写日程事件或拥有日程生命周期 |
+
+旧安装执行一次可恢复的 `schedule schema v1` 隔离迁移：先创建新库，在同一新库事务中复制旧会议库
+`local_schedule_events` 和既有 calendar checkpoint 并逐行核对所有字段；核对通过后写入
+`schedule_database_meta` 完成标记并提交，之后才在会议库事务中删除旧表/旧 calendar checkpoint 并写
+`schedule_database_v1` cutover tombstone。复制、提交或退役任一步骤
+中断时均按完成标记幂等恢复；禁止双写。会议库已经删除而旧导入从未完成时失败关闭，并继续允许既有
+AsyncStorage 兼容导入写入新日程库，不制造空数据已迁移的假象。
+
+`native_schedule_projection_checkpoints` 只保存 `calendar` surface；录音和文字记录等 checkpoint 仍在
+会议库。会议库删除后日历 checkpoint 和日程正文保持可读，checkpoint 本身可从日程 revision 重建。
+完整“清除本机数据”协调器显式删除两个库；`deleteMeetingDatabase` 及会议领域清理不能调用
+`deleteScheduleDatabase`。禁止用 Android `pm clear` 修复会议或媒体问题。
+
+会议库历史迁移文件仍按发布阶段连续落库：
 
 迁移文件按发布阶段连续落库：Stage 1 包只新增 `0040-0042`，Stage 2 再新增 `0043-0044`，Stage 4
 新增 `0045`；当前隔离切片追加 `0046` 仅保存上传执行句柄，不得提前放置高编号 placeholder，也不得让
@@ -377,11 +399,12 @@ meeting_question_q2_citations(citation_id PK, clause_id, ordinal,
 新建、编辑、完成/恢复、删除和后续日程都调用同一 repository/use-case；重生成只写候选，不更新
 已有 ActionItem。
 
-保留并复用：`meeting_notes`、`manual_notes`、`recording_assets`、`transcript_revisions`、
-`transcript_segments`、`summary_versions`、`summary_fact_documents`、`summary_view_*`、`action_items`、
+会议库保留并复用：`meeting_notes`、`manual_notes`、`recording_assets`、`transcript_revisions`、
+`transcript_segments`、`summary_versions`、`summary_fact_documents`、`summary_view_*`、
+`summary_knowledge_documents`、`summary_layout_preferences`、`summary_block_overrides_v4`、`action_items`、
 历史只读 `meeting_question_*`、新 `meeting_question_q2_*`、`meeting_tags/tag_links`、
-`meeting_list_order`、`meeting_attachments`、
-`meeting_content_shares`、`local_schedule_events`。
+`meeting_list_order`、`meeting_attachments`、`meeting_content_shares`。`local_schedule_events` 只属于
+`laoji-schedule.db`，会议库中的同名表只是迁移源，复制核对后立即退役。
 
 ### 0043 `TranscriptOverlayAndSearchVNext`
 
@@ -403,13 +426,42 @@ speaker_manual_overrides(meeting_id, stable_segment_key, expected_transcript_rev
 `remote_object_revision`。会议删除继续使用 `meeting_notes.deleted_at_ms`，新增统一 `purge_after_ms`；
 回收站不是单独复制表。
 
-### 0045 `ScheduleMentionGraphVNext`
+### 0045 `ScheduleMentionGraphVNext` 与 schedule schema v1
 
-扩展 `local_schedule_events`：`event_revision`、`draft_source_sha256`、`producer_revision`、
-`graph_schema_revision`、`deleted_at_ms`。Graph 只在编辑会话和诊断中短期保存，不为每次解析建立
-永久业务表。新增 `native_projection_checkpoints`，只持久保存每个 device epoch / native surface /
-entity 已接受的 revision、surface instance 和 payload SHA-256，不复制页面正文；同 revision 同 hash
-幂等，旧 revision 或同 revision 不同 hash 拒绝。
+`0045` 是旧单库升级路径，负责在隔离复制前补齐 `local_schedule_events` 的 `event_revision`、
+`draft_source_sha256`、`producer_revision`、`graph_schema_revision`、`deleted_at_ms`。新库 schema v1
+直接创建完整列和索引；复制完成后应用不再查询或写入会议库旧表。Graph 只在编辑会话和诊断中短期保存，
+不为每次解析建立永久业务表。
+
+原 `native_projection_checkpoints` 继续服务会议 surface；`calendar` surface 迁到新库
+`native_schedule_projection_checkpoints`。两表只持久保存已接受的 revision、surface instance 和
+payload SHA-256，不复制页面正文；同 revision 同 hash 幂等，旧 revision 或同 revision 不同 hash 拒绝。
+
+### 0047 `UnifiedAdaptiveMeetingSummary`
+
+```text
+summary_knowledge_documents(
+  summary_version_id PK REFERENCES summary_versions(version_id),
+  schema_version CHECK(schema_version = 4), document_json, source_fingerprint,
+  model_revision, prompt_revision, reducer_revision, created_at_ms
+)
+summary_layout_preferences(
+  meeting_id PK REFERENCES meeting_notes(id),
+  mode CHECK(mode IN ('auto','custom')),
+  hidden_block_keys_json, updated_at_ms
+)
+summary_block_overrides_v4(
+  summary_version_id REFERENCES summary_versions(version_id),
+  stable_block_key, replacement_kind CHECK(replacement_kind IN ('paragraph','bullet_group')),
+  replacement_text, updated_at_ms,
+  PRIMARY KEY(summary_version_id, stable_block_key)
+)
+```
+
+`summary_view_preferences/template_id` 不改列语义、不迁成板块偏好。旧 V3/template 表只读保留；active
+repository 优先读取 V4，缺失时经 V3 compatibility adapter 组装同一页面。0047 事务只建表和索引，
+不得在数据库迁移中调用模型或批量伪造 V4 文档。布局偏好只保存真正存在的 optional block key；未知
+key 在读取时忽略，`恢复自动` 删除该 meeting 的偏好行。
 
 ## 4. 服务端 canonical schema
 
@@ -840,7 +892,9 @@ POST /api/device/v2/source-bundle-groups/{group_id}/commit
 DELETE /api/device/v2/source-streams/{stream_id}
 ```
 
-Summary 不接模板 ID。Question 不接 summary sections 或历史 answer text。来源 manifest 只含稳定
+Summary 不接模板 ID、板块显隐或图表偏好；Task 创建时冻结 `summary.knowledge.v4` handler 和
+schema/prompt/model/reducer revision，最终 artifact kind 为 `meeting_knowledge_v4`。Question 不接 summary
+sections 或历史 answer text。来源 manifest 只含稳定
 revision/hash。短会是一个 stream/一个 chapter；长会按确定性章节顺序消费，不因会议时长拒绝，也不
 在 task 创建前暂存整场正文。stream 创建提交 binding generation/revision/cancel revision、客户端
 operation/generation/idempotency hash 与 contract revision；同 request/hash 幂等，同 ID/不同 hash 409。
@@ -869,8 +923,9 @@ UTF-8 range 和 content hash。commit 只有在 ordinal 连续、声明计数/�
 group；outstanding source bytes 每 device `<=256 MiB`、全局 `<=512 MiB`，超限返回 429 而不创建空壳行。
 
 Summary/Q2 Task 引用绑定的 stream ID。worker 按 chapter ordinal 消费 complete group，将本章结果和当前
-聚合按领域确定性 reducer 合并；reducer 必须持续满足 Facts/Q2 最终协议的事实、关系、行动、引用和
-证据候选数量上限，不保存已淘汰章结果。新滚动槽完成 schema/hash 校验并经 fenced CAS 成为 current 后，
+聚合按领域确定性 reducer 合并；Summary reducer 必须持续满足 Knowledge V4 的主题、事实、关系、数据、
+观点、行动和引用上限，Q2 reducer 持续满足 clause/citation/证据候选数量上限；两者都不保存已淘汰章
+结果。新滚动槽完成 schema/hash 校验并经 fenced CAS 成为 current 后，
 才删除该 chapter payload、标记 group consumed 并释放预留，再接收/消费下一章；所有 chapter 成功后才
 从 current 聚合提交最终 artifact。最终 source manifest root、已 compact page 的滚动 Merkle accumulator
 和 current checkpoint 的 source prefix hash 共同证明处理前缀；不会为每章保留输出行。
@@ -1074,19 +1129,20 @@ PurgeOnlyJournalV1 {
 实施：
 
 1. 顺序执行 0040/0041/0042，接入 epoch/binding/operation、cutover counter、immutable source 和 Q2 表。
-2. 新安装只创建 SQLite canonical store；旧安装执行一次性、可恢复、带 row count/hash 的导入，
-   导入成功后停止反向 legacy mirror。此处只迁手机业务数据，不包含服务端 legacy task；历史笔记/
-   附件只为当前真实正文创建 `migrated_current` revision。
-3. 把 meeting/schedule 写入统一到 repository transaction；日程迁出 AsyncStorage metadata、编辑和
-   删除 journal；UI/store 不直接拼 SQL/网络结果。
+2. 新安装分别创建 schedule/meeting canonical store；旧安装执行一次性、可恢复、带逐行字段核对和
+   row count 的导入，导入成功后停止反向 legacy mirror。此处只迁手机业务数据，不包含服务端 legacy
+   task；历史笔记/附件只为当前真实正文创建 `migrated_current` revision。
+3. meeting/schedule 各自写入本领域 repository transaction；日程迁出 AsyncStorage metadata、编辑和
+   删除 journal；UI/store 不直接拼 SQL/网络结果。跨领域命令不得假设跨库原子性，只能用稳定 ID、
+   幂等 request 和可重试 use case 组合。
 4. `device_operations` 接管上传、转写、整理、补全和删除 remote intent；`processing_stages` 只作派生
    UI projection，WorkManager 只作执行器。
 5. 建立本机 speaker profile/deletion owner，迁移 SecureStore/AsyncStorage/native prefs 中重复 key。
 6. 为 ActionItem 建立唯一 repository，保留手动/候选/标记三种 provenance，以及编辑、完成、删除、
    负责人、截止、提醒和后续日程；停止账号协作新写但保留历史只读。
 7. 当前 Q0/旧 Question 与 Summary 兼容整链继续作为默认直到 Stage 3 capability barrier；0042 Q2
-   只建新表不接流量，历史 answer 不进入新证据合同。Summary Facts V3 与 V2 不再产生第二 current
-   pointer，但不得在 Stage 3 前切断当前可用生成服务。
+   只建新表不接流量，历史 answer 不进入新证据合同。Knowledge V4、Facts V3 与 V2 compatibility
+   不得产生第二 current pointer，也不得在 Stage 3 前切断当前可用生成服务。
 8. 会议详情 route 只组合 transcript/summary/question/speaker/audio/marker 领域投影，不再拥有各自生命周期。
 9. 部署 challenge/token/binding/source-stream API 与 generic task owner；使用专用 probe capability 和
    fake provider 完成 restart/cancel/replay，真实 domain 尚不激活 barrier。
@@ -1119,7 +1175,9 @@ Stage 1 停写/退出门：generic probe 的 restart/cancel/replay、epoch/bindi
 
 实施：
 
-1. 顺序执行 0043/0044；MediaAudioExtractor 输出 app-private 可 seek 音频和 hash。
+1. 顺序执行 0043/0044；MediaAudioExtractor 输出 app-private 可 seek 音频和 hash。本机 importer
+   以会议身份独立加锁，所有确认任务先持久化，内部最多同时准备 3 条不同会议资产；恢复、删除和 acknowledge 与同会议 ingest
+   共用锁，禁止全应用 I/O 锁重新串行化。上传入口仅在容量已满或恢复独占阶段不可用。
 2. MeetingUploadWorker 接入 single/multipart R2；server upload/verified-asset/cleanup schema 与 API 上线。
    服务端校验 R2 对象时可把同一压缩媒体流写入私有有界缓存，但必须在 verified asset + Task 事务提交后
    才原子发布；缓存不是业务真相或整份 WAV，缺失时回退 R2，任务终态和孤儿条目必须清理。
@@ -1152,25 +1210,40 @@ Stage 2 停写/退出门：产品所有者已用哈希合同豁免独立人工�
 会议和删除/恢复回放通过。旧 worker/handler 保留到 Stage 5；barrier 后回滚只切换 handler revision，
 不停止 v2/generic ingress。
 
-## 11. Stage 3：Facts V3、行动与 Q2
+## 11. Stage 3：Knowledge V4、自适应整理、行动与 Q2
 
 入口：Stage 2 exit gate 通过，Transcript source identity、verified asset 和 task owner 已采用。
 
-实施：
+当前实施顺序（revision 0033）：
 
-1. 先发布携带 v2 binding/source stream 的客户端；summary/question 的 v1 submit 连续一个完整公开周期
-   为零后分别激活 capability barrier。此后新 v2 请求只写 generic，v1 submit 返回 426，legacy worker
-   只 drain，旧 status/result route 只读。
-2. 修复 Facts V3 的 transcript revision/fingerprint 血缘和 artifact/task 原子提交。
-3. 增加 deterministic chapter builder/merger；短会 single pack，长会多 pack，无模板模型调用。
+1. 保持已经存在的 v2 binding/source stream 与 generic Task 单一 owner。产品所有者对公开零旧调用周期的
+   豁免仍有效，但不豁免本修订的 schema、迁移、真实内容和恢复门；激活 V4 capability 后 v1 submit
+   返回 426，legacy worker 只 drain，旧 status/result route 只读，禁止双写和请求内 fallback。
+2. **已在 Android 1.1.63 完成。** 客户端增加 V3 compatibility adapter 与
+   `AdaptiveSummaryComposerV1`：移除 active 四模板 picker、
+   关闭任意 speaker 观点、为 fact 建立唯一 primary block，并把逐条来源尾注收敛为板块依据 sheet。该步
+   不重新生成旧记录。
+3. 板块显隐偏好已先以有界本机存储发布；会议库 0047、V4 repository 和 V4 覆盖层仍待 shadow
+   通过后接入，旧 `summary_view_*` 只读保留。
+4. 增加 Knowledge V4 Pydantic/TypeScript schema、紧凑 provider DTO 和通用 prompt；短会 single pack，
+   长会多 pack，每 pack 正常一次调用，无模板/观点/图表第二调用。增加 deterministic chapter
+   builder/merger；
    每个已验证 chapter 确定性并入两个固定槽交替写入的有界聚合 checkpoint；重启或自动 retry 从最后
    一个 hash/prefix 均有效的槽继续，最多重跑仍保留 payload 的当前 chapter，不创建 chapter 子 Task，
    也不把 checkpoint 暴露成部分整理结果。
-4. action candidates 只做来源/状态/重复验证；采用时创建 ActionItem，绝不覆盖已有 mutable item。
-5. Q2 snapshot、provider DTO、grounding、device operation retry 和 owner 已在隔离候选接入；先 shadow，
+5. 实现主题、数据、观点和关系验证、逐字搬运门、图表准入和 Android 白名单 renderer；任何准入失败
+   只退化/省略可选块，不增加语义修复调用。action candidates 只做来源/状态/重复验证；采用时创建
+   ActionItem，绝不覆盖已有 mutable item。
+6. Device V2 handler 发布 `meeting_knowledge_v4` artifact；先 shadow，随后分别激活
+   `summary_knowledge_v4` 与 `summary_adaptive_v1`。本机 activation fence 原子保存 V4 version/document/
+   current pointer；布局偏好不上传。
+7. Q2 snapshot、provider DTO、grounding、device operation retry 和 owner 已在隔离候选接入；先 shadow，
    再按 capability 默认。笔记/附件修改、epoch/binding 变化和迟到 attempt 都必须使本机激活 CAS 失败。
-6. mobile summary/question repositories 原子保存版本、facts/turns、clauses 和 exact citations；Q2
+8. mobile summary/question repositories 原子保存版本、knowledge/turns、clauses 和 exact citations；Q2
    thread/turn/citation 通过只读投影复用现有问答页，不写旧问答表。
+
+此前 Facts V3、四模板和富块回放保留为历史血缘与 V3 compatibility 证据，不再代表当前 Stage 3
+presentation/semantic composition 退出。以下记录中的“关闭模板本地投影/富块视觉门”均按此边界解释。
 
 截至 2026-08-20，`emulator-5562` 已完成 direct/长来源 Q2、当前笔记、定量逐字引用、引用跳转、
 失败 operation 重试、应用重启恢复以及“模型运行期间笔记 revision 改变”的激活 CAS。迟到成功
@@ -1255,17 +1328,21 @@ adjudication，确定性计算 Facts 支持/遗漏、行动真实性/适用性�
 通过 `27/39` 门；剩余 12 个机器门只对应两组独立人工质量和一个公开 Summary V2/Q0 零旧调用周期，
 详见 `docs/vnext-stage3/STAGE3-EXIT-PREFLIGHT-20260821.md`。
 
-退出：短/长真实样本无截断；事实支持率、引用、行动重复、模板切换、问答相关性和延迟预算通过；
-进程在 generation/commit 阶段中断后只有一个当前版本。
+退出：短/长真实样本无截断；事实支持率、引用、行动重复、问答相关性和延迟预算通过；可见模板为 0，
+同正文重复为 0，每个 fact 只有一个 primary block，观点/图表错误准入为 0，板块切换不联网且 p95
+`<100ms`；进程在 generation/commit/local activation 阶段中断后只有一个当前版本。完整门见
+[revision 0033](revisions/0033-unified-adaptive-meeting-summary-20260823.md)。
 
 回滚：停止新的 vNext handler admission，但继续接收 v2 source stream + generic Task，并将新 generation
 显式路由到保留的 Q0/Summary V2 handler revision；已进入 generic 的任务继续 generic drain/read，
 不迁回 legacy，也不恢复 legacy submit/mirror。禁止 Q2 失败时请求内调用 Q0。兼容 handler 只在
 Stage 5 删除门通过后物理删除。
 
-Stage 3 停写/退出门：产品所有者已豁免 Facts/行动/Q2 独立人工质量和公开零旧提交周期；这些门保持
-`waived`。隔离候选 summary/question capability barrier 需持久激活；旧 legacy queued/running/retry_wait 仅剩可恢复排空项；generic 不使用 retry_wait；Q2 immutable source、Facts V3、ActionItem、章节
-manifest、引用和内容结果回放通过。Q0/V2 只读兼容保留，不在此阶段物理删除。
+Stage 3 停写/退出门：产品所有者此前豁免 Facts/行动/Q2 独立人工质量和公开零旧提交周期；这些门保持
+`waived`，不能用来跳过 revision 0033 新增的确定性结构、真实内容和真机交互门。隔离候选 summary/
+question capability barrier 需持久激活；旧 legacy queued/running/retry_wait 仅剩可恢复排空项；generic
+不使用 retry_wait；Q2 immutable source、Knowledge V4/V3 compatibility、ActionItem、章节 manifest、
+引用和内容结果回放通过。Q0/V2/V3 只读兼容保留，不在此阶段物理删除。
 
 ## 12. Stage 4：日程、搜索与投影
 
@@ -1273,8 +1350,8 @@ manifest、引用和内容结果回放通过。Q0/V2 只读兼容保留，不在
 
 实施：
 
-1. 执行 0045，拆 `localScheduleParser` 为 recognizers/producer/validator/executor，并启用唯一的本机
-   ProjectionEnvelope checkpoint owner。
+1. 执行 0045 补齐旧表 provenance 后完成 schedule schema v1 隔离迁移，拆 `localScheduleParser` 为
+   recognizers/producer/validator/executor，并启用日程库唯一的 calendar ProjectionEnvelope checkpoint owner。
 2. 服务端 graph producer 和 clarification 上线；先发布 v2 schedule client，v1 schedule submit 连续一个
    完整公开周期为零后激活 barrier 并返回 426；server rule pass/model post-normalizer 仅移入兼容模块。
 3. voice session 先录后连；统一 supplement graph revision。
@@ -1347,6 +1424,8 @@ Stage 2 capability barrier 后停止新写并移动到 compatibility module；St
 Stage 3 capability barrier 后停止新调用并移动到 compatibility module；Stage 5 才物理删除：
 
 - summary v2 公共/模板第二轮、递归摘要、逐行动复核、样本行动补丁；
+- 四模板 active picker/projector、`summary_view_preferences` 新写和任意 speaker 观点分支；V3 历史 reader
+  与旧版本解释能力仍保留，直到另获 Stage 5B 删除授权；
 - Q0 fast-repair/sample answers、scope model、strict verifier、transcript review、final editor、
   exact-slot repair 和 recovery generation；
 - Question request 中 `summary_sections` 和历史 `answer` 正文。
@@ -1370,7 +1449,7 @@ Stage 4 barrier 后停止新调用、Stage 5 删除门后物理删除：
 | 上传 | 1 MiB/31 MiB/33 MiB/1 GiB 与超限 1 GiB+，2/4 session、2/4 GiB reservation，断网/kill/prune/expiry/delete/late PUT/HEAD release |
 | ASR | realtime/import/no-speech，多格式，首 partial/stable/final、chunk/event cursor 断线重放、token 到期/轮换、RTF、CER/数字时间准确率、标点边界 |
 | speaker | registered/unknown/short/overlap，attribution F1、manual CAS/rebase/revoke |
-| summary | short/long、notes/attachments、四模板、actions、chapter retry、source mutation |
+| summary | short/long、notes/attachments、Knowledge V4、V3 compatibility、单一自适应页面、primary-owner 去重、观点/图表负向准入、板块显隐、依据去重、actions、chapter retry、source mutation |
 | Q&A | direct/implicit/absence/open/follow-up，跨会议/旧 revision/无关引用/timeout |
 | schedule | independent natural holdout 完全正确率、关键字段召回、错误保存率；simple/complex/correction/range/clarify/query/delete/OOD |
 | local features | recurrence/reminder/location/widget/marker/clip/series/tag/trash/share/update/app-lock；ActionItem 全 CRUD/提醒/后续日程 |

@@ -7,7 +7,12 @@ export type DeviceOperationReason = 'original' | 'retry' | 'regenerate';
 export type DeviceOperationState = 'queued' | 'running' | 'success' | 'failure' | 'cancelled';
 
 const ALLOWED_STATE_TRANSITIONS: Record<DeviceOperationState, readonly DeviceOperationState[]> = {
-  queued: ['queued', 'running', 'failure', 'cancelled'],
+  // A native/background executor can finish before JavaScript observes its
+  // intermediate running state. The caller that records success must still
+  // prove the canonical remote asset identity, so allowing this monotonic
+  // queued -> success observation closes the durable operation without
+  // weakening the upload ownership contract.
+  queued: ['queued', 'running', 'success', 'failure', 'cancelled'],
   running: ['running', 'success', 'failure', 'cancelled'],
   success: ['success'],
   failure: ['failure'],
@@ -114,6 +119,7 @@ export interface DeviceUploadOperationSnapshot {
     nativeSessionId: string | null;
     localUri: string;
     remoteAssetId: string | null;
+    remoteObjectRevision: number | null;
     mimeType: string | null;
     fileName: string | null;
     byteSize: number | null;
@@ -133,6 +139,7 @@ type DeviceUploadOperationRow = OperationRow & {
   asset_native_session_id: string | null;
   asset_local_uri: string;
   asset_remote_asset_id: string | null;
+  asset_remote_object_revision: number | null;
   asset_mime_type: string | null;
   asset_file_name: string | null;
   asset_byte_size: number | null;
@@ -248,6 +255,7 @@ function uploadOperationSelect(): string {
            asset.asset_generation, asset.role AS asset_role, asset.origin AS asset_origin,
            asset.native_session_id AS asset_native_session_id, asset.local_uri AS asset_local_uri,
            asset.remote_asset_id AS asset_remote_asset_id, asset.mime_type AS asset_mime_type,
+           asset.remote_object_revision AS asset_remote_object_revision,
            asset.file_name AS asset_file_name, asset.byte_size AS asset_byte_size,
            asset.duration_ms AS asset_duration_ms, asset.checksum_sha256 AS asset_checksum_sha256,
            asset.source_sha256 AS asset_source_sha256, asset.updated_at_ms AS asset_updated_at_ms
@@ -284,6 +292,7 @@ export async function listPendingDeviceUploadOperations(
         nativeSessionId: row.asset_native_session_id,
         localUri: row.asset_local_uri,
         remoteAssetId: row.asset_remote_asset_id,
+        remoteObjectRevision: row.asset_remote_object_revision,
         mimeType: row.asset_mime_type,
         fileName: row.asset_file_name,
         byteSize: row.asset_byte_size,

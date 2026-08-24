@@ -30,6 +30,7 @@ object MinutesSnapshotParser {
     searching = raw.boolean("searching"),
     query = raw.string("query").orEmpty(),
     mediaImporting = raw.boolean("mediaImporting"),
+    mediaImportStatusLabel = raw.string("mediaImportStatusLabel").orEmpty(),
     phase = phase,
     message = raw.string("message")?.takeIf { it.isNotBlank() }?.let {
       NativeUserMessages.readable(it, listFallback(phase))

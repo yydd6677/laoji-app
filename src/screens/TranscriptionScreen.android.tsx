@@ -5958,18 +5958,22 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const deviceTranscriptFailed = !hasStableFinalTranscript
     && deviceTranscriptTask?.state === 'failed'
     && !deviceTranscriptNoSpeech;
+  const canonicalUploadPending = processingStatuses.upload === 'queued'
+    || processingStatuses.upload === 'uploading';
+  const canonicalUploadFailed = processingStatuses.upload === 'failed_retryable'
+    || processingStatuses.upload === 'blocked';
   const detailProcessingPresentation: DetailProcessingPresentation = (() => {
     if (retryingAudioUpload) {
       return { label: '正在上传录音', tone: 'neutral', retryStage: null };
     }
-    if (pendingAudioError) {
+    if (pendingAudioError && canonicalUploadFailed) {
       return {
         label: pendingAudioUpload?.uploadState === 'blocked' ? '录音上传受阻' : '录音上传失败，可重试',
         tone: 'danger',
         retryStage: pendingAudioUpload ? 'upload' : null,
       };
     }
-    if (pendingAudioUpload) {
+    if (pendingAudioUpload && canonicalUploadPending) {
       return { label: '等待上传录音', tone: 'neutral', retryStage: null };
     }
     if (deviceTranscriptTask?.state === 'failed' && !hasStableFinalTranscript) {

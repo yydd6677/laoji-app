@@ -45,6 +45,25 @@ QUEUE_LIMIT = max(2, min(32, int(os.getenv("LAOJI_VNEXT_IMPORT_QUEUE_LIMIT", "8"
 LEASE_SECONDS = 30
 
 
+def configured_worker_concurrency(value: str | None = None) -> int:
+    """Bound offline orchestration without constraining accepted uploads.
+
+    ASR inference remains serialized and priority-aware inside port 8030. A
+    small number of orchestration lanes overlaps R2/ffmpeg/VAD work and keeps
+    that inference queue fed; unbounded lanes would only add decoder and
+    memory pressure without increasing model parallelism.
+    """
+    raw = os.getenv("LAOJI_VNEXT_IMPORT_WORKER_CONCURRENCY", "3") if value is None else value
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        parsed = 3
+    return max(1, min(4, parsed))
+
+
+WORKER_CONCURRENCY = configured_worker_concurrency()
+
+
 def import_transcription_enabled() -> bool:
     return os.getenv("LAOJI_VNEXT_IMPORT_TRANSCRIPTION_ENABLED", "0").strip().lower() in {
         "1", "true", "yes", "on",
@@ -416,7 +435,7 @@ class VNextImportTranscriptionWorker:
             asyncio.PriorityQueue(maxsize=QUEUE_LIMIT)
         )
         self._sequence = itertools.count()
-        self._task: asyncio.Task | None = None
+        self._tasks: list[asyncio.Task] = []
         self._maintenance_task: asyncio.Task | None = None
         self._closed = False
         self._queued: set[str] = set()
@@ -424,9 +443,14 @@ class VNextImportTranscriptionWorker:
         self._lease_owner = f"import-transcript:{socket.gethostname()}:{os.getpid()}"
 
     def start(self) -> None:
-        if self._task is None or self._task.done():
-            self._closed = False
-            self._task = asyncio.create_task(self._run(), name="vnext-import-transcription")
+        self._closed = False
+        self._tasks = [task for task in self._tasks if not task.done()]
+        while len(self._tasks) < WORKER_CONCURRENCY:
+            ordinal = len(self._tasks) + 1
+            self._tasks.append(asyncio.create_task(
+                self._run(),
+                name=f"vnext-import-transcription:{ordinal}",
+            ))
         if self._maintenance_task is None or self._maintenance_task.done():
             self._maintenance_task = asyncio.create_task(
                 self._maintain(),
@@ -435,7 +459,9 @@ class VNextImportTranscriptionWorker:
 
     async def stop(self) -> None:
         self._closed = True
-        tasks = [task for task in (self._task, self._maintenance_task) if task is not None]
+        tasks = [*self._tasks]
+        if self._maintenance_task is not None:
+            tasks.append(self._maintenance_task)
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -443,7 +469,7 @@ class VNextImportTranscriptionWorker:
                 await task
             except asyncio.CancelledError:
                 pass
-        self._task = None
+        self._tasks = []
         self._maintenance_task = None
         self._queued.clear()
 
@@ -493,7 +519,6 @@ class VNextImportTranscriptionWorker:
         while not self._closed:
             item = await self._queue.get()
             _priority, _sequence, device_id, epoch_id, task_id = item
-            self._queued.discard(task_id)
             try:
                 await self._process(ImportContext(device_id, epoch_id), task_id)
             except asyncio.CancelledError:
@@ -501,6 +526,11 @@ class VNextImportTranscriptionWorker:
             except Exception as error:
                 _logger.warning("vnext import worker item failed: %s", type(error).__name__)
             finally:
+                # Keep the task identity reserved for its entire in-flight
+                # lifetime.  The maintenance scan runs every second; dropping
+                # it when a lane merely dequeues the item lets another lane
+                # claim and decode the same source concurrently.
+                self._queued.discard(task_id)
                 self._queue.task_done()
 
     async def _process(self, context: ImportContext, task_id: str) -> None:

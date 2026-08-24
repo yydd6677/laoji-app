@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 from pathlib import Path
@@ -71,6 +72,68 @@ class FakeR2:
 
 def _digest(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("0", 1), ("1", 1), ("3", 3), ("8", 4), ("invalid", 3)],
+)
+def test_import_worker_concurrency_is_bounded(value: str, expected: int) -> None:
+    assert vnext_import_transcription_pipeline.configured_worker_concurrency(value) == expected
+
+
+@pytest.mark.asyncio
+async def test_import_worker_starts_configured_orchestration_lanes(monkeypatch) -> None:
+    monkeypatch.setattr(vnext_import_transcription_pipeline, "WORKER_CONCURRENCY", 3)
+    worker = vnext_import_transcription_pipeline.VNextImportTranscriptionWorker()
+    worker.start()
+    try:
+        assert len(worker._tasks) == 3  # type: ignore[attr-defined]
+        assert len({task.get_name() for task in worker._tasks}) == 3  # type: ignore[attr-defined]
+    finally:
+        await worker.stop()
+    assert worker._tasks == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_import_worker_keeps_inflight_task_reserved(monkeypatch) -> None:
+    monkeypatch.setattr(vnext_import_transcription_pipeline, "WORKER_CONCURRENCY", 3)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def blocked_transcribe(_context, _source, *, attempt_id, lease_owner):
+        del attempt_id, lease_owner
+
+    worker = vnext_import_transcription_pipeline.VNextImportTranscriptionWorker(
+        transcribe_source=blocked_transcribe,
+    )
+
+    async def blocked_process(_context, task_id):
+        nonlocal calls
+        assert task_id == TASK_ID
+        calls += 1
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(worker, "_process", blocked_process)
+    source = {
+        "task_id": TASK_ID,
+        "device_id": "device-a",
+        "epoch_id": "epoch-a",
+    }
+    worker.start()
+    try:
+        worker.notify(source)
+        await entered.wait()
+        worker.notify(source)
+        await asyncio.sleep(0)
+        assert calls == 1
+        assert worker._queue.empty()  # type: ignore[attr-defined]
+        assert TASK_ID in worker._queued  # type: ignore[attr-defined]
+    finally:
+        release.set()
+        await worker.stop()
 
 
 def test_r2_media_is_piped_through_ffmpeg_without_whole_file_copy(monkeypatch) -> None:
@@ -799,6 +862,10 @@ async def test_checkpoint_replay_republishes_stable_text_without_second_asr_call
         second_attempt,
         "recover-owner",
     )
+    retry_snapshot = vnext_import_transcript_store.get_event_snapshot(context, TASK_ID)
+    assert retry_snapshot is not None
+    assert retry_snapshot["state"] == "running"
+    assert retry_snapshot["error_code"] is None
     result = await vnext_import_transcription_pipeline._transcribe_source(
         context,
         source,

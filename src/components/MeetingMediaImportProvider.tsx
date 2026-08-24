@@ -53,7 +53,8 @@ import { useAppDialog } from './AppDialog';
 import { MeetingImportSheet, type MeetingImportDraft } from './MeetingImportSheet';
 
 interface MeetingMediaImportContextValue {
-  busy: boolean;
+  blocked: boolean;
+  blockedLabel: string | null;
   selectMeetingMedia: () => Promise<void>;
 }
 
@@ -90,6 +91,13 @@ type ImportConfirmation = {
   initialRecordedAtMs: number;
 };
 
+// Every confirmed import is journaled and receives a visible meeting shell
+// immediately.  Only the expensive copy/extract step is bounded: allowing an
+// arbitrary number of MediaCodec jobs to run at once can exhaust vendor codec
+// instances or race disk reservations, while rejecting the third selection
+// made perfectly recoverable work look unavailable to the user.
+const MAX_ACTIVE_MEDIA_PREPARATIONS = 3;
+
 function defaultRecordedAtMs(source: Pick<ImportSource, 'lastModifiedMs' | 'receivedAtMs'>): number {
   const nowMs = Date.now();
   const candidate = source.lastModifiedMs ?? source.receivedAtMs;
@@ -111,15 +119,17 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     updateMeetingStatus,
   } = useMeetings();
   const { showDialog } = useAppDialog();
-  const [busy, setBusy] = useState(false);
+  const [recoveringImports, setRecoveringImports] = useState(false);
   const [confirmation, setConfirmation] = useState<ImportConfirmation | null>(null);
-  const busyRef = useRef(false);
+  const activePreparationCountRef = useRef(0);
+  const preparationWaitersRef = useRef<Array<() => void>>([]);
   const mountedRef = useRef(true);
   const promptActiveRef = useRef(false);
   const recoveryRunningRef = useRef(false);
   const recoveryGenerationRef = useRef(0);
   const activeIntentTokenRef = useRef<string | null>(null);
   const handledIntentTokensRef = useRef(new Set<string>());
+  const meetingsRef = useRef(meetings);
   const runImportRef = useRef<(source: ImportRequest) => Promise<void>>(async () => {});
   const handleIntentRef = useRef<(intent: PendingMeetingMediaImportIntent) => void>(() => {});
   const drainIntentInboxRef = useRef<() => void>(() => {});
@@ -133,9 +143,28 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     mountedRef.current = false;
   }, []);
 
-  const setImportBusy = useCallback((value: boolean) => {
-    busyRef.current = value;
-    if (mountedRef.current) setBusy(value);
+  useEffect(() => {
+    meetingsRef.current = meetings;
+  }, [meetings]);
+
+  const acquirePreparationSlot = useCallback(async () => {
+    if (activePreparationCountRef.current < MAX_ACTIVE_MEDIA_PREPARATIONS) {
+      activePreparationCountRef.current += 1;
+      return;
+    }
+    await new Promise<void>(resolve => {
+      preparationWaitersRef.current.push(resolve);
+    });
+  }, []);
+
+  const releasePreparationSlot = useCallback(() => {
+    const next = preparationWaitersRef.current.shift();
+    if (next) {
+      // Transfer the occupied slot directly to the oldest durable import.
+      next();
+      return;
+    }
+    activePreparationCountRef.current = Math.max(0, activePreparationCountRef.current - 1);
   }, []);
 
   const releasePrompt = useCallback(() => {
@@ -174,21 +203,18 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
   }, [importMeetingMedia]);
 
   const runImport = useCallback(async (source: ImportRequest) => {
-    if (busyRef.current) {
-      return;
-    }
     const request: PreparedImportRequest = {
       ...source,
       meetingId: source.meetingId ?? secureClientIdFactory.create(),
       assetId: source.assetId ?? secureClientIdFactory.create(),
     };
     promptActiveRef.current = false;
-    setImportBusy(true);
     let copied = Boolean(source.readyMedia);
     let staged = Boolean(source.readyMedia);
     let ingestedMedia = source.readyMedia ?? null;
     let navigatedMeetingId: string | null = request.draft.targetMeetingId ?? null;
     let placeholderCreated = false;
+    let preparationAcquired = false;
     let activeDraft = request.draft;
     try {
       await saveMeetingMediaImportDraft(request.meetingId, activeDraft);
@@ -251,6 +277,11 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         navigateToMeeting(navigatedMeetingId);
       }
 
+      // Everything above this point is lightweight and durable.  A fourth or
+      // tenth selection is accepted immediately and can recover after process
+      // death; it merely waits here for bounded codec / file-I/O capacity.
+      await acquirePreparationSlot();
+      preparationAcquired = true;
       const serviceMaximumBytes = source.maximumBytesPromise
         ? await source.maximumBytesPromise
         : source.maximumBytes;
@@ -353,7 +384,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         ],
       });
     } finally {
-      setImportBusy(false);
+      if (preparationAcquired) releasePreparationSlot();
       drainIntentInboxRef.current();
     }
   }, [
@@ -363,7 +394,8 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     mode,
     persistIngestedMedia,
     releasePrompt,
-    setImportBusy,
+    acquirePreparationSlot,
+    releasePreparationSlot,
     showDialog,
     updateMeetingStatus,
   ]);
@@ -444,7 +476,6 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       initializing
       || mode === 'signed_out'
       || recoveryRunningRef.current
-      || busyRef.current
       || promptActiveRef.current
       || activeIntentTokenRef.current !== null
     ) return;
@@ -507,7 +538,6 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       initializing
       || mode === 'signed_out'
       || recoveryRunningRef.current
-      || busyRef.current
       || promptActiveRef.current
       || activeIntentTokenRef.current !== null
       || !hasNativeMeetingMediaImport()
@@ -533,8 +563,8 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     const generation = recoveryGenerationRef.current + 1;
     recoveryGenerationRef.current = generation;
     recoveryRunningRef.current = true;
+    setRecoveringImports(true);
     void recoverPendingMeetingMediaImports().then(async pending => {
-      if (pending.length > 0 && !cancelled) setImportBusy(true);
       for (const media of pending) {
         if (cancelled) return;
         try {
@@ -569,7 +599,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
             targetMeetingId: null,
           };
           const recoveredTargetMeetingId = draft.targetMeetingId
-            ?? (meetings.some(meeting => meeting.id === media.meetingId) ? media.meetingId : null);
+            ?? (meetingsRef.current.some(meeting => meeting.id === media.meetingId) ? media.meetingId : null);
           await persistIngestedMedia(media, {
             ...draft,
             targetMeetingId: recoveredTargetMeetingId,
@@ -630,7 +660,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     }).finally(() => {
       if (recoveryGenerationRef.current !== generation) return;
       recoveryRunningRef.current = false;
-      setImportBusy(false);
+      if (mountedRef.current) setRecoveringImports(false);
       drainIntentInboxRef.current();
     });
     return () => {
@@ -638,13 +668,16 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       if (recoveryGenerationRef.current === generation) {
         recoveryGenerationRef.current += 1;
         recoveryRunningRef.current = false;
-        setImportBusy(false);
+        if (mountedRef.current) setRecoveringImports(false);
       }
     };
-  }, [initializing, meetings, mode, persistIngestedMedia, releasePrompt, scopeKey, setImportBusy, showDialog]);
+  }, [initializing, mode, persistIngestedMedia, releasePrompt, scopeKey, showDialog]);
 
   const selectMeetingMedia = useCallback(async () => {
-    if (busyRef.current || promptActiveRef.current || recoveryRunningRef.current) return;
+    if (
+      promptActiveRef.current
+      || recoveryRunningRef.current
+    ) return;
     if (!hasNativeMeetingMediaImport()) {
       showDialog({
         title: '暂时无法导入',
@@ -702,9 +735,12 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
   }, [presentImportConfirmation, releasePrompt, showDialog]);
 
   const value = useMemo<MeetingMediaImportContextValue>(() => ({
-    busy,
+    blocked: recoveringImports,
+    blockedLabel: recoveringImports
+      ? '正在恢复未完成录音'
+      : null,
     selectMeetingMedia,
-  }), [busy, selectMeetingMedia]);
+  }), [recoveringImports, selectMeetingMedia]);
 
   return (
     <MeetingMediaImportContext.Provider value={value}>

@@ -1,14 +1,15 @@
 {
   "platform": "android",
-  "version_name": "1.1.63",
-  "version_code": 171,
-  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.63-171.apk",
-  "sha256": "sha256:2279f63b09bb9d8f65a51ad0fdd217f33b61f319b47eebbe38d3aff10b2b9515",
-  "size_bytes": 82665955,
+  "version_name": "1.1.66",
+  "version_code": 174,
+  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.66-174.apk",
+  "sha256": "sha256:f595c956735428e74c81854f1d4f47698f3a346ad2cb28583d3725d81349447e",
+  "size_bytes": 82670263,
   "release_notes": [
-    "会议整理改为一份自适应结果，不再用四个标题不同但正文近似的模板重复组织内容。",
-    "新增本机板块显示设置；时间线、流程、对比、数据、风险和问题只在有对应依据时出现。",
-    "讲话人和时间引用按板块收纳为一个依据入口，普通条目不再重复显示来源。"
+    "录音导入不再因已有两条正在准备而拒绝新选择；所有选择先可靠保存，再由本机有界并行准备。",
+    "会议总览和详情统一显示等待转写、正在转写及失败状态，第一段文字出现前也不再留白。",
+    "服务器可同时编排三条离线转写，并修复同一任务重复解码及重试时残留旧错误状态的问题。",
+    "修复转写已经完成后会议列表仍长期显示“正在生成文字记录”的终态投影问题。"
   ],
   "minimum_supported_version_code": 106
 }

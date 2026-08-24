@@ -5,12 +5,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
+import re
+import shutil
+import subprocess
 import sys
 import zipfile
 
 
 EXPECTED_API_BASE = "https://laoji.cloud"
+# Direct APK updates can only preserve on-device data when Android accepts the
+# new package as the same signer. This is the certificate used by every public
+# LaoJi APK through 1.1.61; changing it requires an explicit signing-lineage or
+# store migration, never an incidental local build setting.
+EXPECTED_SIGNER_SHA256 = "fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c"
 EXPECTED_ENABLED_FLAGS = (
     "localMeetingDbV1",
     "localMeetingDbCanonicalReadV1",
@@ -41,6 +50,44 @@ LEGACY_MARKERS = (
     "realtimeAsrHost",
     "realtimeAsrPort",
 )
+
+
+def _apksigner() -> Path | None:
+    direct = shutil.which("apksigner")
+    if direct:
+        return Path(direct)
+    for name in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        root = os.environ.get(name, "").strip()
+        if not root:
+            continue
+        candidates = sorted((Path(root) / "build-tools").glob("*/apksigner"), reverse=True)
+        if candidates:
+            return candidates[0]
+    return None
+
+
+def _verify_signer(apk: Path) -> list[str]:
+    signer = _apksigner()
+    if signer is None:
+        return ["找不到 apksigner，无法验证 APK 更新签名连续性"]
+    result = subprocess.run(
+        [str(signer), "verify", "--print-certs", str(apk)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return [f"APK 签名验证失败: {(result.stderr or result.stdout).strip()}"]
+    match = re.search(r"Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]+)", result.stdout)
+    if match is None:
+        return ["APK 签名输出缺少 SHA-256 证书摘要"]
+    digest = match.group(1).lower()
+    if digest != EXPECTED_SIGNER_SHA256:
+        return [
+            "APK 签名与已发布更新链不一致；覆盖安装会失败或要求清空本机数据: "
+            f"{digest}"
+        ]
+    return []
 
 
 def verify(apk: Path) -> list[str]:
@@ -88,6 +135,7 @@ def verify(apk: Path) -> list[str]:
     for marker in LEGACY_MARKERS:
         if marker in serialized:
             failures.append(f"包含旧生产配置标记: {marker}")
+    failures.extend(_verify_signer(apk))
     return failures
 
 

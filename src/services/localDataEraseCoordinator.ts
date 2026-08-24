@@ -4,6 +4,7 @@ import { clearDeviceIdentity } from './deviceIdentity';
 import { clearLocalAppFiles, clearScheduledAppNotifications } from './localData';
 import { clearThemePreference } from './themePreferences';
 import { deleteMeetingDatabase } from '../data/db/openDatabase';
+import { deleteScheduleDatabase } from '../data/db/openScheduleDatabase';
 import { clearNativeTransferLease } from '../native/nativeTransferCoordinator';
 import { clearNativeUpcomingEventsProjection } from 'laoji-native-platform';
 import { getOrCreateDeviceIdentity } from './deviceIdentity';
@@ -102,6 +103,7 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
   const ownerSteps: EraseStep[] = [
     { name: 'async-storage', run: clearAppStorage },
     { name: 'meeting-database', run: deleteMeetingDatabase },
+    { name: 'schedule-database', run: deleteScheduleDatabase },
     { name: 'theme-preference', run: clearThemePreference },
   ];
   const ownerResults = await Promise.allSettled(ownerSteps.map(step => step.run()));

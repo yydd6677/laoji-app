@@ -3021,6 +3021,25 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
           .filter(item => Boolean(item.transcriptionTaskId))
           .map(item => rememberDeviceTranscriptTaskBestEffort(item.meetingId, item.transcriptionTaskId!)));
       }
+      let guestCanonicalUploadCommitted = false;
+      if (mode === 'guest' && deviceV2IngressReady) {
+        // A succeeded WorkManager result may be observable only once. Commit
+        // the identity carried by this very observation before re-listing the
+        // durable queue; waiting for a second native read stranded successful
+        // uploads as local `queued` operations after executor pruning.
+        await Promise.all(result.uploaded.map(async uploaded => {
+          const inspection = derivePendingMeetingAudioUploadInspection(uploaded, null);
+          const operationId = inspection.pending.nativeOperationId?.trim();
+          if (!operationId) return;
+          const committed = await commitGuestNativeUploadSuccess(inspection).catch(error => {
+            diagnosticWarn('[device-v2-upload] observed success commit deferred', error);
+            return false;
+          });
+          if (!committed) return;
+          guestCanonicalUploadCommitted = true;
+          await markDeviceUploadOperationSuccess(operationId);
+        }));
+      }
       const after = await listPendingMeetingAudioUploads(scope);
       shouldPollPendingUploads = after.some(item => (
         Boolean(item.nativeWorkId) || !item.remoteMeetingId
@@ -3029,7 +3048,6 @@ export function MeetingsProvider({ children }: { children: React.ReactNode }) {
       const afterInspections = mode === 'guest' && !deviceV2IngressReady
         ? after.map(item => derivePendingMeetingAudioUploadInspection(item, null))
         : await inspectPendingMeetingAudioUploads(after);
-      let guestCanonicalUploadCommitted = false;
       if (mode === 'guest' && deviceV2IngressReady) {
         await Promise.all(afterInspections.map(async inspection => {
           const operationId = inspection.pending.nativeOperationId?.trim();

@@ -1,16 +1,16 @@
 # 老记设计蓝图当前入口
 
 - current architecture: `LaoJi vNext global development baseline`
-- architecture revision: `vnext-3-stage5a-candidate-ready`
+- architecture revision: `vnext-6-unified-adaptive-summary`
 - baseline release: `1.1.10 (118)`
 - design status: `global development baseline frozen`
-- production/App/GPU mutation: `production ASR 8030 v2 handler activated; App/public capability unchanged; GPU1 untouched`; `emulator-5562` carries isolated candidate only
+- production/App/GPU mutation: `production ASR 8030 v2 handler retained; Android 1.1.63 publishes adaptive Facts V3 presentation; API/model/GPU unchanged`; `emulator-5562` verified the release candidate
 - stable source reference: `master` / `v1.1.10`
 - implementation reference: `vnext/implementation`
 - source and runtime paths are intentionally environment-specific; use repository-relative paths and deployment variables
 - implementation branch: `vnext/implementation`
 - stable baseline: Stage 0 passed at `1.1.10 (118)`; see [Stage 0 exit](../vnext-stage0/EXIT-20260818.md)
-- implementation status: `Stage 0/1 passed; Stage 2-4 machine/recovery/performance/privacy gates passed and human/public-cycle gates closed only as owner-waived; Stage 5A passed with isolated candidate 1.1.55 (163); legacy physical deletion deferred and safe_to_delete=false`
+- implementation status: `Stage 0/1 passed; prior Stage 2-4 machine/recovery/performance/privacy gates passed and human/public-cycle gates owner-waived; Stage 3 Slice A adaptive Facts V3 presentation released in 1.1.63 while Knowledge V4 remains shadow-pending; Stage 5A legacy physical deletion remains deferred and safe_to_delete=false`
 
 2026-08-21 最新产品决定：跳过独立人工质量和正常使用/公开零旧调用周期；对应门必须显示 `waived`，
 不能伪报质量指标。完成 Stage 5A 的 vNext 单一 owner、隔离 barrier、迁移恢复、工程验收、候选 APK 与
@@ -35,7 +35,7 @@ vNext 不是某一个会议能力升级，而是覆盖日程、录音/导入、�
 核心结构：
 
 ```text
-mobile SQLite + app-private media (business authority)
+mobile schedule DB + meeting DB + app-private media (business authority)
   -> domain-specific remote intent
   -> laoji-api minimal task/attempt owner
   -> laoji-asr / Ollama / R2 adapters
@@ -46,6 +46,25 @@ mobile SQLite + app-private media (business authority)
 手机拥有用户业务数据；服务器只拥有设备授权、临时加密任务、生成 artifact、上传 session 和 R2
 清理义务；R2 只保存有 TTL 的 staging object。账号和跨设备同步不进入 vNext。
 
+2026-08-23 根据真实本机清理事件重新打开数据库故障域审查：此前“所有业务共用
+`laoji-meeting-memory.db`”的决定只覆盖了 owner/事务一致性，没有覆盖领域清理、重建、迁移和损坏恢复的
+爆炸半径。当前实现已修订为 `laoji-schedule.db` 与 `laoji-meeting-memory.db` 两个无跨库外键的领域库；
+旧日程表先事务复制并逐行核对，完成标记提交后才退役。会议库删除不再影响日程；完整安装清除仍显式删除
+两库。详见 [数据库隔离修订](revisions/0031-schedule-meeting-database-isolation-20260823.md)。
+
+同日媒体导入取消了用户可见的准备数量门限：所有已确认导入先持久化并创建会议记录，本机内部最多同时准备三条不同会议资产，
+按会议身份互斥并保留独立 journal；同一会议仍严格串行，启动恢复仍短暂独占。该改动只放宽本机复制/
+抽音准备，不扩大服务器 ASR 并发或建立无界队列。详见
+[有界并行媒体准备](revisions/0032-bounded-concurrent-media-preparation-20260823.md)。
+
+同日真机记录 `1436403866` 暴露出四模板语义投影错误：不同标题实际复用同一批 context facts，访谈
+观点还会把任意带 speaker 的普通转写逐字搬运；条目尾注与 section citation 又重复展示同一时间来源。
+Android `1.1.63` 已取消 active 四模板入口，先以 Facts V3 compatibility adapter 输出一份本机自适应
+整理；图表按证据准入，引用按板块收纳。Knowledge V4 仍须经过 shadow 和质量/时延门，不能视为已上线。
+该修订重新打开 semantic composition 的后续实现门，但不推翻既有 immutable
+source、单 pack/章一次生成、ActionItem owner、Q2 或恢复证据。详见
+[统一自适应会议整理](revisions/0033-unified-adaptive-meeting-summary-20260823.md)。
+
 ## 领域闭合
 
 | 领域 | 状态 |
@@ -54,7 +73,7 @@ mobile SQLite + app-private media (business authority)
 | 日程文字/语音解析 | STAGED |
 | 实时录音、导入、上传 | STAGED |
 | ASR、讲话人、Transcript | SELECTED |
-| 整理、行动、模板和编辑 | SELECTED |
+| 整理、行动、自适应板块和编辑 | SLICE A RELEASED / V4 SHADOW PENDING |
 | 本场待办、提醒和后续日程 | RETAINED |
 | 会议问答 Q2 | SELECTED |
 | 标签、分类、搜索、回收站、分享、更新 | SELECTED/RETAINED |
@@ -68,7 +87,8 @@ mobile SQLite + app-private media (business authority)
 - Stage 0：冻结 1.1.10、导入并版本化真实后端源码、生成共享 schema。
 - Stage 1：手机业务权威与 device v2 最小任务 owner。
 - Stage 2：原生 R2 上传、文字优先 ASR、讲话人异步 overlay。
-- Stage 3：Facts V3 长会闭合、行动候选、Q2 single reader。
+- Stage 3：immutable source/长会/行动/Q2 基础保留；V3 自适应投影、板块显隐与引用收纳已发布，
+  Knowledge V4 语义合同和完整富内容仍走 shadow 后采用。
 - Stage 4：Mention Graph 日程、FTS、ProjectionEnvelope 和全局本地功能（0045/FTS 与 MentionGraph
   隔离切片已实现，未采用）。
 - Stage 5A：已采用隔离 vNext 单一 owner，完成迁移/资源/隐私和候选交付；legacy 冷保留。
@@ -392,3 +412,7 @@ activation fence 合并 `27/27` 通过；两主题下段落、项目符号、引
 风险卡和统计均可见。原 Facts JSON、主题和模板偏好已恢复，临时备份表和测试包已清除，SQLite 完整性
 通过。该证据关闭富块视觉门，不关闭独立人工质量、公开零旧链路周期或 capability barrier；见
 [富内容 Android 回放](../vnext-stage3/SUMMARY-V3-RICH-BLOCK-ANDROID-REPLAY-20260821.md)。
+
+上述两项现在只保留为历史 renderer/本地切换证据，不能继续作为整理产品质量门。2026-08-23 的真实
+内容审计证明“可切换、无网络、组件可见”没有验证板块语义区分、逐字搬运或引用重复。新退出门改为
+单一自适应页面、事实 primary-owner 去重、观点/图表准入和板块级依据；见 revision 0033。

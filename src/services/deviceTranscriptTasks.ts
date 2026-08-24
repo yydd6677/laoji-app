@@ -4,6 +4,10 @@ import { ensureLocalMeetingServiceBinding } from './deviceAuthority';
 import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRepository';
 import { sqliteMeetingNoteRepository } from '../data/repositories';
 import {
+  mirrorDeviceTranscriptTaskProgress,
+  mirrorLegacyTranscriptProcessingFailure,
+} from './meetingStageMirror';
+import {
   createDeviceOperation,
   getLatestDeviceOperation,
   listPendingDeviceOperations,
@@ -229,24 +233,40 @@ export async function rememberDeviceTranscriptTask(meetingId: string, taskId: st
     predecessorOperationId: current?.operationId ?? null,
     creationReason: current ? 'retry' : 'original',
   });
+  await mirrorDeviceTranscriptTaskProgress(
+    'guest',
+    normalizedMeetingIdValue,
+    'queued',
+    normalizedTaskIdValue,
+  );
   notifyChanged(normalizedMeetingIdValue);
 }
 
 export async function markDeviceTranscriptTaskProgress(
   meetingId: string,
   phase: DeviceTranscriptTaskPhase,
-): Promise<void> {
+): Promise<boolean> {
   const normalized = normalizedMeetingId(meetingId);
   const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
-  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
-  if ((phase === 'running' && existing.remoteState === 'running')
-    || (phase === 'queued' && existing.remoteState === 'queued')) return;
-  const updated = await updateDeviceOperation({
-    operationId: existing.operationId,
-    expectedRevision: existing.operationRevision,
-    state: phase === 'running' ? 'running' : 'queued',
-  });
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return false;
+  const alreadyProjected = (phase === 'running' && existing.remoteState === 'running')
+    || (phase === 'queued' && existing.remoteState === 'queued');
+  let updated: DeviceOperationRecord | null = null;
+  if (!alreadyProjected) {
+    updated = await updateDeviceOperation({
+      operationId: existing.operationId,
+      expectedRevision: existing.operationRevision,
+      state: phase === 'running' ? 'running' : 'queued',
+    });
+  }
+  const stageChanged = await mirrorDeviceTranscriptTaskProgress(
+    'guest',
+    normalized,
+    phase,
+    existing.generationId,
+  );
   if (updated) notifyChanged(normalized);
+  return Boolean(updated) || stageChanged;
 }
 
 export async function advanceDeviceTranscriptEventCursor(
@@ -281,17 +301,25 @@ export async function advanceDeviceTranscriptEventCursor(
   return updated !== null;
 }
 
-export async function markDeviceTranscriptTaskFailed(meetingId: string, errorCode?: string): Promise<void> {
+export async function markDeviceTranscriptTaskFailed(meetingId: string, errorCode?: string): Promise<boolean> {
   const normalized = normalizedMeetingId(meetingId);
   const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
-  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return false;
   const updated = await updateDeviceOperation({
     operationId: existing.operationId,
     expectedRevision: existing.operationRevision,
     state: 'failure',
     errorCode: errorCode?.trim().slice(0, 80) || null,
   });
-  if (updated) notifyChanged(normalized);
+  if (!updated) return false;
+  await mirrorLegacyTranscriptProcessingFailure(
+    'guest',
+    normalized,
+    errorCode === 'no_speech' ? 'no_speech' : 'remote_processing',
+    new Error(errorCode?.trim() || 'transcription_failed'),
+  );
+  notifyChanged(normalized);
+  return true;
 }
 
 export async function cancelDeviceTranscriptTask(meetingId: string): Promise<void> {

@@ -1,5 +1,10 @@
 import type { Meeting } from '../types';
-import type { CaptureStatus, MeetingEntryPoint, ScopeKey } from '../domain/meeting';
+import type {
+  CaptureStatus,
+  MeetingEntryPoint,
+  ScopeKey,
+  TranscriptStatus,
+} from '../domain/meeting';
 import {
   createInitialProcessingStages,
   createSecureAssetGeneration,
@@ -304,6 +309,115 @@ export async function mirrorLegacyMeetingStageState(
 }
 
 export type MeetingTranscriptFailureKind = 'persistence' | 'sync' | 'remote_processing' | 'no_speech';
+
+/**
+ * Project the durable device transcript task into the canonical meeting stage.
+ *
+ * `device_operations` remains the recovery owner; the processing stage is its
+ * UI projection.  Keeping this projection current makes list and detail views
+ * agree even before the first stable transcript event exists.
+ */
+export async function mirrorDeviceTranscriptTaskProgress(
+  scopeKey: ScopeKey,
+  legacyMeetingId: string,
+  phase: 'queued' | 'running',
+  taskId: string,
+): Promise<boolean> {
+  if (!getFeatureFlags().localMeetingDbV1) return false;
+  let changed = false;
+  try {
+    const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(
+      legacyMeetingId,
+      scopeKey,
+    );
+    if (!aggregate || aggregate.note.lifecycle === 'deleted') return false;
+    await sqliteMeetingNoteRepository.transaction(async transaction => {
+      const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
+      if (!note || note.lifecycle === 'deleted') return;
+      const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
+      if (!stage) throw new Error('meeting transcript processing stage is missing');
+      const status: TranscriptStatus = phase === 'running' ? 'finalizing' : 'queued';
+      if (stage.status === status && stage.jobId === taskId) return;
+      const nowMs = Math.max(Date.now(), note.updatedAtMs, stage.updatedAtMs);
+      await transaction.upsertStage(transitionProcessingStage(stage, {
+        stage: 'transcript',
+        status,
+        attemptStarted: stage.jobId !== taskId,
+        progress: null,
+        jobId: taskId,
+      }, nowMs), scopeKey);
+      await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
+      changed = true;
+    });
+    if (changed) {
+      diagnosticAudit('meeting_transcript_task_projection', {
+        status: phase,
+        scope: scopeKey === 'guest' ? 'guest' : 'account',
+      });
+    }
+    return changed;
+  } catch (error) {
+    diagnosticWarn('[meeting-db] transcript task projection failed', error);
+    return false;
+  }
+}
+
+/**
+ * Close the canonical transcript stage from the content that is actually
+ * readable on the device.  A terminal remote task must never be projected
+ * back through `running`: doing so creates a second, fallible write between
+ * the final transcript and the list status, leaving a permanent spinner when
+ * that later write is interrupted.
+ */
+export async function mirrorDeviceTranscriptTaskTerminal(
+  scopeKey: ScopeKey,
+  legacyMeetingId: string,
+  outcome: 'text' | 'no_speech',
+): Promise<boolean> {
+  if (!getFeatureFlags().localMeetingDbV1) return false;
+  let changed = false;
+  try {
+    const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(
+      legacyMeetingId,
+      scopeKey,
+    );
+    if (!aggregate || aggregate.note.lifecycle === 'deleted') return false;
+    await sqliteMeetingNoteRepository.transaction(async transaction => {
+      const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
+      if (!note || note.lifecycle === 'deleted') return;
+      const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
+      if (!stage) throw new Error('meeting transcript processing stage is missing');
+      if (outcome === 'text') {
+        const active = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
+        if (!active || active.kind === 'realtime_draft' || active.status !== 'ready') {
+          throw new Error('terminal transcript task has no readable final revision');
+        }
+      }
+      const status: TranscriptStatus = outcome === 'text' ? 'ready' : 'no_speech';
+      if (stage.status === status && stage.jobId === null) return;
+      const nowMs = Math.max(Date.now(), note.updatedAtMs, stage.updatedAtMs);
+      await transaction.upsertStage(transitionProcessingStage(stage, {
+        stage: 'transcript',
+        status,
+        progress: outcome === 'text' ? 1 : null,
+        jobId: null,
+      }, nowMs), scopeKey);
+      await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
+      await transaction.advanceCanonicalWrite(scopeKey, nowMs);
+      changed = true;
+    });
+    if (changed) {
+      diagnosticAudit('meeting_transcript_task_terminal_projection', {
+        outcome,
+        scope: scopeKey === 'guest' ? 'guest' : 'account',
+      });
+    }
+    return changed;
+  } catch (error) {
+    diagnosticWarn('[meeting-db] terminal transcript task projection failed', error);
+    throw error;
+  }
+}
 
 function transcriptProcessingFailureCode(
   kind: MeetingTranscriptFailureKind,

@@ -343,7 +343,11 @@ internal class MinutesListSurface(
     uploadButton.isEnabled = !state.mediaImporting
     uploadIcon.visibility = if (state.mediaImporting) View.GONE else View.VISIBLE
     uploadProgress.visibility = if (state.mediaImporting) View.VISIBLE else View.GONE
-    uploadButton.contentDescription = if (state.mediaImporting) "正在导入会议录音" else "导入会议录音"
+    uploadButton.contentDescription = if (state.mediaImporting) {
+      state.mediaImportStatusLabel.ifBlank { "录音导入暂时繁忙" }
+    } else {
+      "导入会议录音"
+    }
   }
 
   private fun toggleViewMode() {

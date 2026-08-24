@@ -321,6 +321,7 @@ data class MinutesListState(
   val searching: Boolean = false,
   val query: String = "",
   val mediaImporting: Boolean = false,
+  val mediaImportStatusLabel: String = "",
   val phase: MinutesContentPhase = MinutesContentPhase.READY,
   val message: String = "",
   val showingCachedData: Boolean = false,
