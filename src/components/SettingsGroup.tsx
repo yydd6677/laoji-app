@@ -4,33 +4,29 @@ import {
   StyleSheet,
   Text,
   TextStyle,
-  TouchableOpacity,
   View,
   ViewStyle,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { FeishuTitleBar } from './FeishuShell';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { AppTitleBar } from './AppShell';
+import { MotionPressable } from './MotionPressable';
+import { useTheme } from '../theme/ThemeProvider';
 import {
-  FEISHU_DIMENSIONS,
-  FEISHU_FONT_SIZES,
-  getFeishuTokens,
-} from '../theme/feishuTokens';
-
-const { colors: F } = getFeishuTokens();
+  UI_DIMENSIONS,
+  UI_FONT_SIZES,
+} from '../theme/uiTokens';
 
 // UI-SHELL-001 / UI-TOKENS-001: settings pages share the 44dp shell and semantic rows.
 
 export const SETTINGS_GROUP_GEOMETRY = {
-  marginHorizontal: 0,
   marginTop: 12,
-  radius: 0,
   rowHeight: 52,
   avatarRowHeight: 64,
   horizontalPadding: 16,
-  titleSize: FEISHU_FONT_SIZES.body0,
-  valueSize: FEISHU_FONT_SIZES.body1,
+  titleSize: UI_FONT_SIZES.body0,
+  valueSize: UI_FONT_SIZES.body1,
   arrowSize: 16,
-  divider: FEISHU_DIMENSIONS.divider,
+  divider: UI_DIMENSIONS.divider,
 } as const;
 
 export function SettingsTitleBar({
@@ -44,25 +40,29 @@ export function SettingsTitleBar({
   trailing?: React.ReactNode;
   testID?: string;
 }) {
+  const { tokens } = useTheme();
+  const colors = tokens.colors;
   return (
-    <FeishuTitleBar
+    <AppTitleBar
       title={title}
       testID={testID}
       leading={(
-        <TouchableOpacity
+        <MotionPressable
           style={s.backButton}
           onPress={onBack}
           accessibilityRole="button"
           accessibilityLabel="返回"
           testID={`${testID}-back`}
+          feedback="quiet"
+          pressedStyle={{ backgroundColor: colors.pressedFill }}
         >
           <Ionicons
             name="chevron-back"
             size={24}
-            color={F.iconPrimary}
+            color={colors.iconPrimary}
             testID="app-back-icon"
           />
-        </TouchableOpacity>
+        </MotionPressable>
       )}
       trailing={trailing}
     />
@@ -78,8 +78,36 @@ export function SettingsGroup({
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
+  const { tokens, appearance } = useTheme();
+  const colors = tokens.colors;
+  const flat = appearance.surfaceMode === 'flat';
+  const editorial = appearance.surfaceMode === 'editorial';
+  const layered = appearance.surfaceMode === 'layered';
   return (
-    <View style={[s.group, style]} testID={testID}>
+    <View
+      style={[
+        s.group,
+        {
+          marginHorizontal: flat ? 0 : editorial ? 16 : 12,
+          borderRadius: flat || editorial ? 0 : appearance.cardRadius,
+          backgroundColor: layered
+            ? colors.backgroundBodyOverlay
+            : editorial || flat
+              ? colors.backgroundBody
+              : colors.backgroundFloat,
+          borderWidth: flat || editorial ? 0 : appearance.borderWidth,
+          borderColor: colors.divider,
+          borderTopWidth: editorial ? StyleSheet.hairlineWidth : undefined,
+          borderBottomWidth: editorial ? StyleSheet.hairlineWidth : undefined,
+          shadowColor: appearance.shadowOpacity > 0 ? colors.shadow : undefined,
+          shadowOpacity: appearance.surfaceMode === 'soft' ? appearance.shadowOpacity : 0,
+          shadowRadius: appearance.surfaceMode === 'soft' ? appearance.shadowRadius : 0,
+          elevation: appearance.surfaceMode === 'soft' ? appearance.elevation : 0,
+        },
+        style,
+      ]}
+      testID={testID}
+    >
       {children}
     </View>
   );
@@ -120,13 +148,21 @@ export function SettingsRow({
   style?: StyleProp<ViewStyle>;
   labelStyle?: StyleProp<TextStyle>;
 }) {
+  const { tokens, appearance } = useTheme();
+  const colors = tokens.colors;
+  const rowBackground = appearance.surfaceMode === 'layered'
+    ? colors.backgroundBodyOverlay
+    : appearance.surfaceMode === 'soft'
+      ? colors.backgroundFloat
+      : colors.backgroundBody;
   const content = (
     <>
       <Text
         style={[
           s.label,
+          { color: colors.textTitle },
           centered && s.centeredLabel,
-          destructive && s.destructiveLabel,
+          destructive && { color: colors.danger },
           labelStyle,
         ]}
         numberOfLines={2}
@@ -135,31 +171,52 @@ export function SettingsRow({
       </Text>
       {!centered ? (
         <View style={s.rightArea}>
-          {value ? <Text style={s.value} numberOfLines={1}>{value}</Text> : null}
+          {value ? (
+            <Text style={[s.value, { color: colors.textCaption }]} numberOfLines={1}>
+              {value}
+            </Text>
+          ) : null}
           {right}
           {showChevron ? (
             <Ionicons
               name="chevron-forward"
               size={SETTINGS_GROUP_GEOMETRY.arrowSize}
-              color={F.iconTertiary}
+              color={colors.iconTertiary}
             />
           ) : null}
         </View>
       ) : null}
-      {!last ? <View pointerEvents="none" style={s.divider} /> : null}
+      {!last ? (
+        <View
+          pointerEvents="none"
+          style={[
+            s.divider,
+            {
+              left: appearance.surfaceMode === 'editorial' ? 0 : SETTINGS_GROUP_GEOMETRY.horizontalPadding,
+              backgroundColor: colors.divider,
+            },
+          ]}
+        />
+      ) : null}
     </>
   );
 
-  const rowStyle = [s.row, { minHeight: height }, disabled && s.disabled, style];
+  const rowStyle = [
+    s.row,
+    { minHeight: height, backgroundColor: rowBackground },
+    disabled && s.disabled,
+    style,
+  ];
   if (!onPress) {
     return <View style={rowStyle} testID={testID}>{content}</View>;
   }
 
   return (
-    <TouchableOpacity
+    <MotionPressable
       style={rowStyle}
       onPress={onPress}
-      activeOpacity={0.72}
+      pressedStyle={{ backgroundColor: colors.backgroundBodyOverlay }}
+      feedback="quiet"
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
@@ -168,24 +225,20 @@ export function SettingsRow({
       testID={testID}
     >
       {content}
-    </TouchableOpacity>
+    </MotionPressable>
   );
 }
 
 const s = StyleSheet.create({
   group: {
-    marginHorizontal: SETTINGS_GROUP_GEOMETRY.marginHorizontal,
     marginTop: SETTINGS_GROUP_GEOMETRY.marginTop,
-    borderRadius: SETTINGS_GROUP_GEOMETRY.radius,
     overflow: 'hidden',
-    backgroundColor: F.backgroundBody,
   },
   row: {
     position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SETTINGS_GROUP_GEOMETRY.horizontalPadding,
-    backgroundColor: F.backgroundBody,
   },
   disabled: { opacity: 0.45 },
   label: {
@@ -194,14 +247,12 @@ const s = StyleSheet.create({
     fontSize: SETTINGS_GROUP_GEOMETRY.titleSize,
     lineHeight: 22,
     fontWeight: '400',
-    color: F.textTitle,
   },
   centeredLabel: {
     flex: 1,
     maxWidth: '100%',
     textAlign: 'center',
   },
-  destructiveLabel: { color: F.danger },
   rightArea: {
     flex: 1,
     minWidth: 0,
@@ -212,12 +263,13 @@ const s = StyleSheet.create({
     gap: 6,
   },
   value: {
-    flexShrink: 1,
+    flex: 1,
     minWidth: 0,
+    paddingHorizontal: 1,
     fontSize: SETTINGS_GROUP_GEOMETRY.valueSize,
     lineHeight: 20,
     fontWeight: '400',
-    color: F.textCaption,
+    textAlign: 'right',
   },
   divider: {
     position: 'absolute',
@@ -225,11 +277,10 @@ const s = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: SETTINGS_GROUP_GEOMETRY.divider,
-    backgroundColor: F.divider,
   },
   backButton: {
     width: 44,
-    height: FEISHU_DIMENSIONS.titleBarHeight,
+    height: UI_DIMENSIONS.titleBarHeight,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -3,13 +3,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import uuid
 
 from sqlalchemy import case, select
@@ -17,9 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.meeting import Meeting
-from app.models.meeting_note_root import MeetingNoteRootV2
 from app.models.meeting_recording_asset import (
-    MeetingMediaClipJobV1,
     MeetingRecordingAssetOperationV2,
     MeetingRecordingAssetV2,
     MeetingRecordingTranscriptionJobV2,
@@ -28,10 +24,6 @@ from app.models.meeting_recording_transcript_draft import MeetingRecordingTransc
 from app.privacy_logging import privacy_log
 
 
-MEDIA_CLIP_MINIMUM_DURATION_MS = 1_000
-MEDIA_CLIP_MAXIMUM_DURATION_MS = 300_000
-MEDIA_CLIP_ADJUSTMENT_STEP_MS = 1_000
-_MEDIA_CLIP_STALE_RUNNING_AFTER = timedelta(minutes=10)
 _RECORDING_QUEUE: asyncio.Queue[tuple[str, str]] | None = None
 _RECORDING_WORKER_TASK: asyncio.Task | None = None
 _TRANSIENT_TRANSCRIPTION_ERRORS = frozenset({
@@ -78,8 +70,16 @@ def normalize_checksum(value: str | None) -> str | None:
     return normalized
 
 
+def _sha256_file(path: Path) -> str:
+    """Hash a recording asset without loading it into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
 def asset_payload(asset: MeetingRecordingAssetV2) -> dict:
-    uploaded = asset.upload_state == "uploaded" and bool(asset.storage_path)
     return {
         "schema_version": 2,
         "id": asset.id,
@@ -94,7 +94,6 @@ def asset_payload(asset: MeetingRecordingAssetV2) -> dict:
         "byte_size": asset.byte_size,
         "duration_ms": asset.duration_ms,
         "checksum_sha256": asset.checksum_sha256,
-        "content_url": f"/api/laoji/v2/recording-assets/{asset.id}/content" if uploaded else None,
         "requires_auth": True,
         "created_at": _server_time(asset.created_at),
         "updated_at": _server_time(asset.updated_at),
@@ -225,12 +224,9 @@ async def owned_active_meeting(
     return (
         await db.execute(
             select(Meeting)
-            .outerjoin(MeetingNoteRootV2, MeetingNoteRootV2.meeting_id == Meeting.id)
             .where(
                 Meeting.id == meeting_id,
                 Meeting.user_id == user_id,
-                (MeetingNoteRootV2.lifecycle.is_(None))
-                | (MeetingNoteRootV2.lifecycle != "deleted"),
             )
         )
     ).scalar_one_or_none()
@@ -667,8 +663,6 @@ async def _recording_worker_loop() -> None:
         try:
             if kind == "transcription":
                 await _run_transcription_job_async(job_id)
-            elif kind == "media_clip":
-                await _run_media_clip_job_async(job_id)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -1100,526 +1094,9 @@ def recording_asset_storage_path(
 ) -> Path:
     directory = (
         Path(settings.audio_storage_abs_path)
-        / "app-meeting-assets-v2"
-        / f"user-{user_id}"
+        / "device-meeting-assets"
+        / f"principal-{user_id}"
         / meeting_id
     )
     directory.mkdir(parents=True, exist_ok=True)
     return directory / f"{asset_id}{suffix}"
-
-
-async def project_compat_media_upload(
-    db: AsyncSession,
-    *,
-    meeting: Meeting,
-    user_id: int,
-    source_path: Path,
-    file_name: str,
-    mime_type: str,
-    duration_ms: int | None,
-    start_transcription: bool,
-    language: str = "zh",
-) -> tuple[dict, dict | None, bool]:
-    """Project a legacy upload into the RecordingAsset v2 source of truth.
-
-    A repeated upload of identical bytes reuses the same asset.  If a meeting
-    already has a primary asset, compatibility uploads become secondary assets
-    and never replace or delete the primary recording.
-    """
-
-    if not source_path.is_file() or source_path.stat().st_size < 1:
-        raise LookupError("asset_content_missing")
-    checksum = _sha256_file(source_path)
-    checksum_hex = checksum.removeprefix("sha256:")
-    client_asset_id = f"compat:{meeting.id}:{checksum_hex}"
-    existing = (
-        await db.execute(
-            select(MeetingRecordingAssetV2).where(
-                MeetingRecordingAssetV2.user_id == user_id,
-                MeetingRecordingAssetV2.client_asset_id == client_asset_id,
-            )
-        )
-    ).scalar_one_or_none()
-    primary = (
-        await db.execute(
-            select(MeetingRecordingAssetV2).where(
-                MeetingRecordingAssetV2.user_id == user_id,
-                MeetingRecordingAssetV2.meeting_id == meeting.id,
-                MeetingRecordingAssetV2.role == "primary",
-            )
-        )
-    ).scalar_one_or_none()
-    role = existing.role if existing is not None else ("secondary" if primary else "primary")
-    mutation = (
-        {
-            "client_asset_id": existing.client_asset_id,
-            "role": existing.role,
-            "origin": existing.origin,
-            "mime_type": existing.mime_type,
-            "file_name": existing.file_name,
-            "byte_size": existing.byte_size,
-            "duration_ms": existing.duration_ms,
-            "checksum_sha256": existing.checksum_sha256,
-        }
-        if existing is not None
-        else {
-            "client_asset_id": client_asset_id,
-            "role": role,
-            "origin": "imported",
-            "mime_type": mime_type,
-            "file_name": file_name,
-            "byte_size": source_path.stat().st_size,
-            "duration_ms": duration_ms,
-            "checksum_sha256": checksum,
-        }
-    )
-    register_key = f"compat-register:{user_id}:{meeting.id}:{checksum_hex}"
-    registered = await register_asset(
-        db,
-        user_id=user_id,
-        meeting_id=meeting.id,
-        idempotency_key=register_key,
-        request_hash=recording_request_hash("register", meeting.id, mutation),
-        mutation=mutation,
-    )
-    asset_id = str(registered.payload["id"])
-    asset = await find_asset(db, user_id=user_id, asset_id=asset_id)
-    if asset is None:
-        raise LookupError("asset_missing")
-    if asset.upload_state == "uploaded" and asset.storage_path:
-        existing_path = Path(asset.storage_path)
-        if existing_path != source_path:
-            source_path.unlink(missing_ok=True)
-        effective_path = existing_path
-    else:
-        completed = await complete_content_upload(
-            db,
-            user_id=user_id,
-            asset_id=asset.id,
-            expected_revision=asset.revision,
-            idempotency_key=f"compat-content:{user_id}:{meeting.id}:{checksum_hex}",
-            request_hash=recording_request_hash("content", asset.id, {}),
-            storage_path=str(source_path),
-            actual_byte_size=source_path.stat().st_size,
-            actual_checksum=checksum,
-            duration_ms=duration_ms,
-        )
-        effective_path = source_path
-        asset = await find_asset(db, user_id=user_id, asset_id=asset.id)
-        if asset is None:
-            raise LookupError("asset_missing")
-        registered = completed
-
-    if role == "primary":
-        meeting.audio_path = str(effective_path)
-        meeting.audio_file_name = asset.file_name
-        meeting.audio_mime_type = asset.mime_type
-        meeting.audio_duration_sec = (
-            round(asset.duration_ms / 1000.0, 3)
-            if asset.duration_ms is not None
-            else None
-        )
-    elif primary is not None and primary.storage_path:
-        meeting.audio_path = primary.storage_path
-        meeting.audio_file_name = primary.file_name
-        meeting.audio_mime_type = primary.mime_type
-        meeting.audio_duration_sec = (
-            round(primary.duration_ms / 1000.0, 3)
-            if primary.duration_ms is not None
-            else None
-        )
-    meeting.updated_at = datetime.utcnow()
-
-    job_result: RecordingAssetMutationResult | None = None
-    should_submit = False
-    if start_transcription:
-        job_result = await create_transcription_job(
-            db,
-            user_id=user_id,
-            asset_id=asset.id,
-            client_request_id=f"compat-transcription:{meeting.id}:{checksum_hex}",
-            idempotency_key=f"compat-transcription:{user_id}:{meeting.id}:{checksum_hex}",
-            language=language,
-        )
-        should_submit = job_result.status_code == 202
-        meeting.status = "processing" if should_submit else meeting.status
-        meeting.mode = "offline"
-        meeting.updated_at = datetime.utcnow()
-    return asset_payload(asset), job_result.payload if job_result else None, should_submit
-
-
-def media_clip_job_payload(job: MeetingMediaClipJobV1) -> dict:
-    completed = (
-        job.status == "completed"
-        and bool(job.output_path)
-        and bool(job.mime_type)
-        and bool(job.file_name)
-        and job.byte_size is not None
-        and bool(job.checksum_sha256)
-    )
-    return {
-        "schema_version": 1,
-        "job_id": job.id,
-        "meeting_id": job.meeting_id,
-        "recording_asset_id": job.asset_id,
-        "client_clip_id": job.client_clip_id,
-        "revision": job.revision,
-        "stage": "media_clip",
-        "status": job.status,
-        "attempt": job.attempt,
-        "progress": job.progress,
-        "start_ms": job.start_ms,
-        "end_ms": job.end_ms,
-        "error_code": job.error_code,
-        "retryable": bool(job.retryable),
-        "mime_type": job.mime_type if completed else None,
-        "file_name": job.file_name if completed else None,
-        "byte_size": job.byte_size if completed else None,
-        "checksum_sha256": job.checksum_sha256 if completed else None,
-        "content_url": f"/api/laoji/v2/media-clip-jobs/{job.id}/content" if completed else None,
-        "requires_auth": True,
-        "created_at": _server_time(job.created_at),
-        "updated_at": _server_time(job.updated_at),
-    }
-
-
-async def create_media_clip_job(
-    db: AsyncSession,
-    *,
-    user_id: int,
-    asset_id: str,
-    client_clip_id: str,
-    idempotency_key: str,
-    start_ms: int,
-    end_ms: int,
-) -> RecordingAssetMutationResult:
-    request_hash = recording_request_hash(
-        "media_clip",
-        asset_id,
-        {"client_clip_id": client_clip_id, "start_ms": start_ms, "end_ms": end_ms},
-    )
-    by_key = (
-        await db.execute(
-            select(MeetingMediaClipJobV1).where(
-                MeetingMediaClipJobV1.user_id == user_id,
-                MeetingMediaClipJobV1.idempotency_key == idempotency_key,
-            )
-        )
-    ).scalar_one_or_none()
-    if by_key is not None:
-        if by_key.request_hash != request_hash:
-            raise RecordingAssetConflict("idempotency_key_reused", media_clip_job_payload(by_key))
-        return RecordingAssetMutationResult(200, media_clip_job_payload(by_key))
-    by_client = (
-        await db.execute(
-            select(MeetingMediaClipJobV1).where(
-                MeetingMediaClipJobV1.user_id == user_id,
-                MeetingMediaClipJobV1.client_clip_id == client_clip_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if by_client is not None:
-        raise RecordingAssetConflict("media_clip_identity_mismatch", media_clip_job_payload(by_client))
-    asset = await find_asset(db, user_id=user_id, asset_id=asset_id)
-    if asset is None or asset.upload_state != "uploaded" or not asset.storage_path:
-        raise LookupError("asset_not_uploaded")
-    if end_ms <= start_ms or start_ms < 0:
-        raise ValueError("片段时间范围无效")
-    duration_ms = end_ms - start_ms
-    if duration_ms < MEDIA_CLIP_MINIMUM_DURATION_MS or duration_ms > MEDIA_CLIP_MAXIMUM_DURATION_MS:
-        raise ValueError("片段时长超出支持范围")
-    if asset.duration_ms is not None and end_ms > asset.duration_ms:
-        raise ValueError("片段结束时间超过录音时长")
-    source = Path(asset.storage_path)
-    if not source.is_file():
-        raise LookupError("asset_content_missing")
-    now = datetime.utcnow()
-    job = MeetingMediaClipJobV1(
-        id=str(uuid.uuid4()),
-        meeting_id=asset.meeting_id,
-        asset_id=asset.id,
-        user_id=user_id,
-        client_clip_id=client_clip_id,
-        idempotency_key=idempotency_key,
-        request_hash=request_hash,
-        source_asset_revision=asset.revision,
-        source_checksum_sha256=asset.checksum_sha256,
-        start_ms=start_ms,
-        end_ms=end_ms,
-        revision=1,
-        status="queued",
-        attempt=0,
-        progress=0.0,
-        retryable=0,
-        created_at=now,
-        updated_at=now,
-    )
-    db.add(job)
-    await db.flush()
-    return RecordingAssetMutationResult(202, media_clip_job_payload(job))
-
-
-async def find_media_clip_job(
-    db: AsyncSession,
-    *,
-    user_id: int,
-    job_id: str,
-) -> MeetingMediaClipJobV1 | None:
-    return (
-        await db.execute(
-            select(MeetingMediaClipJobV1).where(
-                MeetingMediaClipJobV1.id == job_id,
-                MeetingMediaClipJobV1.user_id == user_id,
-            )
-        )
-    ).scalar_one_or_none()
-
-
-async def recover_stale_media_clip_job(
-    db: AsyncSession,
-    *,
-    user_id: int,
-    job_id: str,
-) -> tuple[MeetingMediaClipJobV1 | None, bool]:
-    job = await find_media_clip_job(db, user_id=user_id, job_id=job_id)
-    if job is None:
-        return None, False
-    should_submit = job.status == "queued"
-    if job.status == "running" and job.updated_at <= datetime.utcnow() - _MEDIA_CLIP_STALE_RUNNING_AFTER:
-        job.status = "queued"
-        job.progress = 0.0
-        job.error_code = None
-        job.retryable = 0
-        job.revision += 1
-        job.updated_at = datetime.utcnow()
-        await db.flush()
-        should_submit = True
-    return job, should_submit
-
-
-async def queue_media_clip_retry(
-    db: AsyncSession,
-    *,
-    user_id: int,
-    job_id: str,
-) -> RecordingAssetMutationResult:
-    job = await find_media_clip_job(db, user_id=user_id, job_id=job_id)
-    if job is None:
-        raise LookupError("media_clip_job_missing")
-    if job.status in ("queued", "running"):
-        return RecordingAssetMutationResult(200, media_clip_job_payload(job))
-    if job.status != "failed" or not job.retryable:
-        raise RecordingAssetConflict("media_clip_not_retryable", media_clip_job_payload(job))
-    job.status = "queued"
-    job.progress = 0.0
-    job.error_code = None
-    job.retryable = 0
-    job.revision += 1
-    job.updated_at = datetime.utcnow()
-    await db.flush()
-    return RecordingAssetMutationResult(202, media_clip_job_payload(job))
-
-
-async def delete_media_clip_job(
-    db: AsyncSession,
-    *,
-    user_id: int,
-    job_id: str,
-) -> tuple[Path, Path] | None:
-    job = await find_media_clip_job(db, user_id=user_id, job_id=job_id)
-    if job is None:
-        return None
-    final_path = media_clip_storage_path(
-        user_id=job.user_id,
-        meeting_id=job.meeting_id,
-        job_id=job.id,
-    )
-    temporary_path = final_path.with_suffix(".wav.part")
-    await db.delete(job)
-    await db.flush()
-    return final_path, temporary_path
-
-
-def delete_media_clip_files(paths: tuple[Path, Path] | None) -> None:
-    if paths is None:
-        return
-    for path in paths:
-        path.unlink(missing_ok=True)
-    directory = paths[0].parent
-    try:
-        directory.rmdir()
-    except OSError:
-        pass
-
-
-def submit_media_clip_job(job_id: str) -> None:
-    _recording_queue().put_nowait(("media_clip", job_id))
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
-    return f"sha256:{digest.hexdigest()}"
-
-
-def _export_media_clip(source: Path, target: Path, start_ms: int, end_ms: int) -> tuple[int, str]:
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        raise RuntimeError("ffmpeg_unavailable")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_suffix(".wav.part")
-    temporary.unlink(missing_ok=True)
-    command = [
-        ffmpeg,
-        "-nostdin",
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        str(source),
-        "-ss",
-        f"{start_ms / 1000.0:.3f}",
-        "-t",
-        f"{(end_ms - start_ms) / 1000.0:.3f}",
-        "-vn",
-        "-map_metadata",
-        "-1",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-c:a",
-        "pcm_s16le",
-        "-f",
-        "wav",
-        str(temporary),
-    ]
-    try:
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=600)
-        if not temporary.is_file() or temporary.stat().st_size <= 44:
-            raise RuntimeError("media_clip_output_invalid")
-        temporary.replace(target)
-        return target.stat().st_size, _sha256_file(target)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        target.unlink(missing_ok=True)
-        raise
-
-
-async def _fail_media_clip_job(job_id: str, error_code: str, retryable: bool) -> None:
-    from app.database import async_session
-
-    async with async_session() as db:
-        job = await db.get(MeetingMediaClipJobV1, job_id)
-        if job is None:
-            return
-        job.status = "failed"
-        job.progress = None
-        job.error_code = error_code
-        job.retryable = 1 if retryable else 0
-        job.revision += 1
-        job.updated_at = datetime.utcnow()
-        await db.commit()
-
-
-async def _run_media_clip_job_async(job_id: str) -> None:
-    from app.database import async_session
-
-    final_path: Path | None = None
-    source_path: Path | None = None
-    start_ms = 0
-    end_ms = 0
-    async with async_session() as db:
-        job = await db.get(MeetingMediaClipJobV1, job_id)
-        if job is None or job.status != "queued":
-            return
-        asset = await db.get(MeetingRecordingAssetV2, job.asset_id)
-        if (
-            asset is None
-            or asset.user_id != job.user_id
-            or asset.meeting_id != job.meeting_id
-            or asset.upload_state != "uploaded"
-            or not asset.storage_path
-            or asset.revision != job.source_asset_revision
-            or asset.checksum_sha256 != job.source_checksum_sha256
-        ):
-            job.status = "failed"
-            job.progress = None
-            job.error_code = "recording_asset_changed"
-            job.retryable = 0
-            job.revision += 1
-            job.updated_at = datetime.utcnow()
-            await db.commit()
-            return
-        source_path = Path(asset.storage_path)
-        if not source_path.is_file():
-            job.status = "failed"
-            job.progress = None
-            job.error_code = "recording_content_missing"
-            job.retryable = 0
-            job.revision += 1
-            job.updated_at = datetime.utcnow()
-            await db.commit()
-            return
-        final_path = media_clip_storage_path(
-            user_id=job.user_id,
-            meeting_id=job.meeting_id,
-            job_id=job.id,
-        )
-        start_ms = job.start_ms
-        end_ms = job.end_ms
-        job.status = "running"
-        job.attempt += 1
-        job.progress = None
-        job.error_code = None
-        job.retryable = 0
-        job.revision += 1
-        job.updated_at = datetime.utcnow()
-        await db.commit()
-    try:
-        byte_size, checksum = await asyncio.to_thread(
-            _export_media_clip,
-            source_path,
-            final_path,
-            start_ms,
-            end_ms,
-        )
-    except subprocess.TimeoutExpired:
-        await _fail_media_clip_job(job_id, "media_clip_timeout", True)
-        return
-    except Exception:
-        await _fail_media_clip_job(job_id, "media_clip_export_failed", True)
-        return
-    async with async_session() as db:
-        job = await db.get(MeetingMediaClipJobV1, job_id)
-        if job is None or job.status != "running":
-            final_path.unlink(missing_ok=True)
-            return
-        now = datetime.utcnow()
-        job.status = "completed"
-        job.progress = 1.0
-        job.error_code = None
-        job.retryable = 0
-        job.output_path = str(final_path)
-        job.mime_type = "audio/wav"
-        job.file_name = f"meeting-clip-{job.id}.wav"
-        job.byte_size = byte_size
-        job.checksum_sha256 = checksum
-        job.revision += 1
-        job.updated_at = now
-        job.completed_at = now
-        await db.commit()
-
-
-def media_clip_storage_path(*, user_id: int, meeting_id: str, job_id: str) -> Path:
-    directory = (
-        Path(settings.audio_storage_abs_path)
-        / "app-media-clips-v1"
-        / f"user-{user_id}"
-        / meeting_id
-    )
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory / f"{job_id}.wav"

@@ -1,0 +1,24 @@
+[Unit]
+Description=LaoJi compact API
+After=network-online.target laoji-asr.service laoji-ollama.service
+Wants=network-online.target
+Requires=laoji-asr.service laoji-ollama.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/laoji-service-platform/current/services/laoji-api
+EnvironmentFile=%h/.config/laoji/laoji.env
+Environment=PYTHONUNBUFFERED=1
+Environment=CUDA_VISIBLE_DEVICES=0
+ExecStart=%h/laoji-service-platform/.venvs/laoji-compact-py312/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 18020 --workers 1 --ws-ping-interval 25 --ws-ping-timeout 300
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -10,6 +10,7 @@ import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.Signature
+import kotlinx.coroutines.launch
 
 /** Android Keystore boundary for device-v2 identity.
  *
@@ -22,10 +23,12 @@ class LaojiDeviceAuthModule : Module() {
     Name("LaojiDeviceAuth")
 
     AsyncFunction("getOrCreateKey") { keyVersion: Int, promise: Promise ->
-      try {
-        promise.resolve(keyInfo(keyVersion))
-      } catch (error: Throwable) {
-        promise.reject("DEVICE_KEY_ERROR", "无法创建设备密钥", error)
+      appContext.backgroundCoroutineScope.launch {
+        try {
+          promise.resolve(keyInfo(keyVersion))
+        } catch (error: Throwable) {
+          promise.reject("DEVICE_KEY_ERROR", "无法创建设备密钥", error)
+        }
       }
     }
 
@@ -40,48 +43,40 @@ class LaojiDeviceAuthModule : Module() {
     }
 
     AsyncFunction("findProofOfWork") { nonceBase64: String, difficultyBits: Int, promise: Promise ->
-      try {
-        require(difficultyBits in 1..24) { "工作量难度无效" }
-        val nonce = decode(nonceBase64)
-        var candidate = 0L
-        val targetShift = 256 - difficultyBits
-        while (candidate <= Long.MAX_VALUE) {
-          val input = ByteArray(nonce.size + 8)
-          nonce.copyInto(input)
-          var value = candidate
-          for (index in 0 until 8) {
-            input[input.size - 1 - index] = (value and 0xff).toByte()
-            value = value ushr 8
-          }
-          val digest = MessageDigest.getInstance("SHA-256").digest(input)
-          var leading = 0
-          for (byte in digest) {
-            val unsigned = byte.toInt() and 0xff
-            if (unsigned == 0) {
-              leading += 8
-              continue
+      appContext.backgroundCoroutineScope.launch {
+        try {
+          require(difficultyBits in 1..24) { "工作量难度无效" }
+          val nonce = decode(nonceBase64)
+          var candidate = 0L
+          while (candidate <= Long.MAX_VALUE) {
+            val input = ByteArray(nonce.size + 8)
+            nonce.copyInto(input)
+            var value = candidate
+            for (index in 0 until 8) {
+              input[input.size - 1 - index] = (value and 0xff).toByte()
+              value = value ushr 8
             }
-            leading += Integer.numberOfLeadingZeros(unsigned) - 24
-            break
+            val digest = MessageDigest.getInstance("SHA-256").digest(input)
+            var leading = 0
+            for (byte in digest) {
+              val unsigned = byte.toInt() and 0xff
+              if (unsigned == 0) {
+                leading += 8
+                continue
+              }
+              leading += Integer.numberOfLeadingZeros(unsigned) - 24
+              break
+            }
+            if (leading >= difficultyBits) {
+              promise.resolve(candidate)
+              return@launch
+            }
+            candidate += 1
           }
-          if (leading >= difficultyBits) {
-            promise.resolve(candidate)
-            return@AsyncFunction
-          }
-          candidate += 1
+          throw IllegalStateException("工作量证明搜索空间耗尽")
+        } catch (error: Throwable) {
+          promise.reject("DEVICE_POW_ERROR", "无法完成设备注册验证", error)
         }
-        throw IllegalStateException("工作量证明搜索空间耗尽")
-      } catch (error: Throwable) {
-        promise.reject("DEVICE_POW_ERROR", "无法完成设备注册验证", error)
-      }
-    }
-
-    AsyncFunction("rotateKey") { nextKeyVersion: Int, promise: Promise ->
-      try {
-        if (nextKeyVersion < 1 || nextKeyVersion > 100) throw IllegalArgumentException("密钥版本无效")
-        promise.resolve(keyInfo(nextKeyVersion))
-      } catch (error: Throwable) {
-        promise.reject("DEVICE_KEY_ERROR", "无法轮换设备密钥", error)
       }
     }
 
@@ -101,12 +96,14 @@ class LaojiDeviceAuthModule : Module() {
         registrationRequestId: String,
         promise: Promise,
       ->
-      try {
-        promise.resolve(purgeStore().prepare(
-          scopeKind, deviceEpochId, bindingId, bindingGeneration, registrationRequestId,
-        ))
-      } catch (error: Throwable) {
-        promise.reject("PURGE_JOURNAL_ERROR", "无法准备清理凭据", error)
+      appContext.backgroundCoroutineScope.launch {
+        try {
+          promise.resolve(purgeStore().prepare(
+            scopeKind, deviceEpochId, bindingId, bindingGeneration, registrationRequestId,
+          ))
+        } catch (error: Throwable) {
+          promise.reject("PURGE_JOURNAL_ERROR", "无法准备清理凭据", error)
+        }
       }
     }
 
@@ -118,15 +115,13 @@ class LaojiDeviceAuthModule : Module() {
       purgeStore().beginErase()
     }
 
-    Function("getPurgeOnlyJournalStatus") {
-      purgeStore().status()
-    }
-
     AsyncFunction("resumePurgeOnlyJournal") { apiBase: String, promise: Promise ->
-      try {
-        promise.resolve(purgeStore().resume(apiBase))
-      } catch (error: Throwable) {
-        promise.reject("PURGE_JOURNAL_ERROR", "远端清理暂未完成", error)
+      appContext.backgroundCoroutineScope.launch {
+        try {
+          promise.resolve(purgeStore().resume(apiBase))
+        } catch (error: Throwable) {
+          promise.reject("PURGE_JOURNAL_ERROR", "远端清理暂未完成", error)
+        }
       }
     }
   }

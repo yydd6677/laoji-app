@@ -1,28 +1,12 @@
 import * as Crypto from 'expo-crypto';
-import type { Meeting, MeetingSummary, TranscriptLine } from '../types';
-import type {
-  ActionItemRecord,
-  SummaryFactDocumentRecord,
-  SummaryCitationRecord,
-  SummarySectionRecord,
-  SummaryVersionRecord,
-  TranscriptRevisionRecord,
-  TranscriptSegmentRecord,
-} from '../data/repositories';
-import { projectLegacyTranscriptSegmentRevisions } from './transcriptSegmentRevision';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import type { Meeting, MeetingSummary } from '../types';
+import type { ActionItemRecord, SummaryFactDocumentRecord, SummaryCitationRecord, SummarySectionRecord, SummaryVersionRecord, TranscriptSegmentRecord } from "../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { ScopeKey } from '../domain/meeting';
 import { transitionProcessingStage } from '../domain/meeting/processing';
-import { getFeatureFlags } from '../config/featureFlags';
 import { meetingSummaryToText, normalizeMeetingSummaryResult } from './meetingSummaryFormat';
-import { legacyMeetingSummaryToDocument } from './meetingSummaryDocument';
 import { meetingFactsResultV3ToWire } from './meetingSummaryV3';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
-import {
-  evaluateTranscriptCandidate,
-  type TranscriptCandidateKind,
-  type TranscriptServerCompleteness,
-} from './transcriptCompleteness';
 
 const writeTailByMeeting = new Map<string, Promise<unknown>>();
 
@@ -49,24 +33,6 @@ function timestamp(value: string | null | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : fallback;
 }
 
-function secondsToMs(value: number | null | undefined): number {
-  return Number.isFinite(value) ? Math.max(0, Math.round(Number(value) * 1000)) : 0;
-}
-
-function normalizeTranscriptText(value: string): string {
-  return value.normalize('NFKC').toLocaleLowerCase('zh-CN');
-}
-
-function optionalTranscriptIdentity(value: string | null | undefined, field: string): string | null {
-  if (value === null || value === undefined) return null;
-  const normalized = value.trim();
-  if (!normalized) return null;
-  if (normalized.length > 512 || /[\u0000-\u001f\u007f]/.test(normalized)) {
-    throw new Error(`${field} is invalid`);
-  }
-  return normalized;
-}
-
 function enqueueMeetingWrite<T>(scopeKey: ScopeKey, meetingId: string, operation: () => Promise<T>): Promise<T> {
   const key = `${scopeKey}\u0000${meetingId}`;
   const previous = writeTailByMeeting.get(key) ?? Promise.resolve();
@@ -78,16 +44,16 @@ function enqueueMeetingWrite<T>(scopeKey: ScopeKey, meetingId: string, operation
   return next;
 }
 
-export interface SummaryMirrorResult {
+export interface MeetingSummaryPersistResult {
   /** Whether the compatibility cache may replace its currently readable projection. */
-  replaceLegacyProjection: boolean;
+  replaceProjection: boolean;
   status: string;
   canonicalRevision: number | null;
   /** Local immutable identity corresponding to the provider version, when materialized. */
   localVersionId?: string | null;
 }
 
-export interface MirrorLegacySummaryOptions {
+export interface PersistMeetingSummaryFactsOptions {
   expectedCanonicalMeetingId?: string;
   canonicalWrite?: boolean;
   throwOnFailure?: boolean;
@@ -99,11 +65,7 @@ export interface MirrorLegacySummaryOptions {
   settleProcessingStage?: boolean;
 }
 
-function isLegacyProvider(value: string | null): boolean {
-  return value === 'legacy' || value === 'legacy-cache';
-}
-
-function legacyActionStatus(value: string | undefined): ActionItemRecord['status'] {
+function summaryActionStatus(value: string | undefined): ActionItemRecord['status'] {
   const normalized = value?.trim().toLowerCase();
   if (['completed', 'complete', 'done'].includes(normalized ?? '')) return 'completed';
   if (['dismissed', 'cancelled', 'canceled'].includes(normalized ?? '')) return 'dismissed';
@@ -114,349 +76,45 @@ function normalizedActionIdentityText(value: string | null): string {
   return (value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ');
 }
 
-function reportFailure(kind: 'transcript' | 'summary', scopeKey: ScopeKey, error: unknown): void {
-  diagnosticWarn(`[meeting-db] ${kind} shadow write failed`, error);
-  diagnosticAudit(`meeting_${kind}_shadow_write`, {
+function reportFailure(error: unknown): void {
+  diagnosticWarn('[meeting-db] summary write failed', error);
+  diagnosticAudit('meeting_summary_write', {
     status: 'failed',
-    scope: scopeKey === 'guest' ? 'guest' : 'account',
+    scope: 'guest',
     error_code: error instanceof Error ? error.name : 'UnknownError',
   });
 }
 
-export interface MirrorLegacyTranscriptOptions {
-  candidateKind?: TranscriptCandidateKind;
-  serverCompleteness?: TranscriptServerCompleteness;
-  remoteRevisionId?: string | null;
-}
-
-export function mirrorLegacyTranscriptContent(
+export function persistMeetingSummaryFacts(
   scopeKey: ScopeKey,
-  legacyMeeting: Meeting,
-  transcript: readonly TranscriptLine[],
-  options: MirrorLegacyTranscriptOptions = {},
-): Promise<void> {
-  if (!getFeatureFlags().localMeetingDbV1) return Promise.resolve();
-  return enqueueMeetingWrite(scopeKey, legacyMeeting.id, async () => {
-    try {
-      const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
-      if (!aggregate || aggregate.note.lifecycle === 'deleted') return;
-      const meaningfulTranscript = transcript.filter(line => (
-        typeof line.text === 'string' && line.text.trim().length > 0
-      ));
-      if (meaningfulTranscript.length === 0) {
-        let status = 'unchanged_empty';
-        await sqliteMeetingNoteRepository.transaction(async transaction => {
-          const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
-          if (!note || note.lifecycle === 'deleted') return;
-          const current = await transaction.getActiveTranscriptRevision(note.id, scopeKey);
-          if (current && !isLegacyProvider(current.sourceProvider)) {
-            status = 'preserved_canonical';
-            return;
-          }
-          const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
-          if (!stage) throw new Error('meeting transcript processing stage is missing');
-          const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
-          const stillCompleting = options.serverCompleteness === 'incomplete'
-            || legacyMeeting.status === 'processing';
-          const retainedStatus = !current
-            ? stillCompleting ? 'finalizing' : 'none'
-            : current.kind === 'realtime_draft'
-              ? stillCompleting ? 'finalizing' : 'realtime_draft'
-              : current.status === 'ready' ? 'ready' : 'finalizing';
-          await transaction.upsertStage(transitionProcessingStage(stage, {
-            stage: 'transcript',
-            status: retainedStatus,
-            progress: null,
-            inputFingerprint: null,
-          }, nowMs), scopeKey);
-          await transaction.updateMeeting(note.id, scopeKey, { updatedAtMs: nowMs });
-          status = current ? 'preserved_nonempty_active' : 'unchanged_empty';
-        });
-        diagnosticAudit('meeting_transcript_shadow_write', {
-          status,
-          scope: scopeKey === 'guest' ? 'guest' : 'account',
-          segments: 0,
-        });
-        return;
-      }
-      const assetById = new Map(aggregate.recordingAssets.map(asset => [asset.id, asset]));
-      const assetByRemoteId = new Map(aggregate.recordingAssets
-        .filter(asset => Boolean(asset.remoteAssetId))
-        .map(asset => [asset.remoteAssetId!, asset]));
-      const soleAsset = aggregate.recordingAssets.length === 1 ? aggregate.recordingAssets[0] : null;
-      const normalizedLines = meaningfulTranscript.map((line, ordinal) => {
-        const localAssetId = optionalTranscriptIdentity(
-          line.recordingAssetId,
-          'transcript recording asset ID',
-        );
-        const wireRemoteAssetId = optionalTranscriptIdentity(
-          line.recording_asset_id,
-          'transcript recording asset remote ID',
-        );
-        const compatibilityRemoteAssetId = optionalTranscriptIdentity(
-          line.recordingAssetRemoteId,
-          'transcript recording asset remote ID',
-        );
-        if (
-          wireRemoteAssetId
-          && compatibilityRemoteAssetId
-          && wireRemoteAssetId !== compatibilityRemoteAssetId
-        ) throw new Error('transcript recording asset remote identity is inconsistent');
-        const remoteAssetId = wireRemoteAssetId ?? compatibilityRemoteAssetId;
-        const localAsset = localAssetId ? assetById.get(localAssetId) : null;
-        if (localAssetId && !localAsset) {
-          throw new Error('transcript recording asset does not belong to the meeting');
-        }
-        const remoteAsset = remoteAssetId ? assetByRemoteId.get(remoteAssetId) : null;
-        if (localAsset && remoteAsset && localAsset.id !== remoteAsset.id) {
-          throw new Error('transcript recording asset identity is inconsistent');
-        }
-        const resolvedAsset = localAsset ?? remoteAsset ?? (!localAssetId && !remoteAssetId ? soleAsset : null);
-        return {
-          ordinal,
-          sourceId: typeof line.id === 'string' ? line.id.trim() : '',
-          sourceRecordingAssetId: resolvedAsset?.id ?? localAssetId,
-          sourceRecordingAssetRemoteId: remoteAssetId ?? resolvedAsset?.remoteAssetId ?? null,
-          sourceTranscriptionJobId: optionalTranscriptIdentity(
-            line.transcription_job_id ?? line.transcriptionJobId,
-            'transcript source job ID',
-          ),
-          speakerId: line.speaker_id?.trim() || null,
-          speakerLabel: line.speaker_label?.trim() || null,
-          text: typeof line.text === 'string' ? line.text : '',
-          startMs: secondsToMs(line.start_time),
-          endMs: Math.max(secondsToMs(line.start_time), secondsToMs(line.end_time)),
-          confidence: Number.isFinite(line.confidence)
-            && Number(line.confidence) >= 0 && Number(line.confidence) <= 1
-            ? Number(line.confidence)
-            : null,
-          textState: line.textState === 'stable' || line.textState === 'final'
-            ? line.textState
-            : 'partial',
-          createdAtMs: timestamp(line.created_at, aggregate.note.createdAtMs),
-        };
-      });
-      const fingerprint = await sha256(normalizedLines);
-      const derivedKind: TranscriptCandidateKind = legacyMeeting.status === 'recording'
-        || legacyMeeting.status === 'paused'
-        ? 'realtime_draft'
-        : 'final';
-      const requestedKind = options.candidateKind ?? derivedKind;
-      const revisionKind: TranscriptCandidateKind = options.serverCompleteness === 'incomplete'
-        && requestedKind === 'final'
-        ? 'realtime_draft'
-        : requestedKind;
-      const realtimeDraft = revisionKind === 'realtime_draft';
-      const revisionId = realtimeDraft
-        ? `${aggregate.note.id}:transcript:legacy-live`
-        : revisionKind === 'reprocessed'
-          ? `${aggregate.note.id}:transcript:legacy-reprocessed:${fingerprint}`
-          : `${aggregate.note.id}:transcript:legacy-final:${fingerprint}`;
-      const createdAtMs = normalizedLines.reduce(
-        (minimum, line) => Math.min(minimum, line.createdAtMs),
-        normalizedLines[0]?.createdAtMs ?? aggregate.note.createdAtMs,
-      );
-      const finalizedAtMs = realtimeDraft
-        ? null
-        : normalizedLines.reduce(
-          (maximum, line) => Math.max(maximum, line.createdAtMs),
-          aggregate.note.endedAtMs ?? aggregate.note.createdAtMs,
-        );
-      const segmentFingerprints = await Promise.all(normalizedLines.map(line => sha256(line)));
-      const segments: TranscriptSegmentRecord[] = normalizedLines.map((line, ordinal) => ({
-        id: `${revisionId}:segment:${ordinal}:${segmentFingerprints[ordinal]}`,
-        meetingId: aggregate.note.id,
-        sourceId: line.sourceId || null,
-        sourceRecordingAssetId: line.sourceRecordingAssetId,
-        sourceRecordingAssetRemoteId: line.sourceRecordingAssetRemoteId,
-        sourceTranscriptionJobId: line.sourceTranscriptionJobId,
-        stableSegmentKey: line.sourceId || `${revisionId}:stable:${ordinal}`,
-        segmentRevision: 1,
-        textState: realtimeDraft
-          ? line.textState === 'stable' ? 'stable' : 'partial'
-          : 'final',
-        ordinal,
-        startMs: line.startMs,
-        endMs: line.endMs,
-        speakerClusterId: line.speakerId,
-        speakerProfileId: null,
-        speakerLabel: line.speakerLabel,
-        speakerLabelOverride: null,
-        text: line.text,
-        normalizedText: normalizeTranscriptText(line.text),
-        confidence: line.confidence,
-        isFinal: !realtimeDraft,
-        createdAtMs: line.createdAtMs,
-      }));
-      const auditState: {
-        writeStatus: string;
-        activationDecision?: ReturnType<typeof evaluateTranscriptCandidate>;
-      } = { writeStatus: 'completed' };
-      await sqliteMeetingNoteRepository.transaction(async transaction => {
-        const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
-        if (!note || note.lifecycle === 'deleted') return;
-        const currentContent = await transaction.getActiveTranscriptContent(note.id, scopeKey);
-        const current = currentContent?.revision ?? null;
-        const versionedSegments = current?.id === revisionId && realtimeDraft
-          ? projectLegacyTranscriptSegmentRevisions(currentContent?.segments ?? [], segments)
-          : segments;
-        const preservedCanonical = Boolean(current && !isLegacyProvider(current.sourceProvider));
-        const activationDecision = evaluateTranscriptCandidate(
-          currentContent?.segments ?? [],
-          versionedSegments,
-          {
-            candidateKind: revisionKind,
-            serverCompleteness: options.serverCompleteness,
-          },
-        );
-        auditState.activationDecision = activationDecision;
-        const activate = !preservedCanonical && activationDecision.useCandidate;
-        const revision: TranscriptRevisionRecord = {
-          id: revisionId,
-          meetingId: note.id,
-          remoteId: options.remoteRevisionId?.trim() || null,
-          kind: revisionKind,
-          status: realtimeDraft ? 'realtime_draft' : 'ready',
-          sourceProvider: 'legacy-cache',
-          sourceModel: null,
-          sourceManifestSha256: null,
-          isActive: activate,
-          createdAtMs,
-          finalizedAtMs,
-          textFinalAtMs: finalizedAtMs,
-        };
-        const replacingActiveDraftWithShorterCandidate = Boolean(
-          current?.id === revisionId && realtimeDraft && !activationDecision.useCandidate,
-        );
-        if (!replacingActiveDraftWithShorterCandidate) {
-          await transaction.saveTranscriptRevision(revision, versionedSegments, scopeKey, {
-            activate,
-            replaceSegments: realtimeDraft,
-          });
-        }
-        const stage = await transaction.getStage(note.id, scopeKey, 'transcript');
-        if (!stage) throw new Error('meeting transcript processing stage is missing');
-        if (!preservedCanonical) {
-          const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
-          const stageStatus = activate
-            ? realtimeDraft
-              ? options.serverCompleteness === 'incomplete'
-                && legacyMeeting.status !== 'recording'
-                && legacyMeeting.status !== 'paused'
-                ? 'finalizing'
-                : 'realtime_draft'
-              : 'ready'
-            : 'finalizing';
-          await transaction.upsertStage(transitionProcessingStage(stage, {
-            stage: 'transcript',
-            status: stageStatus,
-            progress: stageStatus === 'ready' ? 1 : null,
-            inputFingerprint: `sha256:${fingerprint}`,
-          }, nowMs), scopeKey);
-        }
-        auditState.writeStatus = preservedCanonical
-          ? 'preserved_canonical'
-          : activate
-            ? 'completed'
-            : activationDecision.reason === 'candidate_clearly_shorter'
-              ? 'preserved_more_complete_active'
-              : 'saved_inactive';
-      });
-      const activationDecision = auditState.activationDecision;
-      diagnosticAudit('meeting_transcript_shadow_write', {
-        status: auditState.writeStatus,
-        scope: scopeKey === 'guest' ? 'guest' : 'account',
-        segments: segments.length,
-        revision_kind: revisionKind,
-        completeness: options.serverCompleteness ?? 'unknown',
-        baseline_latest_ms: activationDecision?.baseline.latestTimeMs ?? 0,
-        candidate_latest_ms: activationDecision?.candidate.latestTimeMs ?? 0,
-        baseline_text: activationDecision?.baseline.textCodePoints ?? 0,
-        candidate_text: activationDecision?.candidate.textCodePoints ?? 0,
-        regression_signals: activationDecision?.regressionSignals.join(',') ?? '',
-      });
-    } catch (error) {
-      reportFailure('transcript', scopeKey, error);
-    }
-  });
-}
-
-export function mirrorLegacySummaryContent(
-  scopeKey: ScopeKey,
-  legacyMeeting: Meeting,
-  summary: MeetingSummary | null,
-  options: MirrorLegacySummaryOptions = {},
-): Promise<SummaryMirrorResult> {
-  if (!getFeatureFlags().localMeetingDbV1) {
-    return Promise.resolve({
-      replaceLegacyProjection: true,
-      status: 'canonical_disabled',
-      canonicalRevision: null,
-    });
-  }
-  return enqueueMeetingWrite(scopeKey, legacyMeeting.id, async () => {
+  meeting: Meeting,
+  summary: MeetingSummary,
+  options: PersistMeetingSummaryFactsOptions = {},
+): Promise<MeetingSummaryPersistResult> {
+  return enqueueMeetingWrite(scopeKey, meeting.id, async () => {
     let canonicalRevision: number | null = null;
     try {
-      const normalized = summary ? normalizeMeetingSummaryResult(legacyMeeting.id, summary) : null;
-      const factsResult = summary?.facts_document_v3 ?? null;
-      const activationFenceV3 = summary?.activation_fence_v3;
-      const document = normalized?.structured_document
-        ?? (normalized ? legacyMeetingSummaryToDocument(legacyMeeting.id, normalized) : null);
-      if (!normalized || !document || !meetingSummaryToText(normalized)) {
-        const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
-        if (options.expectedCanonicalMeetingId && aggregate?.note.id !== options.expectedCanonicalMeetingId) {
-          throw new Error('summary canonical meeting identity changed');
-        }
-        let status = 'unchanged_empty';
-        if (aggregate && aggregate.note.lifecycle !== 'deleted') {
-          await sqliteMeetingNoteRepository.transaction(async transaction => {
-            const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
-            if (!note || note.lifecycle === 'deleted') return;
-            const current = await transaction.getCurrentSummaryVersion(note.id, scopeKey);
-            if (!current) return;
-            const currentProtected = await transaction.hasUserProtectedSummaryState(current.id, scopeKey);
-            if (!isLegacyProvider(current.generatedBy) || currentProtected) {
-              status = 'preserved_canonical';
-              return;
-            }
-            const stage = await transaction.getStage(note.id, scopeKey, 'summary');
-            if (!stage) throw new Error('meeting summary processing stage is missing');
-            const nowMs = Math.max(Date.now(), stage.updatedAtMs, note.updatedAtMs);
-            await transaction.updateMeeting(note.id, scopeKey, {
-              currentSummaryVersionId: null,
-              updatedAtMs: nowMs,
-            });
-            await transaction.upsertStage(transitionProcessingStage(stage, {
-              stage: 'summary',
-              status: 'none',
-              progress: null,
-              inputFingerprint: null,
-            }, nowMs), scopeKey);
-            if (options.canonicalWrite) {
-              canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, nowMs);
-            }
-            status = 'cleared_legacy_projection';
-          });
-        }
-        diagnosticAudit('meeting_summary_shadow_write', {
-          status,
-          scope: scopeKey === 'guest' ? 'guest' : 'account',
-          sections: 0,
-          actions: 0,
-        });
-        return {
-          replaceLegacyProjection: status !== 'preserved_canonical',
-          status,
-          canonicalRevision,
-        };
+      const normalized = normalizeMeetingSummaryResult(meeting.id, summary);
+      const factsResult = summary.facts_document_v3 ?? null;
+      const activationFenceV3 = summary.activation_fence_v3;
+      const document = normalized?.structured_document ?? null;
+      if (
+        !normalized
+        || !document
+        || !factsResult
+        || !meetingSummaryToText(normalized)
+        || document.templateId !== 'general'
+        || document.templateRevision !== 3
+      ) {
+        throw new Error('summary facts v3 payload is required');
       }
-      const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeeting.id, scopeKey);
+      const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(meeting.id, scopeKey);
       if (options.expectedCanonicalMeetingId && aggregate?.note.id !== options.expectedCanonicalMeetingId) {
         throw new Error('summary canonical meeting identity changed');
       }
       if (!aggregate || aggregate.note.lifecycle === 'deleted') {
         return {
-          replaceLegacyProjection: true,
+          replaceProjection: true,
           status: 'canonical_meeting_unavailable',
           canonicalRevision: null,
         };
@@ -478,15 +136,13 @@ export function mirrorLegacySummaryContent(
       ) {
         throw new Error('summary transcript revision is not the active canonical revision');
       }
-      const generatedAtMs = document.completedAtMs || timestamp(summary?.generated_at, aggregate.note.createdAtMs);
+      const generatedAtMs = document.completedAtMs || timestamp(summary.generated_at, aggregate.note.createdAtMs);
       const summaryPayload = {
         remoteVersionId: document.remoteVersionId,
         templateId: document.templateId,
         templateRevision: document.templateRevision,
         transcriptRevisionId: sourceTranscript?.id ?? null,
-        manualNoteRevision: document.templateId === 'legacy'
-          ? aggregate.manualNote.revision
-          : document.manualNoteRevision,
+        manualNoteRevision: document.manualNoteRevision,
         scheduleSnapshotHash: document.scheduleSnapshotHash,
         generatedAtMs,
         sections: document.sections.map(section => ({
@@ -501,7 +157,7 @@ export function mirrorLegacySummaryContent(
           content: item.content.trim(),
           assignee: item.assignee?.trim() || null,
           dueAtMs: item.dueAtMs,
-          status: legacyActionStatus(item.status),
+          status: summaryActionStatus(item.status),
           citations: item.citations,
         })).filter(item => item.content),
       };
@@ -527,31 +183,27 @@ export function mirrorLegacySummaryContent(
       };
       const fingerprint = await sha256(fingerprintPayload);
       const versionId = `${aggregate.note.id}:summary:${document.templateId}:${fingerprint}`;
-      let factDocument: SummaryFactDocumentRecord | undefined;
-      if (factsResult) {
-        if (
-          document.templateRevision !== 3
-          || document.remoteVersionId !== factsResult.documentId
-          || document.scheduleSnapshotHash !== factsResult.sourceFingerprint
-          || document.remoteTranscriptRevisionId !== factsResult.transcriptRevision
-        ) throw new Error('summary fact document does not match its projected version');
-        const wire = meetingFactsResultV3ToWire(factsResult);
-        const generatedAtMs = Date.parse(factsResult.generatedAt);
-        if (!Number.isFinite(generatedAtMs)) throw new Error('summary fact generation time is invalid');
-        factDocument = {
-          id: factsResult.documentId,
-          meetingId: aggregate.note.id,
-          summaryVersionId: versionId,
-          sourceFingerprint: factsResult.sourceFingerprint,
-          transcriptRevision: factsResult.transcriptRevision,
-          modelRevision: factsResult.modelRevision,
-          promptRevision: factsResult.promptRevision,
-          documentJson: JSON.stringify(wire),
-          coverageJson: JSON.stringify(wire.coverage),
-          generatedAtMs,
-          createdAtMs: Date.now(),
-        };
-      }
+      if (
+        document.remoteVersionId !== factsResult.documentId
+        || document.scheduleSnapshotHash !== factsResult.sourceFingerprint
+        || document.remoteTranscriptRevisionId !== factsResult.transcriptRevision
+      ) throw new Error('summary fact document does not match its projected version');
+      const wire = meetingFactsResultV3ToWire(factsResult);
+      const factGeneratedAtMs = Date.parse(factsResult.generatedAt);
+      if (!Number.isFinite(factGeneratedAtMs)) throw new Error('summary fact generation time is invalid');
+      const factDocument: SummaryFactDocumentRecord = {
+        id: factsResult.documentId,
+        meetingId: aggregate.note.id,
+        summaryVersionId: versionId,
+        sourceFingerprint: factsResult.sourceFingerprint,
+        transcriptRevision: factsResult.transcriptRevision,
+        modelRevision: factsResult.modelRevision,
+        promptRevision: factsResult.promptRevision,
+        documentJson: JSON.stringify(wire),
+        coverageJson: JSON.stringify(wire.coverage),
+        generatedAtMs: factGeneratedAtMs,
+        createdAtMs: Date.now(),
+      };
       const sectionFingerprints = await Promise.all(fingerprintPayload.sections.map(section => sha256(section)));
       const sections: SummarySectionRecord[] = summaryPayload.sections.map((section, ordinal) => ({
         id: `${versionId}:section:${ordinal}:${sectionFingerprints[ordinal]}`,
@@ -625,8 +277,6 @@ export function mirrorLegacySummaryContent(
         return {
           id: `${aggregate.note.id}:action:generated:${actionFingerprints[ordinal]}`,
           meetingId: aggregate.note.id,
-          remoteId: action.remoteId,
-          remoteRevision: null,
           content: action.content,
           status: action.status,
           assigneeText: action.assignee,
@@ -646,7 +296,7 @@ export function mirrorLegacySummaryContent(
           updatedAtMs: generatedAtMs,
         };
       });
-      let replaceLegacyProjection = true;
+      let replaceProjection = true;
       let mirrorStatus = 'completed';
       await sqliteMeetingNoteRepository.transaction(async transaction => {
         const note = await transaction.getMeeting(aggregate.note.id, scopeKey);
@@ -729,15 +379,13 @@ export function mirrorLegacySummaryContent(
             === `${note.id}:summary:${document.templateId}:${currentSourceFingerprint}`;
         }
         if (current && currentMatchesUndeclaredSource) {
-          if (factDocument) {
-            await transaction.saveSummaryVersion(current, sections, actions, scopeKey, {
-              activate: false,
-              citations,
-              factDocument: { ...factDocument, summaryVersionId: current.id },
-              activationFenceV3,
-            });
-          }
-          replaceLegacyProjection = !currentProtected;
+          await transaction.saveSummaryVersion(current, sections, actions, scopeKey, {
+            activate: false,
+            citations,
+            factDocument: { ...factDocument, summaryVersionId: current.id },
+            activationFenceV3,
+          });
+          replaceProjection = !currentProtected;
           if (
             current.status === 'stale'
             && !currentProtected
@@ -789,37 +437,20 @@ export function mirrorLegacySummaryContent(
           return;
         }
         if (existingVersion) {
-          if (factDocument) {
-            await transaction.saveSummaryVersion(existingVersion, sections, actions, scopeKey, {
-              activate: false,
-              citations,
-              factDocument: { ...factDocument, summaryVersionId: existingVersion.id },
-              activationFenceV3,
-            });
-          }
+          await transaction.saveSummaryVersion(existingVersion, sections, actions, scopeKey, {
+            activate: false,
+            citations,
+            factDocument: { ...factDocument, summaryVersionId: existingVersion.id },
+            activationFenceV3,
+          });
           const remainsCurrent = current?.id === versionId;
           const existingProtected = await transaction.hasUserProtectedSummaryState(
             existingVersion.id,
             scopeKey,
           );
-          // A structured result that was materialized by an earlier attempt
-          // must still be allowed to replace an unprotected legacy pointer.
-          // The old branch treated every existing version as a candidate and
-          // therefore left the app permanently pointing at "旧版整理" after
-          // a retry or a page re-entry.  Do not override an explicit current
-          // structured choice; the remote catalog/current merge owns that
-          // decision.
           const activateExisting = sourceInputsStillActive
             && !currentProtected
-            && !existingProtected
-            && (
-              !current
-              || remainsCurrent
-              || (
-                document.templateId !== 'legacy'
-                && (current.templateId === 'legacy' || isLegacyProvider(current.generatedBy))
-              )
-            );
+            && !existingProtected;
           if (activateExisting && !remainsCurrent) {
             await transaction.updateMeeting(note.id, scopeKey, {
               currentSummaryVersionId: versionId,
@@ -831,7 +462,7 @@ export function mirrorLegacySummaryContent(
             });
             canonicalChanged = true;
           }
-          replaceLegacyProjection = (remainsCurrent || activateExisting) && !currentProtected;
+          replaceProjection = (remainsCurrent || activateExisting) && !currentProtected;
           if (
             remainsCurrent
             && current?.status === 'stale'
@@ -890,15 +521,12 @@ export function mirrorLegacySummaryContent(
               : 'preserved_existing_candidate';
           return;
         }
-        const incomingLegacyCanReplace = document.templateId !== 'legacy'
-          || !current
-          || isLegacyProvider(current.generatedBy);
         const activate = sourceInputsStillActive && (
           !current
           || current.id === versionId
-          || (incomingLegacyCanReplace && !currentProtected)
+          || !currentProtected
         );
-        replaceLegacyProjection = activate && !currentProtected;
+        replaceProjection = activate && !currentProtected;
         mirrorStatus = !sourceInputsStillActive
           ? 'saved_stale_input_candidate'
           : activate
@@ -914,9 +542,7 @@ export function mirrorLegacySummaryContent(
           manualNoteRevision: summaryPayload.manualNoteRevision,
           scheduleSnapshotHash: summaryPayload.scheduleSnapshotHash,
           status: document.status,
-          generatedBy: document.templateId === 'legacy'
-            ? 'legacy-cache'
-            : document.generatedBy ?? 'server-v2',
+          generatedBy: document.generatedBy ?? 'facts-v3',
           userEdited: false,
           supersedesVersionId: current && current.id !== versionId
             ? current.id
@@ -950,24 +576,24 @@ export function mirrorLegacySummaryContent(
           canonicalRevision = await transaction.advanceCanonicalWrite(scopeKey, Math.max(Date.now(), generatedAtMs, note.updatedAtMs));
         }
       });
-      diagnosticAudit('meeting_summary_shadow_write', {
+      diagnosticAudit('meeting_summary_write', {
         status: mirrorStatus,
-        scope: scopeKey === 'guest' ? 'guest' : 'account',
+        scope: 'guest',
         sections: sections.length,
         citations: citations.length,
         rejected_citations: rejectedCitationCount,
         actions: actions.length,
       });
       return {
-        replaceLegacyProjection,
+        replaceProjection,
         status: mirrorStatus,
         canonicalRevision,
         localVersionId: versionId,
       };
     } catch (error) {
-      reportFailure('summary', scopeKey, error);
+      reportFailure(error);
       if (options.throwOnFailure) throw error;
-      return { replaceLegacyProjection: true, status: 'failed', canonicalRevision: null };
+      return { replaceProjection: true, status: 'failed', canonicalRevision: null };
     }
   });
 }

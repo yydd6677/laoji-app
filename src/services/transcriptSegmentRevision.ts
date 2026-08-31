@@ -1,4 +1,4 @@
-import type { TranscriptSegmentRecord } from '../data/repositories';
+import type { TranscriptSegmentRecord } from "../data/repositories/meetingNoteRepository";
 
 function sameTextRevision(
   left: TranscriptSegmentRecord,

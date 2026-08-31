@@ -1,1463 +1,247 @@
-# 老记 vNext 实施指示
+# 老记 vNext 实施约束
 
-- architecture: [VNEXT.md](VNEXT.md)
-- decisions: [VNEXT-DECISIONS.md](VNEXT-DECISIONS.md)
-- baseline release: `1.1.10 (118)`
-- implementation status: `Stage 0/1 completed; prior Stage 2-4 infrastructure/recovery evidence retained; Stage 3 Slice A adaptive Facts V3 presentation released in 1.1.63; Knowledge V4 semantic composition remains shadow-pending; legacy physical deletion remains deferred`
+本文面向实现者，描述当前代码 owner、接口、迁移、恢复和验收。它不再按旧 Stage 复述开发历史；新改动必须在当前架构上做垂直替换。
 
-本文供开发执行。阶段可以拆成多个提交，但不得改变 VNEXT 的数据所有权、领域边界和选定路线。
-任一阶段只能在入口证据满足后开始，在退出门全部满足后切换默认路径。
+## 1. 当前基线
 
-截至 2026-08-18 的隔离实现增量：canonical device scope 已停止默认回写旧 JSON projection；设备 v2
-R2 上传 operation 已在本机 `device_operations` 创建并绑定录音资产，WorkManager 的运行/失败/取消/成功
-状态按 CAS 回写。Q2 reader 对有界重复引用和同快照唯一逐字引用做确定性归一。新增样本
-`829384557-1-208.srt` 加入评测后，候选 Q2 `27/27`、Facts V3 `9/9` 通过；2026-08-18 晚间以同一
-候选 provider 重复执行仍为 `27/27` 与 `9/9`。上述均为隔离证据，
-不代表 Stage 2/3/4 退出、生产切换或 Stage 5 删除许可。
+- branch：`vnext/implementation`
+- mobile：`1.1.97` / Android `205`
+- public base：`https://laoji.cloud`，WebSocket 使用 `wss://laoji.cloud`
+- product：accountless、single-device、mobile-local authority
+- production topology：API `127.0.0.1:18020`、ASR `127.0.0.1:8030`、Ollama `127.0.0.1:21434`
 
-2026-08-19 候选又闭合了两项真实回放边界：Q2 reader 对 UTF-8 坐标前缀和部分缺失字段的
-引用归一化，更新样本完整问答 `27/27`；CAM++ 推理改为 `inference_mode` 并在 Linux 做
-best-effort allocator trim，隔离混合负载和 10 次断线恢复的候选 API RSS 均低于门限。证据分别见
-`docs/vnext-stage3/Q2-UTF8-GROUNDING-FIX-20260819.md` 与
-`docs/vnext-stage2/MEMORY-TRIM-REAL-20260819.md`。这些仍是候选证据，Android 设备门、GPU0
-余量门、公开零流量周期和 capability barrier 继续未通过。
+旧分支、旧 Stage 目录、候选工具和历史发布包不是实现输入。需要比对时从 Git 或服务器校验归档恢复到活跃树之外。
 
-2026-08-19 新增 Stage 5 候选基础设施：`capability_cutovers` 现在持久保存不可替换的
-`legacy_reader_removal_revision` 与证据 SHA-256；只允许在对应 capability 已激活且旧提交已关闭后登记，
-不会自动启用能力或删除代码。候选 `b4f84c9` 已在隔离 `18021` 启动并通过 `/api/ready`；五个能力仍未登记，
-因此删除门和生产切换继续保持关闭。
+## 2. 模块所有权
 
-随后候选 `c72472c` 增加了 Task/Attempt 终态规范化和中断 purge 恢复：父 Task 已终态时不再保留
-`retryable_failure`，过期 `running` purge 回到 `pending` 等待设备凭据重放。候选启动后实际修复了 6 个
-历史 Attempt 和 2 个 purge；这仍是候选恢复证据，不是 capability 或 Stage 5 退出证据。
-
-候选 `bd93690` 将旧整理、问答和日程解析提交入口统一接入持久 legacy guard：默认关闭时只累计提交计数，
-关闭后统一返回 `426`，不增加第二 owner 或隐式回退。静态探针覆盖 8 个入口并通过；候选仍未激活任何
-barrier，生产入口未切换。
-
-候选 `fb268c8` 将 App 入口的 guard 顺序调整为先完成鉴权和会议归属校验，再累计有效 legacy submit；
-无效或未授权请求不会污染公开周期统计。
-
-候选 `958c9f2` 又补齐 device-v1 的 4 个旧 producer 路由，静态 guard 合同扩展到 12 个入口并通过；
-这只证明旧提交可被统一关闭，不代表 barrier 已激活或旧路径已物理删除。
-
-候选 `bb38e64` 补齐 App 音频/兼容 recording-assets 和 device-v1 旧 summary 路由；当前静态合同覆盖
-14 个整理/问答/日程入口及 6 个账号兼容媒体入口，候选仍未激活 capability。
-
-2026-08-19 的 Stage 2 切片将同一 VAD drain 产生的多个新片段合并为一次现有 ASR batch 请求，先完整
-校验 batch item 再按源时间顺序持久化，避免 API 侧逐段串行推理；单片段仍保持原低延迟路径。隔离
-GPU0 候选 8031 对真实 1 秒 speech 窗口的 30 次暖态推理 p95 为 `142ms`，另有 30 次真实 speech
-断线/重连/ACK/purge 回放全部为 `text` 且清理确认，详见
-`docs/vnext-stage2/REALTIME-GPU-REPLAY-20260819.md`。这两类证据均未证明 Android 端到端首段 p95、
-混合负载资源门或公开零流量周期，Stage 2 仍不能切 capability。
-
-2026-08-20 的 Stage 2 候选消除了上传校验后由 worker 再次公开读取 R2 的重复 I/O：校验流同步镜像
-压缩媒体，但只在 verified asset + transcription Task 事务提交后原子发布到私有、有界缓存；终态删除，
-缺失时仍从 R2 恢复。隔离 API/数据库/R2 与 loopback v2 测试桥复用生产 GPU0 上相同模型/revision 的
-30 条真实媒体回放，首段 p95 `2.877s`、RTF p95 `0.140411`，并保持 30/30 文本、单 final 和清理。
-因此选定架构的首段/RTF 性能门已关闭，纯 CPU 路线被否决；正式 8030 v2 handler、Android、质量、
-混合负载、公开零流量与 capability 门在该回放后仍开放。证据见
-`docs/vnext-stage2/VERIFIED-MEDIA-CACHE-GPU-20260820.md`。
-
-2026-08-21 的专属 `emulator-5562` 原生回放在活跃 WorkManager v2 上传期间同时注入网络中断和 App
-进程死亡，恢复后精确保持一个资产、operation、task/attempt 和 active Transcript revision，稳定片段键
-无重复；独立静音文件以 `no_speech`、空错误码、零片段成功闭合。与先前混合负载/资源证据合并后，
-Stage 2 历史运行/资源预检 20 门通过 19 门，唯一运行子集阻断为外部公开旧 submit 零流量周期；该
-旧数字没有把 CER、数字时间、speaker overlay、已登记/未知讲话人质量计入机器门禁。质量感知 schema v2
-已补齐这些门；正式 8030 v2 handler 已在获准窗口完成部署、真实协议复验、候选直连和中断恢复，
-当前仍缺独立人工媒体质量、公开零旧提交周期和 capability 人工采用。证据见
-`docs/vnext-stage2/ANDROID-V2-NETWORK-PROCESS-RECOVERY-20260821.md`。
-
-同日生产 `laoji-asr.service` 已切换到封存 handler，真实 Qwen3-ASR-1.7B legacy/v1/v2 8-item、
-NO_SPEECH、错误合同均通过；隔离 18030 从 8031 改为直连 8030，并在 transcript attempt 运行时终止
-API 后恢复为 115 个 stable、唯一 final、ACK 和 purge confirmed。确认无连接和外部引用后旧 8031
-兼容代理已停止。该变更不激活 capability、不修改生产 18020 或公网，证据见
-`docs/vnext-stage2/ASR-V2-8030-CUTOVER-CANDIDATE-20260821.md`。
-
-2026-08-21 的 10 组 MP4/SRT、30 窗口弱参考诊断得到 CER 中位数 `5.56%`、p95 `41.67%`、数字/时间
-`89.71%`；逐条检查确认高误差窗口至少含字幕漏句、错词和边界漂移，因此合同固定为不可晋级，不能按
-弱参考调模型或关闭质量门。`media-human-quality-v1` 只接受第一方双人盲审/裁决参考、预测后置和
-完整哈希血缘；详见 `docs/vnext-stage2/ASR-SRT-WEAK-DIAGNOSTIC-20260821.md`。
-
-双盲 review、独立裁决冻结、冻结后 predictions、development 音频哈希隔离和五项指标确定性计算工具
-已于同日补齐；数字/时间参考为空时失败关闭，CER 不截断，公开报告不复制用户内容。现有会议样本已
-参与开发，不能作为独立晋级 holdout，因此该工具只关闭证据生成缺口，完整质量门仍等待新的第一方
-音频和真实人工流程。详见 `docs/vnext-stage2/MEDIA-HUMAN-QUALITY-EVIDENCE-20260821.md`。
-
-随后隔离 device-v2 候选对同一真实 6 秒语音完成 30 次独立 CAM++ overlay 暖态回放：`30/30`
-成功，文字完成后的 p95 为 `629.6 ms`，所有 binding/epoch purge 均确认，回放后无 active task、speaker
-input、checkpoint 或 spool 文件。预检现在同时要求至少 30 条 overlay 样本，避免单点时延冒充 p95；
-质量感知聚合结果为 `20/28`，剩余 8 项是独立人工媒体质量和公开零旧提交周期。回放还暴露并修复了
-Uvicorn WebSocket 路径经 `uvicorn.error` 泄漏随机 session ID 的问题；修复候选两份真实运行日志的
-动态扫描均为 0 项。详见 `docs/vnext-stage2/SPEAKER-OVERLAY-WARM30-20260821.md`。
-
-2026-08-20 的 Stage 3 Android 候选把 Facts V3 文档、整理版本、章节/引用/行动和 current pointer
-收敛到同一个本机事务，并以 active transcript、current note 及页面完整输入指纹阻止迟到结果覆盖当前
-来源。长会议在 `emulator-5562` 生成成功，四模板中的“通用/项目同步/访谈”共享同一事实并在本地即时
-切换，切换窗口没有网络请求，强制重启后“访谈”投影和事实结果仍可读。证据见
-`docs/vnext-stage3/SUMMARY-V3-ANDROID-ATOMIC-ACTIVATION-20260820.md`。这仍未满足人工质量、完整竞态、
-旧结果迁移、公开零 v1 流量周期或 capability barrier，Stage 3 保持未采用。
-
-同一证据随后增加了真实 note-mutation 回放：重新整理运行期间 current note 变化时，迟到结果不会
-激活，上一份可用结果持续显示；该安全拒绝以 `discarded` 恢复当前 SummaryVersion 的 ready/stale
-状态和信息提示，不再误报“生成失败”。转写/附件竞态与进程中断矩阵仍未闭合。
-
-随后候选把 device epoch、meeting binding identity/revision/cancel revision 和本次授权文字附件的
-位置、revision、规范正文 SHA-256 加入本机原子激活围栏。23 项可执行领域矩阵覆盖正常、epoch/binding
-变化、附件删除/修改/重复和非法输入；`emulator-5562` 的 `1.1.29 (137)` 又以真实长会证明完成流核对
-后成功落入同一事务并激活 14 条有效引用。详见
-`docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。原生 SQLite 逐项负向注入、页面/
-进程中断组合、人工质量和 capability barrier 仍未闭合，Stage 3 保持未采用。
-
-2026-08-21 又完成旧整理后台升级的真实 Android 闭环。回放首先暴露旧稳定 Transcript ID 被错误拼入
-180 字符传输 `item_id`，导致请求在本机 wire 校验前失败并留下无 Attempt 的远端 active Task；候选改为
-有界传输别名、完整身份保留在 `source_id`，并在请求哈希变化时精确取消旧 Task、清空恢复指针。随后在
-1,357 段长会议的真实 Attempt 运行中强制停止 App，重启后沿用同一个 Task/Attempt 原子激活且只新增一个
-版本；原版本始终可读，夹具最终精确还原，升级队列为 0，SQLite integrity/foreign keys 和 7 条会议投影
-均通过。证据见
-`docs/vnext-stage3/SUMMARY-V3-LEGACY-UPGRADE-RECOVERY-20260821.md`。这关闭旧结果后台升级与客户端
-进程恢复缺口，但不替代独立人工质量、公开零旧链路周期或 capability barrier，Stage 3 仍未采用。
-
-同日 Q2 完整来源评估已生成 27 行、随机顺序、Git 工作树外 `0600` 的私有盲审包，并支持逐题原子
-检查点、断点续跑和失败题精确重试。候选确定性投影只保留逐字可验证分句，列表序号不作为业务数字，
-空缺失分句和跨相邻 ASR 行 quote 不再拖垮已验证内容；无任何依据仍失败关闭。自动回放为 `27/27`、
-引用逐字匹配 `100%`、暖态 p95 `11.529s`。人工字段尚未填写，因此该证据只关闭盲审准备和自动化
-稳定性，不关闭 Stage 3 的独立人工 `>=95%` 门。证据见
-`docs/vnext-stage3/Q2-BLIND-REVIEW-PACK-20260821.md`。
-
-Facts/行动候选随后以同一隔离 device-v2 source stream 对 10 份完整字幕生成工作树外 `0600` 盲审包。
-自动回放 `10/10`，104 条事实、4 个行动候选和 233 条引用全部逐字匹配且清理确认；单章节 p95
-`41.791s`、两章节 p95 `65.063s`，分别满足 `45s/90s` 路径门。包内已为会议概述/遗漏、每条事实
-支持/准确/certainty、每条行动真实性/具体性/负责人/期限/日程适配预留独立人工字段，但尚未填写，
-所以不关闭 Stage 3 人工质量门。证据见
-`docs/vnext-stage3/FACTS-ACTIONS-BLIND-REVIEW-PACK-20260821.md`。
-
-`1.1.46 (154)` 又把四模板说明与实际 Facts V3 稳定块合同对齐，并在 `emulator-5562` 完成四模板逐项
-切换、零候选 API 请求、进程重启偏好恢复和版本历史不增生回放；确定性投影与 activation fence 合并
-`26/26` 通过，100 次暖态投影约 `7ms`。这关闭模板本地投影合同，不替代独立人工 Facts/行动质量、
-富块全类型两主题视觉门、公开零旧链路周期或 capability barrier。证据见
-`docs/vnext-stage3/SUMMARY-V3-TEMPLATE-PROJECTION-CONTRACT-20260821.md`。
-
-`1.1.47 (155)` 进一步使用可恢复的 Release-target SQLite 夹具，在 `emulator-5562` 对全部八种富块
-完成标准蓝/绚彩可见回放。过程中发现访谈“后续问题”被旧行动区前缀规则隐藏，已将规范化标题分类
-提取为纯函数并增加回归门；合并测试 `27/27` 通过。窄屏流程按合同退化为纵向列表，其他引用、时间线、
-对比、风险和统计块均正常。原 Facts JSON、主题和模板偏好已经恢复，备份表与测试包已清除，SQLite
-完整性通过。这关闭富块视觉门，不关闭独立人工质量、公开零旧链路周期或 capability barrier。证据见
-`docs/vnext-stage3/SUMMARY-V3-RICH-BLOCK-ANDROID-REPLAY-20260821.md`。
-
-## 0. 已核对的实施基线
-
-2026-08-17 只读现场核对：
-
-- `laoji-api.service` active，cwd 为
-  `$SERVER_DEPLOYMENT_ROOT/compact-production/backend`，监听 `127.0.0.1:18020`；
-- `laoji-asr.service` active，使用同一 cwd 下 `qwen_asr_service/server.py`；
-- `laoji-ollama.service` active，监听 `21434`；Cloudflare Tunnel 直连 `18020`；
-- OpenAPI 同时存在 account、`/api/laoji`、device v1、laoji v1/v2 和 guest route，证明兼容面需要
-  显式切除，不能假设已经统一；
-- 当前非空业务库包括 backend `local.db`、`schedule.db` 和
-  `data/speaker_voiceprints.db`；`app/local.db` 与多个 `data/*.db` 为 0 字节占位，未完成配置/引用
-  审计前不得删除或误认权威；
-- 当前 GPU0 上老记 ASR 约 6.0 GiB、9B runner 约 8.5 GiB、API 约 0.6 GiB；其他进程同时占用，
-  因此 vNext 不增加 GPU 常驻模型，embedding 固定 CPU/按需；
-- Stage 0 已将真实后端导入并版本化到 `services/laoji-api` 和 `services/laoji-asr`，并由本地
-  `vnext-stage0-1.1.10-118` tag 冻结；后续实现以该 tag 作为后端恢复边界。
-- Git `HEAD` 的移动 migration 只到 v38，但公开 1.1.10 APK bundle 已检出
-  `summary_fact_documents/summary_v3_upgrade_tasks` v39 SQL；当前 dirty worktree 包含对应未跟踪源码。
-  因此实现基线必须冻结 APK 对应的完整 dirty source，而不是把 `48e3b36` 当可重建发布快照。
-
-## 1. 代码库与生成合同
-
-当前权威移动端工作树：
-
-`$MOBILE_REPO`
-
-Stage 0 已将生产机 `$SERVER_DEPLOYMENT_ROOT/compact-production/backend` 冻结并导入同一
-版本控制边界，当前布局：
-
-```text
-contracts/vnext/              JSON Schema, fixtures, compatibility matrix
-src/domain/                   mobile domain values and validators
-src/data/repositories/        single local business repositories
-src/application/              use cases; no HTTP/SQLite/native SQL
-src/services/remote/          domain API clients and operation projection
-modules/laoji-native-platform Android system capabilities only
-services/laoji-api/           FastAPI domain routes, task owner, orchestration
-services/laoji-asr/           Qwen3-ASR adapter service
-deploy/linux/                 systemd, Cloudflare, environment templates
-tools/vnext/                  Linux/Windows portable migration and audit tools
-```
-
-权威 schema：
-
-- `entity-revision.schema.json`
-- `device-authority.schema.json`
-- `meeting-binding.schema.json`
-- `generation-source-envelope.schema.json`
-- `source-ref.schema.json`
-- `task-attempt.schema.json`
-- `content-outcome.schema.json`
-- `operation-envelope.schema.json`
-- `source-stream.schema.json`
-- `source-bundle-group.schema.json`
-- `purge-journal.schema.json`
-- `projection-envelope.schema.json`
-- `schedule-mention-graph.schema.json`
-- `upload-session.schema.json`
-- `realtime-asr-session.schema.json`
-- `transcript-revision.schema.json`
-- `meeting-facts-v3.schema.json`
-- `meeting-answer-v2.schema.json`
-- `error-envelope.schema.json`
-
-使用脚本生成 TypeScript、Kotlin serialization DTO 和 Python Pydantic models。CI 对生成后 diff
-失败关闭；禁止三端手写同名 wire type。
-
-## 2. 当前模块到 vNext 的映射
-
-| 当前入口 | vNext 归属 | 动作 |
+| 责任 | 当前入口 | 约束 |
 | --- | --- | --- |
-| `src/store/EventsStore.tsx` | ScheduleRepository + view store | 业务写入下沉 repository；store 只订阅 |
-| `src/services/localScheduleParser.ts` | local MentionGraph producer | 拆出 recognizers；不再拥有最终 Draft 规则和服务路由 |
-| `src/services/deviceApi.ts` schedule methods | `src/services/remote/scheduleApi.ts` | v2 graph API；删除服务端规则回退 |
-| `VoiceInputModal*.tsx` / `ScheduleVoiceHostView.kt` | ScheduleVoiceSession | 先录音缓冲、后连 WSS；同一 clarification state |
-| `meetingMediaImport*` / `MediaAudioExtractor.kt` | MediaAsset ingest | 保留；导入事务先创建本机 asset generation 并全部接纳；按会议隔离且内部本机准备 lane 为 3 |
-| `MeetingUploadWorker.kt` / `nativeTransferCoordinator.ts` | UploadExecutor | 改为 direct R2 single/multipart + server probe |
-| `recordingAssets.ts` 旧 content API | v1 compatibility adapter | 一个发布周期后删除 |
-| `realtimeAsr.ts` / `RealtimeAsrSocket.kt` | realtime ASR adapter | 保留 WSS，统一 partial/stable/final schema |
-| `deviceTranscriptTasks.ts` | DeviceOperation projection | 不再拥有第二任务生命周期 |
-| `processing.ts` / `meetingStageMirror.ts` | derived OperationStatus | 页面只读派生状态；删除任意跨阶段写入 |
-| `meetingNoteRepository*` | MeetingRepository facade | 收敛为唯一 meeting aggregate transaction |
-| `speakers.ts` / speaker Kotlin surfaces | SpeakerOverlayRepository | 自动/人工 overlay 分表和 expected revision CAS |
-| `meetingSummaryV3.ts` | FactsV3 projection | 保留并扩展 deterministic chapter merge |
-| `meetingSummaryTasks.ts` / `meetingSummaryProcessing.ts` | remote summary operation | 删除内存/重复 task owner |
-| `meetingQuestions.ts` | legacy adapter + Q2 dispatch | Q2 路径只读取 immutable transcript/note source；旧链路在 barrier 前兼容 |
-| `meetingQuestionRepository.ts` | QuestionRepository | 保存 immutable turn + exact SourceRef transaction |
-| `MeetingActionsSheet.tsx` / `MeetingActionEditorSheet.tsx` | ActionItemRepository | 保留手动创建、编辑、完成、删除、负责人、截止、提醒和后续日程；candidate 只提供 provenance |
-| `notifications.ts` meeting action/planned-end paths | NotificationProjection | 保留本场待办与预计结束提醒；从本机 revision 重建，不成为状态 owner |
-| `meetingMediaClips.ts` / `LaojiMediaClipModule.kt` | MediaClipRepository | 保留本地剪辑/导出；remote job 只在用户明确请求时创建 |
-| `meetingMarkers.ts` / `meetingAttachments.ts` | MeetingRepository sources | 保留本地 CRUD；删除远端 sync owner |
-| `meetingSeriesMemory.ts` / occurrence services | local MeetingSeriesRepository | 保留系列与日程关联；删除跨设备 occurrence sync |
-| `notifications.ts` / native system entries | LocalScheduleProjection | 保留提醒/小组件，只读本机事件 revision |
-| `currentAddress.ts` / `reverseGeocoder.ts` | LocationService | 系统地址优先，服务端反查兜底；坐标不写日志 |
-| `themePreferences.ts` / ThemeProvider / native tokens | ThemeProjection | 保留标准蓝/绚彩；同一 semantic token schema |
-| `privacy.ts` / AppLockGate / legal screens | LocalPrivacySurface | 保留应用锁与文书；不恢复账号 profile |
-| `meetingContentMirror.ts` / `meetingLegacyMirrorCoordinator.ts` | v1 drain adapter | Stage 5 删除 |
-| `nativeMinutesSnapshots.ts` / `MinutesSnapshotParser.kt` | ProjectionEnvelope | 加 revision/hash/surface fencing |
-| `navigationState*` / RootStack / notification/semantic links | RouteRegistry | 从一个 registry 生成类型、注册、持久化 sanitizer 和外部入口 |
-| `PrivacyScreen.tsx` + native stores/files | LocalDataEraseCoordinator | 协调 recorder/player/worker/DB/SecureStore/files/notifications/memory 清除 |
-| `appUpdate.ts` | UpdateService | RETAINED；只补发布一致性自动检查 |
+| App 启动/导航 | `App.tsx`、`src/navigation` | 启动只装载本机必需状态；不得等待服务 readiness |
+| 日程业务 | `EventsStore.tsx`、`localScheduleRepository.ts`、日程 native surface | repository 写库；store 只订阅/编排 |
+| 会议业务 | `MeetingsStore.tsx`、`meetingNoteRepository.ts`、`sqliteMeetingNoteRepository.ts` | SQLite 是列表/详情共同 owner |
+| 录音/导入 | native recorder、media importer、`meetingMediaImport*` | 先本机接纳；网络不在采集关键路径 |
+| 上传 | RecordingAsset、native WorkManager、device upload API | Work UUID 不是业务 ID；generation + hash 幂等 |
+| 转写 | transcript repository、device task/event ledger、8030 | stable 先持久化再 ack；final 只出现一次 |
+| 讲话人 | speaker overlay repository、CAM++ lane | 不改写 transcript text revision |
+| 整理 | immutable sources、summary task、Facts/Knowledge schema、adaptive composer | 一份语义文档；`general@3` 仅为内部 envelope |
+| 问答 | Q2 source stream、`questionQ2Repository.ts` | 只读当前会议来源；引用当前 revision |
+| 待办 | action repository/application use cases | mutable owner 与生成候选分离 |
+| 外接硬件 | `contracts/hardware`、native hardware runtime、`hardware.ts` | transport only；输出复用媒体链 |
+| 服务编排 | `services/laoji-api` | SQLite durable task/attempt；不保存第二份业务模型 |
+| ASR | `services/laoji-asr` | 模型协议、优先队列和推理指标 |
 
-导入后的服务端映射：
+### 2.1 历史 schema 与窄清理桥
 
-| 当前生产模块 | vNext 目标 | 动作 |
-| --- | --- | --- |
-| `app/api/device_v1.py` | `app/api/device_v2/*` | 按 schedule/upload/transcript/summary/question/speaker 拆 router |
-| `app/services/device_identity.py` | DeviceAuthority | 保留并收紧 device+epoch+token revision |
-| `app/services/summary_task_store.py` | legacy task owner + read adapter | cutover 前旧 owner 排空；不把缺少历史血缘的行迁入新 owner |
-| new generic task/attempt store | TaskAttemptOwner | cutover 后新任务唯一写 owner；领域 payload 保持 typed |
-| `app/workers/summary_tasks.py` | InProcessTaskWorker | 单 worker + priority queue；删除 Celery/CLI/第二 owner |
-| `app/services/llm_provider.py` | LlmProvider/EmbeddingProvider | 保留接口，业务调用静态禁止绕过；embedding CPU/按需 |
-| `app/services/compact_transcription_service.py` | TranscriptOrchestrator | VAD 后 ASR/speaker 分队列，逐段 publication |
-| `app/asr/*` | VAD/CAM++ adapters | 保留算法；不拥有 task/transcript business state |
-| `qwen_asr_service/server.py` | `services/laoji-asr` | 保留 8030，增加 stable batch/stream schema |
-| `app/services/r2_upload_service.py` / `r2_storage_service.py` | UploadSession/CleanupService | staging generation、完整性校验、独立 cleanup obligation |
-| `app/services/schedule_parser_service.py` | ScheduleGraphProvider | 删除 quick/fallback 和模型后 full-text normalizer |
-| `app/services/summary_v3_*` | V3 compatibility reader | 冻结生成新能力；保留历史 artifact/read/rollback，不再拥有 active 四模板投影 |
-| `app/schemas/meeting_knowledge_v4.py` / `app/services/summary_v4_*` | MeetingKnowledgeV4Service | 单 pack/章有界生成、来源/逐字复制校验、主题/数据/观点合并和 artifact 原子提交 |
-| `app/services/vnext_source_stream_store.py` | source stream + bounded checkpoint owner | 加密章节来源、manifest/group 配额、双槽恢复点和 artifact 原子提交；默认关闭 |
-| `app/services/summary_v3_chapter_merge.py` | V3 history reducer | 只服务已存在/未完成 V3 兼容任务；不扩展 active 产品语义 |
-| `app/services/summary_v4_chapter_merge.py` | deterministic Knowledge V4 reducer | 主题/事实/关系/数据/观点/行动有界合并；不调用模型、不使用样本专用规则 |
-| `app/services/vnext_summary_chapter_pipeline.py` | generic Task/Attempt summary adapter | 每次最多处理一章；provider 适配、checkpoint 提升和最终 artifact 提交 |
-| `app/services/vnext_summary_worker.py` | source-stream summary worker | 单并发扫描 active generic task；租约心跳、重启恢复和一章一让出；默认关闭 |
-| `src/services/meetingSummaryV3SourceStream.ts` | source-stream compatibility orchestrator | 保留 immutable source、幂等上传和 task/artifact 恢复；V3 结果转入统一 compatibility adapter |
-| `src/services/meetingSummaryAdaptive.ts` / `src/domain/meeting/summaryComposition.ts` | AdaptiveSummaryComposerV1 | V4/V3 兼容输入、唯一 fact primary owner、富块准入、板块偏好和依据去重；纯本地函数 |
-| `src/services/questionQ2Candidate.ts` / `meetingQuestionsQ2.ts` | Q2 single-reader candidate | source snapshot、单次 reader、grounding、Q2 operation retry 和现有问答页只读投影；默认双开关关闭，等待语义 holdout |
-| `src/services/questionQ2DeviceProvider.ts` | Device Q2 Provider | capability/binding fence、严格 response normalization；不回退旧问答 |
-| `app/services/vnext_question_reader.py` | server Q2 reader candidate | 单次 Ollama reader、结构协议、UTF-8 引用完整性和来源 hash 校验；默认 capability 关闭 |
-| `app/services/app_meeting_question.py` | MeetingQuestionQ2 | 由 5,826 行多轮链替换为 snapshot/provider/grounding/owner 四层 |
-| `app/models/meeting_*sync.py` | none after v1 drain | 账号/跨设备同步模型按 Stage 5 删除 |
-| `app/api/location.py` | LocationProxy | 保留缓存/限流/日志脱敏 |
+历史迁移仍包含 account/sync/template/clip 表名和字段，以保证旧数据库可顺序升级；当前运行时不得读取、写入或通过 capability/error 回退到这些业务链。独立媒体片段只保留永久删除时清理旧文件的窄桥。device-v1 仅保留当前代码明确仍调用的注册/能力、日程、转写恢复、讲话人、删除、日程实时 WSS 和地址能力；每个兼容接口都必须有真实 caller，不能作为无期限保留旧 owner 的理由。
 
-## 3. 手机 canonical schemas
+## 3. 本机数据库
 
-手机使用两个互不 `ATTACH`、无跨库外键的 Expo SQLite 领域库；二者均启用 WAL、foreign keys 和
-5 秒 busy timeout：
+### 3.1 打开与升级
 
-| 数据库 | 唯一职责 | 禁止事项 |
-| --- | --- | --- |
-| `laoji-schedule.db` | `local_schedule_events`、日程 provenance、日历 ProjectionEnvelope checkpoint | 会议清理、媒体任务和会议恢复器不得访问 |
-| `laoji-meeting-memory.db` | 会议聚合、媒体引用、转写、整理、问答、待办、设备 operation 和非日历投影 | 不得新写日程事件或拥有日程生命周期 |
+- 会议：`src/data/db/openDatabase.ts` -> `laoji-meeting-memory.db`。
+- 日程：`src/data/db/openScheduleDatabase.ts` -> `laoji-schedule.db`。
+- 两库分别启用 WAL、foreign keys、busy timeout 和完整性检查。
+- 日程从旧会议库迁移时先复制、逐行核对、提交完成标记，再停止旧表写入；中断后按标记恢复。
+- 任何会议删除、会议库修复、媒体清理都不得打开或删除日程库。
 
-旧安装执行一次可恢复的 `schedule schema v1` 隔离迁移：先创建新库，在同一新库事务中复制旧会议库
-`local_schedule_events` 和既有 calendar checkpoint 并逐行核对所有字段；核对通过后写入
-`schedule_database_meta` 完成标记并提交，之后才在会议库事务中删除旧表/旧 calendar checkpoint 并写
-`schedule_database_v1` cutover tombstone。复制、提交或退役任一步骤
-中断时均按完成标记幂等恢复；禁止双写。会议库已经删除而旧导入从未完成时失败关闭，并继续允许既有
-AsyncStorage 兼容导入写入新日程库，不制造空数据已迁移的假象。
+### 3.2 schema 规则
 
-`native_schedule_projection_checkpoints` 只保存 `calendar` surface；录音和文字记录等 checkpoint 仍在
-会议库。会议库删除后日历 checkpoint 和日程正文保持可读，checkpoint 本身可从日程 revision 重建。
-完整“清除本机数据”协调器显式删除两个库；`deleteMeetingDatabase` 及会议领域清理不能调用
-`deleteScheduleDatabase`。禁止用 Android `pm clear` 修复会议或媒体问题。
+- 业务对象使用稳定 UUID/opaque ID；远端 task/work UUID 不替代实体 ID。
+- 生成内容使用不可变 revision 和 active pointer；用户编辑使用独立 overlay。
+- 远端 operation 投影至少包含 operation ID、generation、stage、updated revision、retry/cancel 状态。
+- transcript segment 的稳定身份不依赖数组下标或重新分段后的顺序。
+- 跨库关系只保存稳定 ID 和必要快照；不建立跨库事务。
 
-会议库历史迁移文件仍按发布阶段连续落库：
+### 3.3 数据清理
 
-迁移文件按发布阶段连续落库：Stage 1 包只新增 `0040-0042`，Stage 2 再新增 `0043-0044`，Stage 4
-新增 `0045`；当前隔离切片追加 `0046` 仅保存上传执行句柄，不得提前放置高编号 placeholder，也不得让
-常规 migration runner 跳号或逆序执行。
+- 回收站是本机 soft delete；永久删除事务先 fence 本机实体，再登记远端 purge。
+- 媒体文件只有在引用计数为零且无活跃 task/lease 时删除。
+- 完整“清除本机数据”分别点名两库、媒体、临时导入、硬件 pending、SecureStore 和任务 journal；不得用领域修复替代 `pm clear`。
 
-### 0040 `VNextAuthorityAndOperations`
+## 4. 日程实现
+
+### 4.1 文本
+
+1. 输入规范化只处理空白、中文数字/时间形式和明确别名，不改变语义。
+2. 本机 fast producer 能闭合时生成 `ScheduleMentionGraph`。
+3. 不能闭合时调用 `POST /api/device/v2/schedule/graph`，不在服务端再跑同一规则 parser。
+4. 手机 validator 统一检查日期、时间、时区、持续时间、重复、提醒、范围和操作目标。
+5. 缺槽位时保留 graph/draft；补充走 `/schedule/graph/clarify`，只更新同一草稿。
+6. 最终事务只写 `laoji-schedule.db`。
+
+### 4.2 语音
+
+- 按下即启动本机 PCM buffer；连接状态不作为用户可见阻塞。
+- WSS 可用后按序补发 pre-connect 音频；断线保留 cursor 并重连。
+- ASR 文本进入同一 graph/validator，不建立“语音专用日程规则”。
+
+## 5. 会议媒体实现
+
+### 5.1 统一 RecordingAsset
+
+所有来源映射到同一字段：`asset_id`、`meeting_id`、`generation`、`source_kind`、`local_uri`、`mime`、
+`audio_duration_ms`、`sha256`、`ingest_stage`、`upload_operation_id`、`transcript_task_id`。
+
+状态单调：
 
 ```text
-device_epochs(
-  epoch_id PK, status CHECK(active/retired), created_at_ms, retired_at_ms
-)
-device_authority_state(
-  singleton_id PK CHECK(singleton_id=1),
-  current_epoch_id REFERENCES device_epochs(epoch_id),
-  authority_revision, next_binding_epoch_seq, updated_at_ms
-)
-meeting_service_bindings(
-  meeting_id PK REFERENCES meeting_notes(id) ON DELETE CASCADE,
-  device_epoch_id REFERENCES device_epochs(epoch_id),
-  binding_id UNIQUE, binding_generation, binding_epoch_seq, binding_revision,
-  state CHECK(active/purging/purged), cancel_revision, created_at_ms
-)
-device_operations(
-  operation_id PK, device_epoch_id REFERENCES device_epochs(epoch_id),
-  capability, entity_id, entity_revision, input_sha256,
-  generation_id, predecessor_operation_id, creation_reason CHECK(original/retry/regenerate),
-  operation_revision, cancel_revision,
-  remote_task_id, accepted_attempt_id, remote_state,
-  progress_done, progress_total, error_code, retry_after_ms,
-  created_at_ms, updated_at_ms, terminal_at_ms,
-  UNIQUE(device_epoch_id, capability, entity_id, entity_revision, input_sha256, generation_id)
-)
+accepted -> preparing -> local_ready -> upload_registered -> uploading
+         -> verified -> transcribing -> transcript_ready
 ```
 
-`device_operations` 是远端 intent/projection，不拥有 meeting/transcript/summary business state。所有
-远端结果带 epoch/operation/task/attempt/input identity；领域 repository 在一个本机事务中检查当前
-epoch、operation/cancel revision、accepted attempt 与预期实体 revision 后才提交。`binding_generation`
-由本机在创建会议事务中生成并保存 128-bit opaque 值；首次 `PUT` 只登记该值，服务端不得生成或
-替换。未成功登记 active binding 前不得提交远端领域任务。
-epoch 退休、取消
-或用户重试提升 fence，迟到结果只能记脱敏诊断。Transcript/Summary 仅保存 nullable
-`source_operation_id`；它是 provenance，不是第二生命周期 owner。
-
-### 0041 `VNextCutoverTombstones`
-
-记录已完成迁移、已关闭 owner 和兼容 API 最后使用时间。它不存业务正文，只用于阻止旧 provider/
-worker 在升级后复活。
-
-### 0042 `ImmutableSourcesAndQuestionQ2`
-
-```text
-manual_note_revisions(
-  revision_id PK, meeting_id REFERENCES meeting_notes(id), revision,
-  content, format, content_sha256, migrated_current, created_at_ms,
-  UNIQUE(meeting_id, revision)
-)
-manual_notes: add active_revision_id
-
-meeting_attachment_text_revisions(
-  revision_id PK, attachment_id REFERENCES meeting_attachments(id),
-  meeting_id REFERENCES meeting_notes(id), revision,
-  content_kind CHECK(text/extracted_text), content, content_sha256,
-  source_asset_sha256, extractor_revision, migrated_current, created_at_ms,
-  UNIQUE(attachment_id, revision)
-)
-meeting_attachments: add active_text_revision_id
-
-meeting_question_q2_snapshots(snapshot_id PK, meeting_id, source_fingerprint,
-                              transcript_revision_id, created_at_ms)
-meeting_question_q2_snapshot_sources(snapshot_id, ordinal, source_type, source_id,
-                                     source_revision_id, content_sha256)
-meeting_question_q2_threads(thread_id PK, meeting_id, snapshot_id, created_at_ms, updated_at_ms)
-meeting_question_q2_turns(turn_id PK, thread_id, request_id, current_operation_id,
-                          ordinal, question, answer_kind NULL, answer NULL,
-                          provider_revision, completed_at_ms NULL)
-meeting_question_q2_clauses(clause_id PK, turn_id, ordinal,
-                            answer_start_utf8, answer_end_utf8)
-meeting_question_q2_citations(citation_id PK, clause_id, ordinal,
-                              source_type CHECK(transcript/manual_note/attachment),
-                              source_id, source_revision_id, content_sha256,
-                              source_start_utf8, source_end_utf8, quote_sha256)
-```
-
-每个 clause 的 citation 集合语义为 `all_of`。Q2 没有 summary 来源和 general scope；pending turn
-允许 answer/completed_at 为空。升级只为迁移时真实存在的当前笔记和附件提取文本建立
-`migrated_current=1` revision，不能制造过去正文；旧 `meeting_question_*` 永远不提升成 Q2。
-
-`MeetingNoteRepository` 在保存笔记或附件提取结果的同一事务中先写 immutable revision，再更新
-`active_revision_id`；内容 hash 未变化不产生新 revision。任何远端 source bundle 只能引用已经存在
-的 revision，不能直接读取可变 `manual_notes`/`meeting_attachments` 行。
-
-`action_items` 保持唯一 mutable ActionItem 表：`status=pending/completed/dismissed`、
-`source_kind=generated/manual/marker`、`source_summary_version_id`、`source_segment_id`、
-`source_start_ms`、负责人、截止时间、提醒 ID 和 `updated_at_ms` 必须随 CAS 更新。候选采用、手动
-新建、编辑、完成/恢复、删除和后续日程都调用同一 repository/use-case；重生成只写候选，不更新
-已有 ActionItem。
-
-会议库保留并复用：`meeting_notes`、`manual_notes`、`recording_assets`、`transcript_revisions`、
-`transcript_segments`、`summary_versions`、`summary_fact_documents`、`summary_view_*`、
-`summary_knowledge_documents`、`summary_layout_preferences`、`summary_block_overrides_v4`、`action_items`、
-历史只读 `meeting_question_*`、新 `meeting_question_q2_*`、`meeting_tags/tag_links`、
-`meeting_list_order`、`meeting_attachments`、`meeting_content_shares`。`local_schedule_events` 只属于
-`laoji-schedule.db`，会议库中的同名表只是迁移源，复制核对后立即退役。
-
-### 0043 `TranscriptOverlayAndSearchVNext`
-
-```text
-transcript_revisions: add source_manifest_sha256, text_final_at_ms
-transcript_segments: add stable_segment_key, segment_revision, text_state
-speaker_overlay_revisions(revision_id PK, meeting_id, transcript_revision_id, ...)
-speaker_overlay_assignments(revision_id, stable_segment_key, automatic_label, confidence, ...)
-speaker_manual_overrides(meeting_id, stable_segment_key, expected_transcript_revision, label, ...)
-```
-
-旧 `speaker_assignments/corrections` 只读迁移到 overlay；无法稳定映射的修正标记 `needs_review`，
-不静默删除或强配到新片段。v20 已存在、且当前查询仓储仍在使用的 `meeting_search_fts` 在 Stage 2
-保持原结构；外部内容 FTS 与查询仓储一起在 0045/Stage 4 原子切换，禁止 0043 复用同名表但改变列结构。
-
-### 0044 `MediaGenerationAndTrashVNext`
-
-扩展 `recording_assets`：`asset_generation`、`source_sha256`、`local_state`、`upload_operation_id`、
-`remote_object_revision`。会议删除继续使用 `meeting_notes.deleted_at_ms`，新增统一 `purge_after_ms`；
-回收站不是单独复制表。
-
-### 0045 `ScheduleMentionGraphVNext` 与 schedule schema v1
-
-`0045` 是旧单库升级路径，负责在隔离复制前补齐 `local_schedule_events` 的 `event_revision`、
-`draft_source_sha256`、`producer_revision`、`graph_schema_revision`、`deleted_at_ms`。新库 schema v1
-直接创建完整列和索引；复制完成后应用不再查询或写入会议库旧表。Graph 只在编辑会话和诊断中短期保存，
-不为每次解析建立永久业务表。
-
-原 `native_projection_checkpoints` 继续服务会议 surface；`calendar` surface 迁到新库
-`native_schedule_projection_checkpoints`。两表只持久保存已接受的 revision、surface instance 和
-payload SHA-256，不复制页面正文；同 revision 同 hash 幂等，旧 revision 或同 revision 不同 hash 拒绝。
-
-### 0047 `UnifiedAdaptiveMeetingSummary`
-
-```text
-summary_knowledge_documents(
-  summary_version_id PK REFERENCES summary_versions(version_id),
-  schema_version CHECK(schema_version = 4), document_json, source_fingerprint,
-  model_revision, prompt_revision, reducer_revision, created_at_ms
-)
-summary_layout_preferences(
-  meeting_id PK REFERENCES meeting_notes(id),
-  mode CHECK(mode IN ('auto','custom')),
-  hidden_block_keys_json, updated_at_ms
-)
-summary_block_overrides_v4(
-  summary_version_id REFERENCES summary_versions(version_id),
-  stable_block_key, replacement_kind CHECK(replacement_kind IN ('paragraph','bullet_group')),
-  replacement_text, updated_at_ms,
-  PRIMARY KEY(summary_version_id, stable_block_key)
-)
-```
-
-`summary_view_preferences/template_id` 不改列语义、不迁成板块偏好。旧 V3/template 表只读保留；active
-repository 优先读取 V4，缺失时经 V3 compatibility adapter 组装同一页面。0047 事务只建表和索引，
-不得在数据库迁移中调用模型或批量伪造 V4 文档。布局偏好只保存真正存在的 optional block key；未知
-key 在读取时忽略，`恢复自动` 删除该 meeting 的偏好行。
-
-## 4. 服务端 canonical schema
-
-Stage 0 导入真实后端后，以当前 SQLite/WAL 库原位迁移：
-
-```text
-devices(device_id PK, current_key_version, token_revision, revoked_at, created_at)
-device_keys(device_id, key_version, public_key_der, public_key_hash,
-            created_at, retired_at, PRIMARY KEY(device_id, key_version))
-device_epochs(device_id, epoch_id, status, last_binding_seq, created_at, last_authenticated_at, retired_at,
-              PRIMARY KEY(device_id, epoch_id))
-device_rate_buckets(device_id, epoch_id, bucket_kind, tokens, last_refill_at,
-                    PRIMARY KEY(device_id, epoch_id, bucket_kind))
-auth_challenges(challenge_id PK, kind CHECK(bootstrap/auth/rotate),
-                device_id, epoch_id, nonce_sha256, proof_difficulty_bits,
-                expires_at, consumed_at, rate_bucket)
-meeting_bindings(binding_id PK, device_id, epoch_id, binding_generation, binding_epoch_seq,
-                 binding_revision, cancel_revision,
-                 state CHECK(active/purging/purged),
-                 created_at, purge_requested_at, purged_at,
-                 UNIQUE(device_id, epoch_id, binding_generation),
-                 UNIQUE(device_id, epoch_id, binding_epoch_seq))
-binding_purge_obligations(purge_id PK, binding_id, binding_generation,
-                          binding_revision, cancel_revision,
-                          state, not_before, claim_until, attempts, last_error_code)
-purge_capabilities(capability_id PK,
-                   scope_kind CHECK(epoch/binding), device_id, epoch_id,
-                   binding_id, binding_generation, secret_sha256,
-                   state CHECK(active/consumed/revoked),
-                   registration_request_id, created_at, consumed_at, revoked_at)
-tasks(task_id PK, device_id, epoch_id, binding_id, capability,
-      binding_generation, binding_revision,
-      client_operation_id, client_request_id, request_sha256, logical_request_sha256, generation_id,
-      lineage_root_task_id, predecessor_task_id, task_generation,
-      creation_reason CHECK(original/retry/regenerate),
-      handler_revision, provider_revision, prompt_revision,
-      state CHECK(active/success/failure/cancelled), state_revision,
-      current_attempt_id REFERENCES task_attempts(attempt_id),
-      current_checkpoint_slot CHECK(current_checkpoint_slot IN (0,1)), checkpoint_through_chapter,
-      checkpoint_reservation_id,
-      cancel_revision, next_retry_at,
-      source_stream_id, source_manifest_sha256,
-      result_artifact_id, result_kind, outcome_code, outcome_json,
-      terminal_code, created_at, terminal_at,
-      UNIQUE(device_id, epoch_id, client_request_id),
-      UNIQUE(device_id, epoch_id, client_operation_id),
-      UNIQUE(device_id, epoch_id, generation_id),
-      UNIQUE(device_id, epoch_id, binding_id, binding_generation,
-             capability, logical_request_sha256, task_generation),
-      UNIQUE(lineage_root_task_id, task_generation))
-task_attempts(attempt_id PK, task_id REFERENCES tasks(task_id) ON DELETE CASCADE, attempt_number,
-              state CHECK(queued/running/succeeded/retryable_failure/
-                          terminal_failure/cancelled/lease_expired),
-              phase CHECK(queued/admitted/running/committing),
-              lease_generation, worker_session_generation, lease_owner, lease_until,
-              epoch_id, binding_generation, binding_revision, cancel_revision_snapshot,
-              provider_request_id, handler_revision, error_code,
-              started_at, ended_at,
-              UNIQUE(task_id, attempt_number), UNIQUE(task_id, attempt_id))
-task_checkpoints(task_id REFERENCES tasks(task_id) ON DELETE CASCADE,
-                 slot_no CHECK(slot_no IN (0,1)), through_chapter_ordinal,
-                 source_prefix_sha256, input_sha256, handler_revision, provider_revision,
-                 produced_by_attempt_id, encrypted_aggregate, aggregate_sha256,
-                 sealed_at, PRIMARY KEY(task_id, slot_no))
-source_streams(stream_id PK, task_id UNIQUE REFERENCES tasks(task_id), device_id, epoch_id, binding_id,
-               binding_generation, binding_revision, cancel_revision,
-               client_operation_id, generation_id, request_sha256,
-               source_manifest_sha256, contract_revision,
-               manifest_accumulator_sha256, next_manifest_page,
-               next_consumable_chapter, final_chapter_count,
-               state CHECK(open/consuming/complete/cancelled/expired), expires_at,
-               UNIQUE(device_id, epoch_id, client_operation_id),
-               UNIQUE(device_id, epoch_id, generation_id))
-source_manifest_pages(stream_id, page_seq, first_chapter_ordinal,
-                      descriptor_count, page_bytes, page_sha256, final_page,
-                      reservation_id, state CHECK(received/compacted),
-                      PRIMARY KEY(stream_id, page_seq))
-source_bundle_groups(group_id PK, stream_id, chapter_ordinal,
-                     declared_bundle_count, declared_item_count,
-                     declared_uncompressed_bytes, reservation_id,
-                     state CHECK(open/complete/consumed/cancelled/expired), expires_at,
-                     UNIQUE(stream_id, chapter_ordinal))
-source_bundles(bundle_id PK, group_id, ordinal, bundle_sha256,
-               item_count, state CHECK(open/complete/consumed/cancelled/expired),
-               consumed_by_task_id, expires_at,
-               UNIQUE(group_id, ordinal))
-source_bundle_items(item_id PK, bundle_id, ordinal, source_type,
-                    source_id, source_revision_id, locator,
-                    source_start_utf8, source_end_utf8, content_sha256,
-                    UNIQUE(bundle_id, ordinal))
-encrypted_payloads(payload_id PK, bundle_id, item_id, source_type,
-                   source_id, source_revision_id, content_sha256,
-                   aes_gcm_nonce, ciphertext, aad_sha256, expires_at)
-generated_artifacts(artifact_id PK, task_id UNIQUE, source_manifest_sha256,
-                    contract_revision, provider_revision, output_sha256,
-                    encrypted_output, expires_at)
-public_shares(share_id PK, device_id, epoch_id, binding_id, binding_generation,
-              binding_revision, token_sha256, selection_sha256,
-              payload_kind, encrypted_payload_or_locator, reservation_id,
-              state CHECK(active/revoked/purging/expired),
-              created_at, expires_at, revoked_at, purged_at,
-              UNIQUE(device_id, epoch_id, share_id))
-verified_assets(asset_revision_id PK, binding_id, binding_generation,
-                binding_revision, cancel_revision, asset_id, generation,
-                byte_size, source_sha256, sealed_locator, reservation_id, state, activated_at)
-voiceprint_profiles(device_id, epoch_id, speaker_id, profile_revision,
-                    encrypted_embedding, embedding_model_revision, revoked_at)
-upload_sessions(session_id, device_id, epoch_id, binding_id, binding_generation,
-                binding_revision, cancel_revision, asset_id, generation,
-                object_key_hmac, multipart_upload_id, expected_size, expected_sha256,
-                last_presign_expires_at, reservation_id, state, ...)
-realtime_asr_sessions(session_id PK, task_id REFERENCES tasks(task_id), client_operation_id,
-                      device_id, epoch_id, binding_id,
-                      binding_generation, binding_revision, cancel_revision,
-                      asset_id, asset_generation, codec_revision,
-                      last_contiguous_chunk_seq, last_durable_event_seq,
-                      state CHECK(open/reconnecting/finalizing/succeeded/cancelled/expired),
-                      opened_at, last_seen_at, expires_at)
-realtime_chunk_checkpoints(session_id, chunk_seq, start_ms, end_ms, content_sha256,
-                           encrypted_spool_locator, state CHECK(spooled/consumed),
-                           PRIMARY KEY(session_id, chunk_seq))
-realtime_event_ledger(session_id, event_seq, event_kind CHECK(stable/final/error),
-                      stable_segment_key, payload_sha256, encrypted_payload,
-                      created_at, device_acked_at,
-                      PRIMARY KEY(session_id, event_seq))
-object_cleanup_obligations(obligation_id, binding_id, binding_generation,
-                           binding_revision, cancel_revision, opaque_object_ref,
-                           multipart_upload_id, reservation_id,
-                           not_before, claim_until, attempts, state, ...)
-capacity_reservations(reservation_id PK, device_id, epoch_id,
-                      resource_kind CHECK(r2_staging/source_manifest/source_payload/task_checkpoint/public_share),
-                      owner_kind, owner_id, reserved_bytes,
-                      state CHECK(active/releasing/released), created_at, released_at,
-                      UNIQUE(resource_kind, owner_kind, owner_id))
-cleanup_audit_aggregates(scope_kind CHECK(epoch/global), scope_id,
-                         obligation_kind, confirmed_count,
-                         last_chain_sha256, updated_at,
-                         PRIMARY KEY(scope_kind, scope_id, obligation_kind))
-cross_store_purge_journal(purge_id, device_id, epoch_id, binding_id,
-                          binding_generation, cancel_revision, target_store,
-                          opaque_scope_sha256, idempotency_key,
-                          state CHECK(pending/running/confirmed),
-                          next_retry_at, last_error_code,
-                          created_at, confirmed_at,
-                          PRIMARY KEY(purge_id, target_store))
-legacy_purge_scope_map(map_id PK, legacy_store, legacy_scope_kind,
-                       encrypted_legacy_locator, locator_sha256,
-                       device_id, epoch_id, binding_id, binding_generation,
-                       evidence_kind CHECK(request_context/exact_join/device_scope/unresolved_global),
-                       evidence_sha256, created_at,
-                       UNIQUE(legacy_store, locator_sha256))
-capability_cutovers(capability PK, contract_revision, barrier_id,
-                    activated_at, legacy_submit_closed_at,
-                    legacy_reader_removed_at, legacy_submit_count)
-```
-
-约束：
-
-- 相同 client request ID 与 hash 返回原 task；同 ID 不同 hash 返回 409。相同 binding generation、
-  capability、logical request hash 和 task generation 的并发请求由唯一约束/事务收敛为一个 task。
-- 客户端在本机先创建 `operation_id` 并随首次领域 POST 提交；服务端保存为 `client_operation_id`，
-  `/operations/{operation_id}` 只在 device/epoch scope 内查询。每次可见状态事务提升 `state_revision`；
-  operation WSS 的 `event_seq` 等于该 revision，cursor 落后时先返回当前 durable snapshot，不要求保存
-  全部中间文案事件。
-- `generation_id` 由客户端为每次 original/retry/regenerate 随机生成并在 lineage 内不可复用；同一个
-  generation 的网络重放收敛到原 Task，用户明确重新生成必须使用新 generation。服务端原子分配
-  单调 `task_generation`，并校验 predecessor/lineage root，不能根据 source hash 吞掉显式重生成。
-- Task 创建事务从部署配置冻结 `handler_revision/provider_revision/prompt_revision`；所有 Attempt 和
-  checkpoint 只能使用该快照。配置改变只影响后续新 Task，worker 不按失败类型静默换 provider/model。
-- 每个 task 的 `attempt_number` 从 1 开始，**总数最多 3 次（初次 + 最多 2 次自动重试）**；退避为
-  `5s/30s`，第三次仍失败进入 `failure`，不再保留 `retry_wait` 状态。用户重试/重新生成创建新
-  task generation，不增加旧 task 的 attempt。
-- terminal task 永不恢复 running。lease 过期先把旧 attempt 终结为 `lease_expired`，再创建新 attempt。
-- owner 在一个事务中完成 exact attempt、authority/cancel/binding CAS 和 artifact/outcome commit；
-  `current_attempt_id` 必须外键指向该 task 的唯一 active attempt，旧 attempt 不能再次成为 current。
-- 实际 SQL 使用 `(task_id, current_attempt_id)` deferred composite FK 指向
-  `task_attempts(task_id, attempt_id)`，并为每个 task 建立至多一个 queued/running attempt 的 partial
-  unique index；不能只靠应用层检查 attempt 是否属于该 Task。
-- `(task_id, current_checkpoint_slot)` 使用 deferred composite FK 指向 `task_checkpoints(task_id, slot_no)`；
-  Task 的 `checkpoint_through_chapter` 必须与 current 槽一致，提升槽和 ordinal 是同一 fenced 事务。
-- commit 同时 CAS current attempt、lease generation、worker session generation、attempt 的
-  epoch/binding generation/revision、cancel revision、active epoch 和 active binding revision。
-- `task_checkpoints` 是每 Task 固定两个槽的 crash-safe 滚动聚合，不按章节追加行。每槽密文上限
-  `4 MiB`；聚合内容受领域最终 schema 的同一数量上限约束，并携带已消费前缀的 chapter ordinal、
-  source prefix hash、handler/provider revision 和 aggregate hash。worker 先在非 current 槽完整写入、校验，
-  再以 current-attempt/lease/cancel fence 原子提升 Task 的 current checkpoint slot；旧槽在提升后才可覆盖。
-  新 attempt 只有在 source prefix、handler、provider 和 input hash 全部相同时才可复用。当前章节 payload
-  只在新槽成为 current 后删除，因此崩溃最多重放当前章节；两个槽均无法校验时 fail closed，客户端从
-  本机 canonical source 创建新 generation，不从残缺聚合继续。它替代递归摘要/章级子任务 owner，
-  不拥有独立状态机，随 Task 终态 TTL 清理。
-- source bundle 经 HTTPS 校验 locator/hash 后使用 AES-256-GCM；AAD 固定包含 device/epoch/binding/
-  generation/revision/cancel revision/bundle/source locator/hash。成功、永久失败或取消立即删除，
-  恢复所需最长 TTL 为 24 小时；没有
-  返回正文的 GET API。
-- generated artifact 默认 TTL 7 天；设备显式选择“帮助改进生成质量”时最长 30 天。公开 share
-  默认 7 天、上限 30 天且可撤销；task/attempt 元数据终态保留 30 天后压缩为无正文审计计数。
-- voiceprint 只保存派生 embedding；登记样本音频在提取成功/失败后删除，撤销 revision 立即 fence 旧缓存。
-- cleanup obligation 不能由 meeting/task/upload session 外键级联删除。
-- `public_shares` 不能被 binding/epoch 直接级联删除；purge 先原子设 purging/revoke token，再建立 payload/
-  object cleanup。share capacity reservation 只有在 public redeem 已 410 且 payload/R2 HEAD absent 后释放。
-- 手机在创建会议事务中从 `next_binding_epoch_seq` 分配并递增 seq；PUT 只接受服务端
-  `last_binding_seq + 1` 或同 binding/generation/seq 的幂等 replay。purge 确认且所有 presign/token/task
-  retention 窗口结束后可删 binding row，但 epoch high-water 不回退，任何旧 seq 无条件拒绝复活。
-- upload 创建事务先校验 `expected_size<=1 GiB`，再通过 `capacity_reservations` 原子检查每 device/global
-  active session `<=2/4` 与 R2 bytes `<=2/4 GiB`；失败不创建 session 或 presign。reservation 一直覆盖
-  incomplete multipart、最后 presign 可能的迟到 PUT、verified-but-unconsumed asset 和 cleanup；只有
-  abort/delete 后 HEAD absent 才进入 released。R2 lifecycle 24 小时只作兜底。
-- source stream 创建事务以 operation/generation/request hash 幂等插入 reservation，并在插行前检查
-  active stream（open/consuming）每 device/global `<=2/8`；manifest page 检查未 compact page `<=2/4` 与 bytes
-  `<=8/16 MiB`；chapter group 检查未消费 group `<=2/4` 与 payload bytes `<=256/512 MiB`。cancel、
-  expiry、page compact 或 group consumed 在删除实际 payload/row 的同一事务释放 reservation；released
-  reservation 24 小时后压缩为计数，不成为另一条无界 ledger。
-- source Task 创建时同时预留两个 `4 MiB` checkpoint 槽；每 device/global checkpoint reservation
-  `<=16/64 MiB`，超过水位不创建空壳 Task。checkpoint 行数固定为每 Task 0-2 行，不随章节数增长；
-  reservation 只在 Task 终态清理两个槽后释放。
-- native 在 epoch bootstrap complete 或 binding PUT 前先生成随机 capability ID 与 256-bit secret，写入
-  purge-only journal 的 `registering` 行，并只提交 secret SHA-256。服务端从不生成或返回 secret；相同
-  registration request/hash 幂等返回原 capability，响应丢失不会丢失唯一凭据。epoch scope
-  只能清理该 epoch 的 schedule/source/task/artifact/voiceprint 和全部 binding；binding scope 只能清理
-  对应 generation。purge 确认后原子标记 `consumed`；已 purging/purged 时幂等返回原 purge ID。
-- `purge_capabilities` 使用两个 partial unique index：epoch scope 唯一键为 `(device_id, epoch_id)`，且
-  binding 字段必须为空；binding scope 唯一键为 `(device_id, epoch_id, binding_id, binding_generation)`，
-  且 binding 字段必须非空。capability 与未确认 `cross_store_purge_journal` 均不得按时间自动过期。
-- 每次成功 token 交换只更新 `device_epochs.last_authenticated_at`，不记录位置或正文；超过 90 天未认证
-  的 active epoch 先转 `retired` 并创建 epoch purge obligation，不能只删 token 而保留 voiceprint/payload。
-- `cross_store_purge_journal` 不保存正文、标题、文件名、对象 key 或可创建任务的凭据，也不能被
-  binding/epoch 级联删除。它只在 legacy/generic 不同事务边界时使用；两个 target store 均确认删除
-  且关联 share/R2 object/multipart 已由 HEAD/list 证明不存在后才进入 `confirmed`。只“建立 cleanup
-  obligation”不算完成；confirmed 事务立即追加 epoch-scoped 链式 hash/count aggregate 并删除详细行，
-  epoch purge 时再合并到 global aggregate。
-- unconfirmed cleanup/purge obligation、journal 与未压缩 tombstone 合计每 device/global 最多
-  `4096/16384` 行且序列化 `<=64 MiB`。75% 水位可把同 epoch/binding 的 locator 集合并入一个 epoch
-  purge，但必须完整保留 object/multipart 引用；硬门停止新远端 bootstrap/binding/task/upload/share admission，
-  不停止本机删除和 purge worker。confirmed 行按上述 aggregate 立即压缩，未确认义务永不按 TTL 丢弃。
-- bootstrap epoch 以及任何可能产生远端 payload/object/share 的 binding/task/upload admission 都先预留最坏情况 cleanup
-  slot 与 metadata bytes；终态在同一事务把 reservation 转成 obligation 或在证明无需清理后释放。
-  已接纳操作因此不会在失败/取消时才发现 cleanup ledger 已满。
-- `legacy_purge_scope_map` 只用于定位删除，不得用于迁移、回答、artifact 激活或补造 provenance。
-  它覆盖 summary task 以及 account/sync/mirror/share 的所有服务端 legacy 表；v1 adapter 在 barrier 前
-  用真实 request context 写 map，历史行只接受可复验的主外键 join。locator
-  使用服务端密钥加密，日志只记 hash/evidence kind。无法精确到 binding 但能证明 device 的行标为
-  `device_scope`；连 device 也无法证明的行标为 `unresolved_global`，禁止猜测填值。
-- verified asset 激活与唯一 transcription task 在同一事务；R2 清理不删除 sealed asset，直到所有
-  消费者持有本地 checkpoint 或任务终态，恢复不得重新选择未经校验的对象。
-- realtime chunk 只有在加密 spool checkpoint 已 fsync 或对应 stable/final event 已持久提交后才 ack；
-  partial 不进入 durable ledger。session/事件/spool 受 binding/cancel fence 和全局临时盘预算约束，final
-  TranscriptRevision 被手机确认后立即清除，最长 TTL 24 小时。
-- WSS handshake 在一个事务创建/复用 generic transcription Task 并把 session 绑定到唯一
-  `task_id + client_operation_id`；session state 只拥有传输恢复，Task 仍是 final Transcript outcome owner。
-  手机 durable ack 后可删除对应 event；临时盘高水位不得丢未 ack stable/final，而是停止新 chunk ack、
-  typed 关闭连接并让本地录音稍后 replay。final CAS ack 后清 event/spool；24 小时过期时手机仍以本地
-  MediaAsset 创建新 generation，不把服务器 TTL 描述成原始音频丢失。
-
-Task 行是终态结果 envelope 的唯一 owner：`result_kind` 只能为 `artifact/content_outcome`；
-`result_kind=artifact` 时只允许 `result_artifact_id` 非空，`result_kind=content_outcome` 时只允许
-`outcome_code/outcome_json` 非空并由 `content-outcome.schema.json` 校验。`generated_artifacts` 只保存
-Task 引用的密文和哈希元数据，不重复保存 result kind 或 ContentOutcome。ErrorEnvelope 只写
-attempt/task error 字段，不得同时写 ContentOutcome。
-
-### 4.1 legacy task bridge-and-drain
-
-旧 `summary_tasks_v2` 没有 task-time transcript snapshot、epoch、policy、handler 和完整 payload 血缘，
-禁止全量迁移，也禁止用当前会议、当前 epoch、dedupe key 或固定常量制造 provenance。
-
-1. Stage 0 记录 legacy 行数、active lease、schema/table hash，并确认 legacy/generic 表是否位于同一
-   SQLite 事务边界；同时建立 `legacy_purge_scope_map`，只导入 request-time 或 exact-join 证据。不满足
-   同库条件时隐私删除使用可恢复 purge journal，而不伪称跨库原子。
-2. generic tables 与持久 `capability_cutovers` 先建立。barrier 前，v1 submit 继续写 legacy，v2/probe
-   才写 generic；先发布支持 v2 source/binding 的客户端并观察一个完整公开周期。对应 v1 submit 为零
-   后才逐 capability 激活 barrier；barrier 后 v1 submit 返回 `426 UPGRADE_REQUIRED`，只保留状态/结果读，
-   不允许 adapter 伪造 binding/source bundle。barrier 前 queued/running 仍由 legacy worker 排空。
-3. generic worker 只 claim generic row，legacy worker 只 claim barrier 前 legacy row。task ID namespace
-   不同；同一 ID 出现在两侧即 integrity failure。
-4. 状态按 task namespace 路由；过渡读为 generic first、legacy second。legacy 结果标记
-   `provenance=legacy_unbound`，只维持既有页面，不提升为 vNext artifact。
-5. meeting/epoch 永久删除先 fence 两侧 publication，再清理 task/payload/artifact；R2/object cleanup
-   obligation 不随业务行级联删除。若两 store 同库则一个事务完成，否则先写 purge journal，逐库
-   幂等执行，确认后才终结 journal。exact map 存在时精确删除；只有 device scope 时保守删除该 device
-   全部 legacy task/artifact。当前锁定为单用户部署，若存在 `unresolved_global`，首次永久 purge 或
-   Stage 5 retirement 会删除部署内全部 unresolved legacy task/artifact；它可能过删旧服务器生成结果，
-   但不删除手机业务数据，也绝不把这些行提升为业务 provenance。
-6. 不提供历史 importer。旧任务自然 drain/expiry；Q0/Summary V2 handler、route 和 reader 保留到
-   Stage 5 删除门，不能在新请求失败时静默 fallback。
-7. barrier 前可回滚到完整 legacy 链；barrier 后始终保留 v2 ingress 和 generic owner，只能显式切换
-   到保留的版本化 legacy handler adapter。Transcript adapter 读取 verified asset，Summary/Q0 adapter
-   读取 immutable source chapter，Schedule adapter 输出同一 MentionGraph schema；它们都只形成临时
-   typed input，不查询/写入 legacy meeting mirror，不拥有任务。已进入 generic 的任务继续 generic
-   drain/read，不迁回 legacy，不恢复 legacy submission、remote mirror 或 dual write。
-
-## 5. v2 公共 API
-
-业务请求带 `X-Laoji-Device-Id`、`X-Laoji-Epoch-Id`、15 分钟短期 bearer token 和
-`X-Laoji-Request-Id`。只有下述 bootstrap/auth challenge、token 交换、单用途 purge capability 和
-public share redeem 端点可免 bearer，且必须按其 challenge、签名、capability secret 和限流合同认证；错误统一返回
-`ErrorEnvelope`，不得用 HTTP 200 包装失败。
-
-### Bootstrap 与能力
-
-```text
-POST /api/device/v2/bootstrap/challenges
-POST /api/device/v2/bootstrap/complete
-POST /api/device/v2/auth/challenges
-POST /api/device/v2/auth/tokens
-POST /api/device/v2/auth/keys/rotate
-GET  /api/device/v2/capabilities
-GET  /api/device/v2/ready
-DELETE /api/device/v2/epochs/{epoch_id}
-POST /api/device/v2/purge-capabilities/{capability_id}/execute
-GET  /api/device/v2/purge-capabilities/{capability_id}
-```
-
-Android Keystore 生成不可导出的 P-256 签名密钥。bootstrap 是公开匿名注册：challenge 60 秒且单次
-消费，complete 校验 challenge、设备签名、自适应 18-22 bit proof-of-work，并执行每 IP 每 24 小时
-最多 3 个成功 epoch、全局每 24 小时最多 20 个成功 epoch 的部署配额。它不使用或分发共享 bootstrap
-secret，也不证明 APK 来源；安全边界是新 device/epoch 只能访问自己的任务且仍受业务队列/字节配额。
-native 在 complete 前先持久化随机 epoch ID、registration request ID 和 `registering` purge credential；
-complete 登记公钥和该 opaque epoch，并登记客户端预先提交 hash 的 epoch purge capability。相同 request
-ID/body 的响应可幂等重放，ID 相同/body 不同返回 409。后续 auth challenge
-同样单次消费，token 固定绑定 device/epoch/key/token revision，15 分钟到期。密钥轮换要求旧/新
-密钥双签名并原子提升 revision；设备私钥丢失时创建新 device/epoch，不伪造旧身份。关闭 epoch
-返回 purge ID，本机清除不等待远端完成；持久 purge credential 只允许继续该 epoch 清理，不能
-创建新任务。
-
-Bearer 免除表固定为：`bootstrap/challenges` 无 bearer 且按 IP 限流并返回 proof difficulty；
-`bootstrap/complete` 使用 bootstrap challenge + proof-of-work + 设备签名；`auth/challenges` 使用 device/epoch/key identity 与
-限流，不接受正文；`auth/tokens` 使用未消费 auth challenge + 设备签名。四者之外没有“token 过期
-仍可调用”的隐式例外；`auth/keys/rotate` 必须携带当前 bearer 和旧/新密钥双签名。另有两个
-`purge-capabilities` 端点只接受 epoch/binding 登记前由 native 生成的单用途 capability secret，不接受通用 bearer，
-也不能读取正文、列举 binding 或创建任务。`capabilities`、`ready`、普通 binding/source/operation
-和 `/purges/{purge_id}` 查询均要求有效 bearer。
-
-唯一另一项 bearer 例外是 `POST /api/public/v1/shares/{share_id}/redeem`：`GET /s/{share_id}` 只返回
-静态落地页，客户端从 URL fragment 读取 256-bit secret 并在 POST body 兑换，token 不进入 query/access
-log。服务端 constant-time 比较 token hash；share token 不得调用任何 device API。active 且未过期时只返回本次
-明确选择的投影，revoked/purging/expired 或 binding fence 不匹配统一返回 410，未知 ID 返回 404。
-
-两个 purge-only 端点都要求 path capability ID、`X-Laoji-Purge-Request-Id` 和
-`Authorization: LaojiPurge <secret>`；服务端 constant-time 比较 secret hash。epoch 与 binding scope
-使用同一 wire schema，execute 幂等返回 purge ID，status 只能返回 `pending/running/confirmed` 和
-脱敏错误码，不能返回被删除对象清单。epoch/binding 与 capability hash 必须在同一事务创建；未知
-高熵 capability ID 返回 `404 CAPABILITY_NOT_REGISTERED`，供 `pending_probe` 收敛，不能返回相近 scope。
-
-### 日程
-
-```text
-POST /api/device/v2/schedule/graphs
-POST /api/device/v2/schedule/graphs/{draft_id}/clarify
-WSS  /api/device/v2/realtime/schedule-asr
-```
-
-POST 输入 raw text、reference time/timezone、locale、可选 prior graph/draft revision；输出
-`ScheduleMentionGraph`，不写日程。服务端禁止返回已保存事件 ID。
-
-### 上传与转写
-
-```text
-PUT    /api/device/v2/meetings/{binding_id}
-GET    /api/device/v2/meetings/{binding_id}
-DELETE /api/device/v2/meetings/{binding_id}
-GET    /api/device/v2/purges/{purge_id}
-
-POST /api/device/v2/uploads
-POST /api/device/v2/uploads/{session_id}/parts
-POST /api/device/v2/uploads/{session_id}/complete
-GET  /api/device/v2/uploads/{session_id}
-DELETE /api/device/v2/uploads/{session_id}
-
-POST /api/device/v2/meetings/{binding_id}/transcripts
-WSS /api/device/v2/meetings/{binding_id}/realtime-transcripts
-GET  /api/device/v2/operations/{operation_id}
-WSS  /api/device/v2/operations/{operation_id}/events?after_event_seq={cursor}
-POST /api/device/v2/operations/{operation_id}/cancel
-POST /api/device/v2/operations/{operation_id}/retry
-POST /api/device/v2/operations/{operation_id}/regenerate
-GET  /api/device/v2/artifacts/{artifact_id}
-POST /api/device/v2/shares
-DELETE /api/device/v2/shares/{share_id}
-GET /s/{share_id}
-POST /api/public/v1/shares/{share_id}/redeem
-
-POST   /api/device/v2/speakers
-POST   /api/device/v2/speakers/{speaker_id}/samples
-DELETE /api/device/v2/speakers/{speaker_id}
-```
-
-`binding_id` 是本机生成的随机 UUID v4，不复用 meeting ID；`binding_generation` 是同时生成的随机
-128-bit 值，在同一 device epoch 内永久唯一。`PUT /meetings/{binding_id}` 必须提交 generation、
-`binding_epoch_seq`、初始
-`binding_revision=1` 和 `cancel_revision=0`；服务端只接受、校验和持久化，禁止替客户端生成、从 meeting
-ID 推导或为已 tombstone 的 generation 重新建 binding。后续 revision/cancel revision 只能单调增加。
-native binding registrar 在每个 epoch 内按 `binding_epoch_seq` 串行，不跳号；后分配的 meeting 仍可
-本地使用，但远端任务等待前序登记。若前序 meeting 在联网前已永久删除，仍只登记 opaque binding 后
-立即用已持久 purge capability 清理，不上传标题、正文或媒体，从而推进 high-water 而不复活业务数据。
-首次 PUT 同时提交 native 已持久化的 `purge_capability_id + secret_sha256 + registration_request_id`；
-服务端只保存 hash，权限严格限制为对该 device/epoch/binding generation 发起幂等永久清理并查询结果。
-201/幂等 200 确认后 native 把 credential 标为 `armed`；secret 不进入 JS、业务 SQLite 或普通 SecureStore。
-远端 binding 只表达 device/epoch/task 归属，不保存标题、标签或会议生命周期。移入回收站不调用远端；
-永久删除或 30 天到期才 fence binding 并创建 purge obligation。purge 先拒绝迟到 commit，再删
-payload/artifact；R2 obligation 独立保留
-至 abort/delete/HEAD 证明完成。上传创建请求必须携带 binding ID/generation/revision、asset
-generation、expected size/hash；每个 part/complete/delete 都带并校验 binding cancel revision。
-binding purging 后旧 presigned PUT、complete、activate 和 transcription claim 均归类为
-`BINDING_PURGING`，不得重新打开 upload session。
-
-会议实时 WSS 首帧提交 device/epoch、binding generation/revision/cancel revision、asset ID/generation、
-随机 session ID、codec revision、`resume_from_chunk_seq` 和 `resume_from_event_seq`。音频帧固定携带单调
-`chunk_seq`、源起止毫秒、PCM hash 与 payload；服务端返回最高连续 `chunk_ack_seq` 和单调
-`event_seq`。native 先写本地录音，再发送并保留未 ack chunk；断线/进程重启后用同 session 和 cursor
-重放，重复 hash 幂等，序号相同但 hash 不同返回协议错误。GET operation 同时返回
-`last_durable_event_seq + stable/final snapshot`，因此漏掉 WSS event 不会丢失已稳定文字。
-
-WSS 握手要求有效短 token；服务端在每个 chunk/event 边界复核 expiry、token revision、epoch 与
-binding cancel revision。token 到期或撤销时发送 typed auth event 后以 4401 关闭，native 继续本地
-录音，换取新 token 后从两个 cursor 续接；禁止让旧连接无限延长失效凭据。
-
-### 整理与问答
-
-```text
-POST /api/device/v2/meetings/{binding_id}/summaries
-GET  /api/device/v2/meetings/{binding_id}/summaries/{operation_id}
-POST /api/device/v2/meetings/{binding_id}/questions
-GET  /api/device/v2/meetings/{binding_id}/questions/{operation_id}
-POST /api/device/v2/meetings/{binding_id}/source-streams
-POST /api/device/v2/source-streams/{stream_id}/manifest-pages
-POST /api/device/v2/source-streams/{stream_id}/groups
-POST /api/device/v2/source-bundle-groups/{group_id}/bundles
-POST /api/device/v2/source-bundle-groups/{group_id}/commit
-DELETE /api/device/v2/source-streams/{stream_id}
-```
-
-Summary 不接模板 ID、板块显隐或图表偏好；Task 创建时冻结 `summary.knowledge.v4` handler 和
-schema/prompt/model/reducer revision，最终 artifact kind 为 `meeting_knowledge_v4`。Question 不接 summary
-sections 或历史 answer text。来源 manifest 只含稳定
-revision/hash。短会是一个 stream/一个 chapter；长会按确定性章节顺序消费，不因会议时长拒绝，也不
-在 task 创建前暂存整场正文。stream 创建提交 binding generation/revision/cancel revision、客户端
-operation/generation/idempotency hash 与 contract revision；同 request/hash 幂等，同 ID/不同 hash 409。
-每 device/global 最多 2/8 个 active stream（open/consuming）；空 stream 30 分钟无活动过期，已有内容的
-stream 在 24 小时无有效 page/group/checkpoint 活动后过期，正常进度会续租，因此不形成会议时长门。
-
-章节描述通过连续 manifest page 上传；每页最大 4 MiB/10,000 descriptors，每 device/global 最多
-2/4 个未 compact page，manifest outstanding bytes `<=8/16 MiB`，插行前用 capacity reservation 原子
-准入。服务端按 page/chapter ordinal 和 page hash 更新滚动 Merkle accumulator；final page 冻结
-`source_manifest_sha256/final_chapter_count` 后才允许已绑定的 Summary/Q2 Task 进入最终 generating/
-publication。已消费 page 压缩为
-accumulator/ordinal 并释放 row/bytes，因此页数和会议时长不形成持久无界行。
-
-source stream 创建与空壳 Task 在同一事务完成并互相绑定，`generation_id` 是未完成 manifest 时的幂等根；
-Task 保持 `active`，typed detail 为 `awaiting_source`，没有 source group 时 Attempt/phase 为空且不占
-provider slot。worker 可在 stream
-仍 open 时逐页处理 complete group，并把本章事实/证据确定性并入两槽滚动 checkpoint；final page 才冻结 Task 的
-`source_manifest_sha256/final_chapter_count`。只有 manifest final 且 current checkpoint 已覆盖最终 chapter 后才提交
-artifact。达到上述 inactivity expiry 时以 `SOURCE_STREAM_EXPIRED` 终结 Task 并清 reservation。
-
-每个 group 创建时声明并通过 capacity reservation 在同一 SQLite 事务原子预留
-`bundle_count<=8`、`item_count<=50,000`、
-`uncompressed_bytes<=128 MiB`；每 bundle 仍不超过 16 MiB。每项带 source type/id/revision、locator、
-UTF-8 range 和 content hash。commit 只有在 ordinal 连续、声明计数/字节和 item hash 与 manifest 一致，
-且 stream cancel revision 仍匹配 active binding 时才完成。每 device 最多 2 个、全局最多 4 个未消费
-group；outstanding source bytes 每 device `<=256 MiB`、全局 `<=512 MiB`，超限返回 429 而不创建空壳行。
-
-Summary/Q2 Task 引用绑定的 stream ID。worker 按 chapter ordinal 消费 complete group，将本章结果和当前
-聚合按领域确定性 reducer 合并；Summary reducer 必须持续满足 Knowledge V4 的主题、事实、关系、数据、
-观点、行动和引用上限，Q2 reducer 持续满足 clause/citation/证据候选数量上限；两者都不保存已淘汰章
-结果。新滚动槽完成 schema/hash 校验并经 fenced CAS 成为 current 后，
-才删除该 chapter payload、标记 group consumed 并释放预留，再接收/消费下一章；所有 chapter 成功后才
-从 current 聚合提交最终 artifact。最终 source manifest root、已 compact page 的滚动 Merkle accumulator
-和 current checkpoint 的 source prefix hash 共同证明处理前缀；不会为每章保留输出行。
-取消/删除先 fence stream/group/checkpoint 再清 payload。不存在临时
-对象直读或整场 source 同时驻留的第二路径。cancel、24 小时 inactivity expiry 或 complete 都删除未消费页/group
-并释放 reservation；空 stream、manifest page 和 group 的数量/字节都不能绕过准入。
-
-HTTP 合同固定为：bootstrap/token/binding 创建 `201`，异步 task/source 提交 `202`，查询/幂等 replay
-`200`，输入或 revision 冲突 `409`，过期/已 purge binding `410`，对象/来源超限 `413`，旧提交入口关闭
-`426 UPGRADE_REQUIRED`，有界队列忙
-`429 + retry_after_ms`，鉴权失败 `401/403`。每个 `202/200` 的异步响应都使用
-`OperationEnvelope`；不会用 `200` 包装业务失败。
-
-`POST retry` 只接受 `task_state=failure` 的终态 operation，由客户端提交新的 `generation_id` 和同一领域输入，创建
-`creation_reason=retry` 的新 Task；它不重开旧 Task。`POST regenerate` 只接受已有成功 artifact 的
-operation，由客户端提交新的 `generation_id`、当前 source fingerprint 和领域输入，创建
-`creation_reason=regenerate` 的新 Task；来源未变仍允许用户显式重生成。provider、handler 和 prompt
-revision 只由服务端当前部署配置选择，并在 Task 创建事务中冻结；客户端不能提交、覆盖或触发云端
-选择。两者都返回
-新 `OperationEnvelope`，旧结果和旧 Task 保持不可变。普通首次提交使用领域 POST，不复用这两个端点。
-
-`GET /artifacts/{artifact_id}` 要求与 Task 相同的 device/epoch/binding 授权并校验未过 retention；返回
-领域 schema artifact 或 404/410，locator 不能用作公开分享 token。公开分享仍只走独立 share API。
-
-### 分享与地址
-
-保留 `/api/location/reverse` 的 v2 设备限流入口。`POST /api/device/v2/shares` 要求 device bearer、
-active binding generation/revision、显式 selection hash 和 TTL，请求明确列出 Markdown、附件或音频，
-默认仅 Markdown；客户端先生成 share ID/256-bit secret，只提交 token hash，并本地保存
-`/s/{share_id}#capability={secret}`，
-服务端不生成/返回 secret。相同 request/hash 幂等。创建事务限制每 device/global active share
-`<=32/128`、referenced/copied payload `<=8/32 GiB`，并写 capacity reservation；超限返回 429，不创建
-token/payload。DELETE 立即
-原子设 revoked，使 public GET 返回 410，再异步删 payload/R2。binding/epoch purge 在同一 fence 事务
-把关联 share 全部设 purging；只有 payload 删除、R2 HEAD 不存在且 public GET 已为 410 才可确认 purge。
-share row 可保留无 token/payload tombstone 到审计 TTL，不得保留可读内容。
-
-音频或附件进入公开分享前，服务端必须复制为独立 `share object`，或在同一事务中把已完成校验的
-verified object 原子登记为有 TTL 的 `share lease`；禁止把 staging R2 URL、上传 session locator 或
-内部 artifact locator 直接返回给公开访问者。staging capacity reservation 只有在 share object 的
-HEAD/hash 校验成功，或 share lease 已持久化且绑定 cleanup obligation 后才可释放。公开落地页从 URL
-fragment 读取 secret，再以 `POST /api/public/v1/shares/{share_id}/redeem` 的 body 兑换；API 网关在
-开始响应及每个不超过 `1 MiB` 的流式 chunk 前重新检查 share/binding/epoch revision，发现撤销即终止
-在途响应，Range 续传重新兑换。禁止签发任何可绕过该检查的对象 URL。撤销、TTL 到期和 binding/epoch
-purge 必须立即使 capability 与 share lease 不可兑换，并由同一 cleanup obligation 完成 DELETE/HEAD
-确认。
-
-## 6. 状态与错误合同
-
-共享 task 与 attempt 分层状态：
-
-```text
-task:    active -> success | failure | cancelled
-attempt: queued -> running -> succeeded
-                    |-> retryable_failure -> new attempt on same active task
-                    |-> terminal_failure
-                    |-> lease_expired -> new attempt on same active task
-                    |-> cancelled
-phase:   queued -> admitted -> running -> committing
-```
-
-领域 progress 作为 typed detail，不增加共享状态。状态只单调前进。每个 task 总计最多 3 个
-attempt（初次 + 2 次自动 retry），退避固定为 `5s/30s`，generic owner 不存在第三次自动退避或
-`retry_wait` 状态。用户点击重试走 `POST retry`，成功结果重新生成走 `POST regenerate`，两者均创建
-lineage 中更高 generation 的新 task。terminal task 永不复活。相同 request ID/hash 是只读 replay；
-相同 ID/不同 hash 返回 409。
-
-`busy` 只是 `task=active + attempt=queued + phase=admitted` 的 admission detail，`cancel_requested` 只是
-手机 `device_operations` 已提升 cancel intent、等待服务端确认的本地投影；二者都不是 Task/Attempt
-lifecycle state，也不得写入 canonical state 列。服务端确认后才进入 `cancelled`。
-
-成功 task 的 `result_kind` 必须为 `artifact` 或 `content_outcome`。`artifact` 通过
-`result_artifact_id` 指向唯一密文 artifact；`ContentOutcome` 只覆盖没有普通 artifact 的两类：
-
-```text
-no_content(code, measurements)
-limited(code, constraint_metadata)
-```
-
-`NO_SPEECH` 是 `task=success + no_content`，包含 analyzed/voiced duration 与 VAD revision；手机提交
-零 segment 的 final TranscriptRevision。它不得进入 error、failed、blocked 或自动重试。
-`EVIDENCE_INCOMPLETE` 和“完整会议无法确认”是 `limited`；provider/decode/schema/citation 失败才是
-ErrorEnvelope。
-
-标准错误：
-
-```text
-OFFLINE, AUTH_REQUIRED, DEVICE_REVOKED, INPUT_STALE, IDENTITY_CONFLICT,
-BINDING_REQUIRED, BINDING_PURGING, SOURCE_ENVELOPE_INVALID,
-SOURCE_ENVELOPE_TOO_LARGE, SOURCE_STREAM_EXPIRED, UPLOAD_EXPIRED, OBJECT_VERIFY_FAILED,
-PROVIDER_BUSY, PROVIDER_UNAVAILABLE, PROVIDER_TIMEOUT, PROTOCOL_INVALID,
-CITATION_INVALID,
-CANCELLED, UPGRADE_REQUIRED, STORAGE_LOW, INTERNAL_RETRYABLE, INTERNAL_TERMINAL
-```
-
-ErrorEnvelope 的 code 不与 ContentOutcome code 复用；客户端按 typed outcome/state 决定展示和重试，
-不解析中文文案。
-
-每个 operation 响应使用同一 `OperationEnvelope`：
-
-```text
-{ task_id, operation_id, attempt_id, attempt_number,
-  generation_id, predecessor_task_id,
-  task_state, state_revision, event_seq, attempt_state, phase, next_retry_at,
-  result_kind, artifact_locator, outcome_code, outcome_json,
-  handler_revision, provider_revision, prompt_revision,
-  error_code, retry_after_ms }
-```
-
-source stream 尚在 `awaiting_source` 时 `attempt_id/attempt_number/attempt_state/phase` 允许为空；创建首个
-Attempt 后必须完整返回，客户端不能把 nullable attempt 解释成失败。
-
-`result_kind=artifact` 时返回 artifact locator；`result_kind=content_outcome` 时只返回通过 schema
-校验的 outcome code/measurements/constraint metadata；`error_code` 与 outcome 互斥。`POST retry`
-只接受 `task_state=failure`，`POST regenerate` 只接受 `task_state=success + result_kind=artifact`；
-二者均创建新 task generation，
-自动 retry 才保持原 task ID 并增加 attempt。
-
-## 7. UI 投影实现
-
-新增 `src/native/projectionEnvelope.ts` 和 Kotlin `ui/ProjectionEnvelope.kt`。JS 生成 snapshot 时固定
-entity/view revision 与 payload hash；native action 必须回传它们。`nativeMinutesRequestCoordinator`
-是唯一 Minutes 跨边界仲裁器。
-
-native 持有 recorder/player/WorkManager 与 surface 瞬时状态，但必须通过 `RecordingOperation`、
-`PlaybackOperation`、`TransferOperation` 和 envelope 暴露单调 command/checkpoint；不得把它们复制成
-第二套 meeting/transcript business state。
-
-页面状态规则：
-
-- 列表只显示稳定的简短状态；详情是 operation 细分状态的唯一完整入口。
-- 状态放在既有标题/日期行的尾部或内容区内，不新增永久占位行。
-- transcript partial 追加不切换 tab、不重建播放器、不滚动用户视口。
-- summary regenerate 显示上一结果并叠加单一进度；按钮不在生成/重新生成之间交替。
-- question pending 是 thread 内不可变 turn；退出重进从 repository 恢复。
-- 固定控件在 loading/error 出现前后几何位移 `<=2dp`。
-- `queued/admitted/busy/retryable_failure/cancel_requested` 映射为同一 operation 的行内细分状态；不会创建
-  第二条列表记录。首次整理无旧结果时显示稳定 skeleton，讲话人独立失败只在讲话人入口说明，
-  不把 Transcript 或整理降级为失败。
-
-### 7.1 清除本机数据的 purge-only journal
-
-`LocalDataEraseCoordinator` 顺序固定为：停止 recorder/player/WorkManager 并等待当前本机事务 -> 将当前
-epoch 和每个尚未完成清理的 binding credential 从 `armed -> pending`、`registering -> pending_probe`
-原子推进并 fsync journal ->
-删除 SQLite 业务行、媒体/附件/clip、
-AsyncStorage、SecureStore、通知、更新文件、native prefs 和内存投影 -> 重启到空设备状态。
-
-purge-only journal 不进入业务 SQLite 或普通 SecureStore，而进入 Android Keystore 独立 alias
-`laoji_purge_only_v1` 保护的 app-private `purge-only/` 原生 capability journal。canonical row 为：
-
-```text
-PurgeOnlyJournalV1 {
-  scope_kind=epoch|binding,
-  capability_id, capability_secret_ciphertext,
-  device_epoch_id, binding_id?, binding_generation?,
-  registration_request_id, purge_request_id?,
-  state=registering|armed|pending_probe|pending|executing|confirmed|confirmed_absent,
-  next_retry_at, created_at, last_error_code
-}
-```
-
-`registering` 在提交注册前已经持久化 secret；epoch/binding 与 capability 在服务端同一事务创建，
-幂等注册确认后进入 `armed`。清除遇到 `pending_probe` 时先用 purge status 探测：capability 存在则
-进入 `pending` 并 execute；服务端明确返回 `CAPABILITY_NOT_REGISTERED` 证明原创建事务未提交时进入
-`confirmed_absent`；超时/未知只重试，不能猜成 absent。只有永久删除或全量本机清除事务才能把
-`armed` 推进到 `pending`。每行只含 opaque scope 和单用途凭据，不含正文、会议 ID 映射、设备长期密钥、文件名、对象 key 或
-创建任务权限。业务清除删除所有普通 Keystore/SecureStore alias，但明确保留
-`laoji_purge_only_v1`；native 组件是唯一可解密调用者，JS 无读取 API。联网后用 capability 端点创建/
-确认服务端 purge，再先删除 journal row；最后一行 `confirmed/confirmed_absent` 后才删除 purge-only alias。未确认 journal 不按
-时间过期，后台使用有界退避持续重试。若用户绕过应用流程直接卸载导致 journal 与 Keystore 一并丢失，
-服务器对 90 天无 token 活动的 orphan epoch 自动执行同一 purge，并令旧 epoch/token 永久失效。
-离线清除由此不阻塞本机删除，也不会因清除普通设备凭据而自锁或把“请求已发出”记成清理完成。
-
-## 8. Stage 0：冻结与代码归一
-
-入口：公开 `1.1.10/118` manifest、APK metadata、hash/size 和生产进程已只读核对。
-
-实施：
-
-1. 保存 APK、公开 manifest、移动 SQLite `PRAGMA integrity_check`、媒体清单和当前版本字段。
-2. 将当前 dirty mobile source、APK bundle 中的 schema 标记和 Git HEAD 做 manifest，确认 v39 对应
-   源码后形成可回溯基线提交；不能只保存 commit `48e3b36`。
-3. 从生产 cwd 创建只读源码 tar/hash，导入 `services/laoji-api`；从 8030 源 cwd 导入
-   `services/laoji-asr`。systemd/environment 只导入脱敏模板。
-4. 建立 `contracts/vnext` schemas 和三端生成检查。
-5. 生成 current-to-target 文件、表、route 和进程 inventory；对 backend `local.db`、`schedule.db`、
-   `speaker_voiceprints.db` 逐表记录 owner、行数、外键、目标表、迁移/排空/保留动作和快照恢复顺序；
-   对每个 account/sync/mirror/share/task 表同时记录 exact/device/unresolved legacy purge scope；0 字节路径
-   只记录配置引用，未知归属不能删除。
-6. 创建本机数据库备份/恢复工具，Windows/Linux 均使用 Python 3/Node，无 shell-only 逻辑。
-
-退出：后端源码可从仓库构建；所有当前用户能力、表、route 有目标映射；快照可恢复；无生产写入。
-
-回滚：本阶段只有新增文档/源码副本/工具，删除候选目录即可；生产无回滚动作。
-
-## 9. Stage 1：本机权威与最小远端任务
-
-入口：Stage 0 exit gate 通过，inventory、快照恢复和 schemas 已冻结。
-
-实施：
-
-1. 顺序执行 0040/0041/0042，接入 epoch/binding/operation、cutover counter、immutable source 和 Q2 表。
-2. 新安装分别创建 schedule/meeting canonical store；旧安装执行一次性、可恢复、带逐行字段核对和
-   row count 的导入，导入成功后停止反向 legacy mirror。此处只迁手机业务数据，不包含服务端 legacy
-   task；历史笔记/附件只为当前真实正文创建 `migrated_current` revision。
-3. meeting/schedule 各自写入本领域 repository transaction；日程迁出 AsyncStorage metadata、编辑和
-   删除 journal；UI/store 不直接拼 SQL/网络结果。跨领域命令不得假设跨库原子性，只能用稳定 ID、
-   幂等 request 和可重试 use case 组合。
-4. `device_operations` 接管上传、转写、整理、补全和删除 remote intent；`processing_stages` 只作派生
-   UI projection，WorkManager 只作执行器。
-5. 建立本机 speaker profile/deletion owner，迁移 SecureStore/AsyncStorage/native prefs 中重复 key。
-6. 为 ActionItem 建立唯一 repository，保留手动/候选/标记三种 provenance，以及编辑、完成、删除、
-   负责人、截止、提醒和后续日程；停止账号协作新写但保留历史只读。
-7. 当前 Q0/旧 Question 与 Summary 兼容整链继续作为默认直到 Stage 3 capability barrier；0042 Q2
-   只建新表不接流量，历史 answer 不进入新证据合同。Knowledge V4、Facts V3 与 V2 compatibility
-   不得产生第二 current pointer，也不得在 Stage 3 前切断当前可用生成服务。
-8. 会议详情 route 只组合 transcript/summary/question/speaker/audio/marker 领域投影，不再拥有各自生命周期。
-9. 部署 challenge/token/binding/source-stream API 与 generic task owner；使用专用 probe capability 和
-   fake provider 完成 restart/cancel/replay，真实 domain 尚不激活 barrier。
-10. account/guest 分支收敛为 device scope；旧 account API 只读 adapter 保留一周期。
-11. 从一个 RouteRegistry 生成 RootStack 类型、Navigator、sanitizer、通知和 semantic link；删除账号和
-   公开 token 分享幽灵 route。
-12. 新增 RecordingOperation 和 LocalDataEraseCoordinator；清除覆盖 recorder/player/worker、SQLite、
-    AsyncStorage、SecureStore、通知、附件、录音、clip、更新文件、native prefs 和内存投影。
-13. 停止创建无消费者的 sync outbox；旧 pending 行只读导出后标记 cutover，不伪造成功。
-14. 从 Stage 1 起持久记录每个 legacy submit/read/active lease；验证 bridge 两侧 task namespace、
-    generic-first/legacy-second 读取、delete-only legacy scope map，以及同库事务或跨库 purge journal。
-
-退出：离线日程和会议 CRUD 不访问网络；每类数据/任务/view state 只有一个 owner；AsyncStorage 无
-业务正文或恢复任务；无 subscriber outbox 为零；route registry/type/Navigator/sanitizer 一致；远端
-task 重启后可恢复；同 logical generation 只产生一个结果；ActionItem 全部当前行为回归；Q2 pending
-turn 与 immutable source revision 可持久；清除本机数据在离线/录音中/重启后无业务正文残留，
-只允许保留不可读取业务内容、仅能执行清理的 purge credential/outbox；旧版客户端仍走 v1。
-
-回滚：feature capability 只切换读取入口；0040 表保留但停止写，不恢复反向双写，也不把 v2 结果
-反写旧 sync owner。
-
-Stage 1 停写/退出门：generic probe 的 restart/cancel/replay、epoch/binding fence、purge-only journal
-和本机 clear 回放通过；旧同步 owner 只允许 drain/read，submission counter 从此刻开始计数；任何
-未满足 owner 唯一性的领域不得进入 Stage 2。Stage 1 不物理删除 legacy 表或任务。
-
-## 10. Stage 2：媒体、上传、转写与讲话人
-
-入口：Stage 1 exit gate 通过，v2 owner、device identity、0040/0042 和 purge-only journal 已可用；
-0043/0044 尚未执行，属于本阶段首个可回滚 migration unit。
-
-实施：
-
-1. 顺序执行 0043/0044；MediaAudioExtractor 输出 app-private 可 seek 音频和 hash。本机 importer
-   以会议身份独立加锁，所有确认任务先持久化，内部最多同时准备 3 条不同会议资产；恢复、删除和 acknowledge 与同会议 ingest
-   共用锁，禁止全应用 I/O 锁重新串行化。上传入口仅在容量已满或恢复独占阶段不可用。
-2. MeetingUploadWorker 接入 single/multipart R2；server upload/verified-asset/cleanup schema 与 API 上线。
-   服务端校验 R2 对象时可把同一压缩媒体流写入私有有界缓存，但必须在 verified asset + Task 事务提交后
-   才原子发布；缓存不是业务真相或整份 WAV，缺失时回退 R2，任务终态和孤儿条目必须清理。
-3. 先发布 v2 upload/transcript 客户端；对应 v1 submit 连续一个完整公开周期为零后激活 capability
-   barrier。server commit 在同事务激活 verified asset 并创建唯一 generic transcription task；barrier 后
-   v1 submit 返回 426，旧 ASR job 只由旧 worker drain。
-4. 8030 增加 stable batch/stream DTO；VAD 片段同时投递 ASR/CAM++ 队列。
-5. 接入 realtime WSS chunk ack/event cursor/durable snapshot/token refresh；mobile 保存
-   partial/stable/final text，speaker/manual overlay 独立应用。
-6. 声纹样本只用于生成 scoped encrypted embedding，样本音频随后删除；撤销提升 profile revision。
-7. 对 realtime、导入、无语音、断网、kill、重启、删除/恢复做端到端回放；NO_SPEECH 必须提交
-   success/no_content 和零 segment final revision，不进入失败或 retry。
-
-当前隔离实现还包含一个上传恢复顺序切片：设备 v2 原生成功必须先把远端资产身份写入
-canonical `recording_assets`，再推进 `device_operations` 终态；旧 AsyncStorage registry 只作为
-兼容补集，遇到成功/取消代际会被抑制。该切片已通过 SQLite、静态合同及 `emulator-5562` 网络/
-进程恢复回放，但尚未激活 capability。
-
-目标退出门：1 GiB 上传内存与恢复门、双上传+实时会议无冲突、首段/RTF/讲话人预算均需分别有真实证据；
-未知讲话人不命名；NO_SPEECH 中文结果正确。首段/RTF、混合负载资源、Android 恢复/去重和 NO_SPEECH
-已分别由 2026-08-20/21 证据关闭；CER/数字时间、已登记/未知讲话人质量、外部公开零流量和 capability
-采用仍不得从这些证据推断。
-
-回滚：barrier 前允许客户端 capability 切回旧完整链路；barrier 后保留 v2 R2 ingress、verified asset
-和 generic Task，只把新 generation 显式路由到 legacy transcription handler adapter，不恢复旧 upload/
-ASR submit。新 generation 不回退旧状态；已创建 R2 对象仍由 cleanup obligation 清理。
-
-Stage 2 停写/退出门：产品所有者已用哈希合同豁免独立人工媒体质量和完整公开零旧提交周期；这些门
-状态为 `waived` 而非 `passed`。隔离候选 capability barrier 需持久激活；barrier 前 lease 可恢复排空；verified asset、late PUT、NO_SPEECH success、双上传+实时
-会议和删除/恢复回放通过。旧 worker/handler 保留到 Stage 5；barrier 后回滚只切换 handler revision，
-不停止 v2/generic ingress。
-
-## 11. Stage 3：Knowledge V4、自适应整理、行动与 Q2
-
-入口：Stage 2 exit gate 通过，Transcript source identity、verified asset 和 task owner 已采用。
-
-当前实施顺序（revision 0033）：
-
-1. 保持已经存在的 v2 binding/source stream 与 generic Task 单一 owner。产品所有者对公开零旧调用周期的
-   豁免仍有效，但不豁免本修订的 schema、迁移、真实内容和恢复门；激活 V4 capability 后 v1 submit
-   返回 426，legacy worker 只 drain，旧 status/result route 只读，禁止双写和请求内 fallback。
-2. **已在 Android 1.1.63 完成。** 客户端增加 V3 compatibility adapter 与
-   `AdaptiveSummaryComposerV1`：移除 active 四模板 picker、
-   关闭任意 speaker 观点、为 fact 建立唯一 primary block，并把逐条来源尾注收敛为板块依据 sheet。该步
-   不重新生成旧记录。
-3. 板块显隐偏好已先以有界本机存储发布；会议库 0047、V4 repository 和 V4 覆盖层仍待 shadow
-   通过后接入，旧 `summary_view_*` 只读保留。
-4. 增加 Knowledge V4 Pydantic/TypeScript schema、紧凑 provider DTO 和通用 prompt；短会 single pack，
-   长会多 pack，每 pack 正常一次调用，无模板/观点/图表第二调用。增加 deterministic chapter
-   builder/merger；
-   每个已验证 chapter 确定性并入两个固定槽交替写入的有界聚合 checkpoint；重启或自动 retry 从最后
-   一个 hash/prefix 均有效的槽继续，最多重跑仍保留 payload 的当前 chapter，不创建 chapter 子 Task，
-   也不把 checkpoint 暴露成部分整理结果。
-5. 实现主题、数据、观点和关系验证、逐字搬运门、图表准入和 Android 白名单 renderer；任何准入失败
-   只退化/省略可选块，不增加语义修复调用。action candidates 只做来源/状态/重复验证；采用时创建
-   ActionItem，绝不覆盖已有 mutable item。
-6. Device V2 handler 发布 `meeting_knowledge_v4` artifact；先 shadow，随后分别激活
-   `summary_knowledge_v4` 与 `summary_adaptive_v1`。本机 activation fence 原子保存 V4 version/document/
-   current pointer；布局偏好不上传。
-7. Q2 snapshot、provider DTO、grounding、device operation retry 和 owner 已在隔离候选接入；先 shadow，
-   再按 capability 默认。笔记/附件修改、epoch/binding 变化和迟到 attempt 都必须使本机激活 CAS 失败。
-8. mobile summary/question repositories 原子保存版本、knowledge/turns、clauses 和 exact citations；Q2
-   thread/turn/citation 通过只读投影复用现有问答页，不写旧问答表。
-
-此前 Facts V3、四模板和富块回放保留为历史血缘与 V3 compatibility 证据，不再代表当前 Stage 3
-presentation/semantic composition 退出。以下记录中的“关闭模板本地投影/富块视觉门”均按此边界解释。
-
-截至 2026-08-20，`emulator-5562` 已完成 direct/长来源 Q2、当前笔记、定量逐字引用、引用跳转、
-失败 operation 重试、应用重启恢复以及“模型运行期间笔记 revision 改变”的激活 CAS。迟到成功
-回答在写入 clauses/citations 前失败关闭，完整但失败的加密来源流可取消清理；durable Task 恢复
-窗口为 180 秒。证据见 `docs/vnext-stage3/Q2-ANDROID-VERTICAL-20260820.md`、
-`docs/vnext-stage3/Q2-ANDROID-LONG-SOURCE-20260820.md` 和
-`docs/vnext-stage3/Q2-ANDROID-ACTIVATION-FENCE-20260820.md`。这仍不覆盖附件/epoch/binding 全恢复
-矩阵或 95% 人工相关性门，capability 继续关闭。
-
-同日，长会议 Facts V3 在远端任务运行期间强制停止并重开 Android 后，已证明恢复同一 task ID、
-同一 attempt 且只新增一个本地版本。恢复身份改为只依赖转写、当前笔记和授权附件，不再把模板、标题
-或日期投影误当成远端任务来源；前台整理与后台旧结果升级也已加互斥让出和已完成队列结清。证据见
-`docs/vnext-stage3/SUMMARY-V3-PROCESS-RECOVERY-DEDUPE-20260820.md`。该次任务总耗时约 98.97 秒，
-超过证据包路径的 90 秒目标，故只关闭本夹具的“进程重启产生重复任务”窗口，不关闭 Stage 3 延迟门，
-也不替代转写/附件组合故障矩阵。
-
-同一夹具随后把 embedding 批次从 16 提至 64：完整来源选择 SHA、覆盖和最终 Facts 文档 SHA 均不变，
-任务总时长降为 66.46 秒。provider 遥测证明模型仍顶满 4,096 token，并以 `length` 结束后只保留
-9 条事实、0 关系、0 行动；因此该优化只关闭等价批处理低效，不关闭输出完整性、人工质量或延迟
-p95。8/8/4 输出限额实验因 9 组 holdout 仅 8/9 已拒绝并回退。详见
-`docs/vnext-stage3/SUMMARY-V3-LATENCY-BATCH64-20260820.md`。
-
-随后 r14 将仅供 provider 使用的响应改为 `f1..f12/r1..r16/a1..a6` 固定槽位，事实 ID、来源类型、
-逐字引用、哈希和行动正文由服务器确定性展开；Ollama 尝试越界槽位时立即停止，解析器只重建停止前
-完整对象。单个可选槽位错误不再触发整场修复，首个必需事实错误仍失败关闭。同一 Android 长会任务
-总时长为 34.53 秒，模型一次调用、617 tokens、`done_reason=stop`；最终 9 组跨主题字幕窗口均一次
-调用通过，p50 7.883 秒、最大 12.549 秒。详见
-`docs/vnext-stage3/SUMMARY-V3-BOUNDED-SLOTS-20260820.md` 和
-`docs/vnext-stage3/facts-v3-r14-slots-final-20260820.json`。小样本结构门和单次长会仍不等于 98%
-总体 Schema 合法率、p95 延迟或 95% 人工事实/行动质量，Stage 3 继续保持未采用。
-
-Android 激活围栏随后从 transcript/note 扩展到 device epoch、meeting binding 和显式授权文字附件。
-本机事务在写 Facts/Version/current pointer 前重读所有身份；23 项可执行矩阵通过，真实长会在
-`emulator-5562` 成功激活 3 个 section、14 条引用且无无效引用。证据见
-`docs/vnext-stage3/SUMMARY-V3-ACTIVATION-FENCE-MATRIX-20260820.md`。同一专用模拟器随后完成了
-binding revision 和授权文字附件 revision 两种原生负向竞态：App 退出后远端旧来源 task 成功，恢复
-时均以稳定 input-changed 结果清理 pending intent，保留上一份 current result，未激活迟到 artifact。
-device-primary 文字附件能力、孤儿 preparation 清理和 canonical transcript 恢复身份也已接通；最终
-Release 为 `1.1.38 (146)`。随后 binding epoch、附件删除、附件移位和附件正文变化也在同一专用模拟器
-逐项完成“远端 attempt 成功、App 退出、来源变化、进程恢复”的原生回放，均只丢弃迟到 artifact 而不覆盖
-上一份 current result；最终 `intents=0`、SQLite integrity/FK 正常。详见同一围栏矩阵文档。Summary
-V3 的原生恢复矩阵与全局混合负载已经关闭；Q2 原生来源恢复随后也已关闭。当前仍未关闭的是独立
-人工质量、公开零 v1 流量周期和 Stage 3 capability。
-
-同日最终 `facts-v3-r15 / summary-facts-v3-chapter-r4 / provider-v3-r2` 候选修复了行动投影字段错位、
-共享更正来源的最终确认、显式期限保留以及长证据包元数据预算遗漏。外部 24 组语义 manifest 在最终
-代码上 `24/24` 通过，首次 Schema 合法 `24/24`、引用精确 `100%`、重复行动 `0`，生产 prompt 的
-few-shot 和样本污染命中均为 `0`。当前 10 个 SRT 样本各三轮的 device-v2 真实纵向回放 `30/30`
-成功，全部 attempt 1、清理确认且 revision 全程一致；72.1 分钟/1,569 项/两章节样本也不再被误报
-`SUMMARY_EVIDENCE_INCOMPLETE`。但 24 个单 pack 样本的 p50/p95 为 `21.724s/58.925s`，仍未达到
-`20s/45s`，因此只关闭自动语义、精确引用和不限长度完成性窗口，不关闭性能、独立人工质量、恢复矩阵
-或 capability barrier。证据见 `docs/vnext-stage3/FACTS-V3-R15-RUNTIME-R4-20260820.md`。
-
-随后性能拆分证明长会先使用 8K GPU embedding 会把 9B 生成模型挤出显存，单次重新装载约
-`23.626s`。`summary-facts-v3-chapter-r5` 将仅 Summary 证据选择改为同一 0.6B embedding 的 CPU +
-2K context，Q2 策略不变且保留环境可调；35.5 分钟同输入的后续暖态 device-v2 回放由 r4 的
-`41.602-58.089s` 降到 `27.074s`，文档/概述哈希、行动和 9/9 引用保持一致。随后在未暂停其他项目、
-并保留共享负载波动的条件下完成同输入 10 份真实字幕 × 3 轮稳定分布：30/30 一次成功，单包
-p50/p95 为 `15.368s/35.498s`，全部长证据路径 p95 为 `60.483s`，引用逐字匹配且清理全部确认。
-因此 Stage 3 的 Summary 暖态性能门已关闭；人工质量、Q2 冷/混合负载、恢复矩阵和 capability 仍开放。
-证据见 `docs/vnext-stage3/SUMMARY-V3-R5-STABLE-LATENCY-20260820.md`。
-
-随后完成 Stage 3 内部的冷缓存 Summary/Q2 并发切片：Question stream 只保留 1 字节生命周期哨兵，
-完成后 compact manifest 并释放 reservation；后台 Summary 生成可在 Q2 到达时中止并从 immutable
-source/checkpoint 立即重试；Summary/Q2 的 CPU/2K embedding 以内容 SHA-256 和 runner options 共享
-有界 LRU。`q2-reader-v2` 将模型并列长句拆为独立 claim，逐项验证数字、否定极性和强字面来源，
-无依据项只删除不补写。API 重启后的 5 pair / 10 流全部成功，实际重叠 Q2 p50/p95/max 为
-`10.991s/12.897s/13.271s`，引用、重放和清理为 100%。证据见
-`docs/vnext-stage3/STAGE3-SUMMARY-Q2-MIXED-20260820.md`。随后 `05d6183` 将日程、Summary 和 Q2 的
-同一 9B Ollama runner 统一为部署级 16K context，消除 capability 切换时约 12--13 秒的 runner
-重载。在全新迁移数据库上的完整十分钟全服务混合负载中，日程/Q2/Summary p95 分别为
-`1.794s/11.249s/13.953s`，实时、导入、上传、资源和清理门也全部通过；见
-`docs/vnext-global/GLOBAL-MIXED-LOAD-20260820.md`。这关闭全局混合负载性能门；Q2 原生来源恢复和旧
-整理后台升级已在后续 Android 回放关闭，当前仍开放独立人工质量、公开零 v1 流量周期和 capability
-barrier。
-
-2026-08-21 复核发现上述 Facts/行动与 Q2 私有包都只有一个 `reviewer`，即使填完也不能证明两名独立
-评审和第三人裁决。现已新增统一的 Stage 3 人工质量合同，精确绑定冻结来源包、两份独立 review 与
-adjudication，确定性计算 Facts 支持/遗漏、行动真实性/适用性和 Q2 正确/完整/引用相关率，公开报告
-不复制正文。私有模板已生成但未填，因而只关闭证据结构缺口，不关闭人工 `>=95%` 门。详见
-`docs/vnext-stage3/HUMAN-QUALITY-EVIDENCE-CONTRACT-20260821.md`。同日新增的失败关闭 Stage 3 聚合预检
-通过 `27/39` 门；剩余 12 个机器门只对应两组独立人工质量和一个公开 Summary V2/Q0 零旧调用周期，
-详见 `docs/vnext-stage3/STAGE3-EXIT-PREFLIGHT-20260821.md`。
-
-退出：短/长真实样本无截断；事实支持率、引用、行动重复、问答相关性和延迟预算通过；可见模板为 0，
-同正文重复为 0，每个 fact 只有一个 primary block，观点/图表错误准入为 0，板块切换不联网且 p95
-`<100ms`；进程在 generation/commit/local activation 阶段中断后只有一个当前版本。完整门见
-[revision 0033](revisions/0033-unified-adaptive-meeting-summary-20260823.md)。
-
-回滚：停止新的 vNext handler admission，但继续接收 v2 source stream + generic Task，并将新 generation
-显式路由到保留的 Q0/Summary V2 handler revision；已进入 generic 的任务继续 generic drain/read，
-不迁回 legacy，也不恢复 legacy submit/mirror。禁止 Q2 失败时请求内调用 Q0。兼容 handler 只在
-Stage 5 删除门通过后物理删除。
-
-Stage 3 停写/退出门：产品所有者此前豁免 Facts/行动/Q2 独立人工质量和公开零旧提交周期；这些门保持
-`waived`，不能用来跳过 revision 0033 新增的确定性结构、真实内容和真机交互门。隔离候选 summary/
-question capability barrier 需持久激活；旧 legacy queued/running/retry_wait 仅剩可恢复排空项；generic
-不使用 retry_wait；Q2 immutable source、Knowledge V4/V3 compatibility、ActionItem、章节 manifest、
-引用和内容结果回放通过。Q0/V2/V3 只读兼容保留，不在此阶段物理删除。
-
-## 12. Stage 4：日程、搜索与投影
-
-入口：Stage 3 exit gate 通过，shared schema generation、device v2 和 ProjectionEnvelope 可用。
-
-实施：
-
-1. 执行 0045 补齐旧表 provenance 后完成 schedule schema v1 隔离迁移，拆 `localScheduleParser` 为
-   recognizers/producer/validator/executor，并启用日程库唯一的 calendar ProjectionEnvelope checkpoint owner。
-2. 服务端 graph producer 和 clarification 上线；先发布 v2 schedule client，v1 schedule submit 连续一个
-   完整公开周期为零后激活 barrier 并返回 426；server rule pass/model post-normalizer 仅移入兼容模块。
-3. voice session 先录后连；统一 supplement graph revision。
-4. 建立 FTS5、显式标签分类、回收站和本地 Markdown 分享投影。
-5. Minutes/Calendar native snapshots/actions 全部加 envelope；清除文案状态判断。
-
-当前候选语音纵向证据：同一 ASR owner 的首个只读 preview 阈值为 `480ms`，final revision/VAD 合同
-不变；专属 `emulator-5562` 通过持续 pipe source 与 `40ms` 单调节拍宿主输入完成 1 次单独冷态和
-30 次暖态真实 App 回放。30/30 到达 Draft，转写与 Draft 哈希各唯一，采集/首文字/Draft p95 为
-`65/1333/2393ms`；联合既有 600 秒六车道混合负载后，Stage 4 全部 voice 性能门已关闭。该证据不
-替代独立人工自然日程 holdout，也不启用 schedule graph capability。
-
-退出：自然日程 holdout 与常见澄清门通过；两种输入速度预算通过；页面 restart/recreate/stale action
-故障注入无跳动、串页或旧写；全局功能回归通过。
-
-回滚：barrier 前日程 v1 整链 producer 可显式恢复；barrier 后保留 v2 graph ingress 和手机唯一 validator，
-只把新请求显式路由到 `LegacyScheduleGraphAdapter`，不得重开 v1 submit 或第二 Draft owner。新 Draft
-不混入旧 parser 字段。
-
-Stage 4 停写/退出门：产品所有者已豁免自然日程人工质量和公开零旧提交周期；这些门保持 `waived`。
-隔离候选 schedule graph capability barrier 与本地 validator 需成为默认；旧 parser 只作为版本化 handler adapter；语音补充、FTS/标签、stale envelope、冷/暖启动与全局本地
-功能回放通过。所有旧 parser/mirror/fallback 继续保留到 Stage 5 删除门。
-
-## 13. Stage 5A：采用、资源与候选交付（本次授权范围）
-
-入口：Stage 1 已通过，Stage 2--4 的机器/恢复/性能/资源/隐私门通过，人工质量和公开观察门由有效
-`vnext-product-owner-risk-waiver-v1` 显式标为 `waived`。waiver 不授权生产发布或物理删除。
-
-实施：
-
-1. 在隔离 candidate SQLite 的 `capability_cutovers` 持久激活 media/realtime/summary/question/schedule，
-   记录 waiver SHA-256、`cold_rollback` 和保留的 legacy submit count；不得写 reader removal marker。
-2. 候选 APK 对每项能力只选择 vNext owner；旧入口不得双写、不得请求内静默 fallback，旧代码/表/
-   handler 只保留为显式整链冷回滚资产。
-3. 排空候选 task/attempt/lease/cleanup，验证迁移、进程恢复、幂等、purge、正文日志、三进程拓扑、
-   loopback、磁盘、GPU/RSS/CPU/temp 预算以及 1.1.10 稳定包仍可独立启动。
-4. 递增 versionName/versionCode，构建候选 APK；核对 APK metadata、签名、hash、size、本地 manifest，
-   生成服务部署包、数据库迁移和显式 handler 回滚清单。
-5. 不更新公开 manifest、不发布 APK、不切公网；这些仍等待单独授权。
-
-退出：五项 candidate barrier 持久关闭且 adoption provenance 一致；只有一个活跃 owner；无双写/静默
-fallback；候选生命周期排空；工程验收通过；候选 APK/部署包/迁移/回滚资产可回溯。legacy 物理资产
-仍存在是预期状态，不把 `safe_to_delete=false` 当成 Stage 5A 失败。
-
-回滚：保留 1.1.10 与 Stage 4 APK、数据库 migration forward compatibility 和版本化 handler；只显式
-切换整条 handler，不恢复双写，不让失败请求自动回落 legacy。
-
-### 13.1 Stage 5B：legacy 物理删除（延期、未授权）
-
-产品所有者以后明确授权后，才执行原 Stage 5 删除门：零旧调用观察、legacy queue/lease/result/read
-排空、reader removal marker、源码/表/模型/venv/cache 的 cwd/open-file/systemd/reference/hash 审计和
-物理删除。当前 `safe_to_delete=false` 必须保持真实，不能因 Stage 5A 完成而改成 true。
-
-## 14. Stage 5B 删除清单（当前只审计和保留，不执行）
-
-Stage 1 后停止新写或移出默认路径；实体代码/表保留到 Stage 5 删除门：
-
-- `AuthStore` 的账号状态、Login/Profile/AccountDeletion 业务入口和账号 API；
-- `sync_outbox`、`sync_conflicts`、`meeting_scope_write_state` 的新业务写入；
-- root/action/summary/occurrence/manual-note/speaker/attachment/marker/tag 的 sync trigger/provider/
-  pull/conflict owner；
-- 无消费者的 outbox listener 和中文“未同步不能删除”门。
-
-Stage 2 capability barrier 后停止新写并移动到 compatibility module；Stage 5 才物理删除：
-
-- AppStorage upload registry v1/v2/v3、JS Base64 chunk 和前台 retry/backoff；
-- WorkRequest UUID 业务身份、共享 R2 key、旧 `/recording-assets/*/content` 写路径；
-- speaker 阻塞 transcript final、自动结果原地覆盖 text segment 的逻辑。
-
-Stage 3 capability barrier 后停止新调用并移动到 compatibility module；Stage 5 才物理删除：
-
-- summary v2 公共/模板第二轮、递归摘要、逐行动复核、样本行动补丁；
-- 四模板 active picker/projector、`summary_view_preferences` 新写和任意 speaker 观点分支；V3 历史 reader
-  与旧版本解释能力仍保留，直到另获 Stage 5B 删除授权；
-- Q0 fast-repair/sample answers、scope model、strict verifier、transcript review、final editor、
-  exact-slot repair 和 recovery generation；
-- Question request 中 `summary_sections` 和历史 `answer` 正文。
-
-Stage 4 barrier 后停止新调用、Stage 5 删除门后物理删除：
-
-- server schedule quick/fallback parser、model 后全文 normalizer、客户端第二 Draft owner；
-- summary/topic 自动分类映射；人物页保留为本机 speaker overlay 派生视图，不建立持久人物分类 owner；
-- `meetingContentMirror`、`meetingLegacyMirrorCoordinator` 和旧 v1 API adapter；
-- 活动源码中的 `.before-*`、多轮备份和无引用模型/venv/cache。
-
-删除前必须 `rg` 源码引用、检查数据库行数/外键、进程 cwd/open files、systemd 和公开 capability；
-任何未知归属项保持不动并登记，不用猜测填补。
-
-## 15. 验证矩阵
-
-| 门 | 最低证据 |
+失败记录具体 operation 与可重试边界，不把整个会议降级。页面从本机 operation 投影状态；返回/重进不触发状态推进。
+
+### 5.2 文件/视频导入
+
+- 系统选择器只过滤受支持的音频/视频 MIME；选择完成立即持久化 draft 和会议。
+- native extractor 以流式 ffmpeg/MediaExtractor 产生 app-private 音频，不生成第二份永久视频。
+- 上传限制依据提取音频和服务容量，不能以视频源文件大小直接拒绝。
+- 不同会议可并发准备；同一 meeting/asset 使用 keyed lock。并发数从设备 I/O 和内存预算配置，不写成产品限制。
+
+### 5.3 手机实时录音
+
+- `AudioRecord`、WAV journal 和本机 meeting identity 先成功，再异步 `attachDeviceV2`。
+- WSS 连接前缓存有界 PCM；附着时验证 meeting/session/storage scope，再有序补发。
+- 停止以本机文件成功为准；final drain 超时进入后台补转写，不返回录音失败。
+- 前台 service/media session 只在真实录音或播放时激活，结束后必须释放通知状态。
+
+### 5.4 外接硬件
+
+- 协议 owner：`contracts/hardware/laoji-hardware-control-v1.schema.json` 与 `docs/hardware/LAOJI-HARDWARE-PROTOCOL-V1.md`。
+- native `HardwareRuntime` 独占连接、session、sequence、CRC、设备 manifest、临时网络、pending file 和 ack。
+- USB/BLE 解码同一 LJHW frame；Wi-Fi 只接收控制面选中的不可变 generation，并支持 Range。
+- 设备 `.part -> WAV`、手机 `.part -> pending WAV` 各自原子提交；generation、长度、WAV 和 SHA 全通过前禁止 ack。
+- ack 只更新设备确认位；设备删除必须来自用户显式操作。pending media 继续调用现有 importer。
+- bridge/Kotlin/provider 原文只能进脱敏日志，用户错误通过单一映射层输出中文动作。
+
+## 6. 上传与转写服务
+
+### 6.1 Device v2 主合同
+
+主路径位于 `/api/device/v2`：
+
+- `/bootstrap/*`、`/auth/*`：设备 challenge、短 token、key rotation；
+- `/capabilities`、`/ready`：协议和依赖 readiness；
+- `PUT /meetings/{binding_id}`、`GET /bindings/cursor`：binding generation；
+- `/uploads`：R2 session、part、complete、cancel；
+- `/tasks`、`/tasks/{id}`：持久 task/attempt/result；
+- `/tasks/{id}/transcript-events`：稳定事件重放/ack；
+- `/source-streams`：整理和问答的不可变来源；
+- `/meetings/{binding_id}/questions-v2`：Q2。
+
+当前 v1 调用不能通过再签发长期 v1 secret 来迁移。v2 bootstrap 应原子查找或建立同一 device/epoch 对应的兼容整数 `principal_id` 投影；v1 依赖在验证 `dv2` 短 token 后只复用该投影访问既有表。既有 v1 principal/epoch 必须原样保留，revoked、closed 或归属冲突一律 fail closed。手机 HTTP、旧日程 WSS 和地址调用逐项改发 v2 token 与 device/epoch header 后，才能删除 APK admission token、`/device/v1/register`、dv1 bearer 和服务端 shared-key fallback。summary 新协议只进入 device-v2 source stream/task，不再扩展 v1。
+
+### 6.2 R2
+
+- 预签名凭据短时、binding/generation scoped。
+- multipart 每 part 记录 ETag；complete 可在客户端崩溃后 probe 并恢复。
+- 服务端以流式 hash/size 验证，完成 verified asset 与 transcription task 的原子登记。
+- 取消、过期、终态和永久删除均创建 cleanup obligation；后台重试直到确认对象不存在。
+
+### 6.3 ASR
+
+8030 保留兼容 `/asr`，主批量协议为 `/v2/asr/batch`：
+
+- 每 item 有稳定 ID、PCM metadata、源时间范围、优先级和 deadline；
+- 响应带 text、language、model revision、queue/inference timing、content outcome；
+- 实时会议 > 日程短语音 > 后台导入；microbatch 只合并等待窗口内兼容请求；
+- 文字事件逐批落库，不能等整文件完成才一次返回；
+- VAD/CAM++ 可流水并行，speaker overlay 在 text stable 后独立发布。
+
+## 7. 整理实现
+
+### 7.1 Source stream
+
+客户端提交 manifest，再分组上传 transcript、当前笔记和明确授权附件的不可变 bundle。每项包含
+source ID、revision、hash、位置/时间边界；服务端验证后 commit source fingerprint。正文使用加密临时载荷，成功、永久失败或 TTL 到期后清理。
+
+### 7.2 生成协议
+
+- Pydantic schema 是服务端输出权威；Provider 只接收 schema 与通用 prompt。
+- prompt 不含评测样本、会议标题、人物、固定话术或业务关键词补丁。
+- 短会一次完整输入；长会按连续时间与语义切章，保留首尾、纠正/否定、时间数字、负责人和跨主题连接段。
+- 每章生成同一事实协议；代码按 source hash、certainty、relation 和语义相似度确定性合并。
+- 正常每章一次生成；只有整体结构不合法允许一次 repair。引用或字段无效时确定性删减，不再调用模型润色。
+
+### 7.3 本机投影
+
+- active UI 只使用 unified adaptive composer。
+- 历史数据行可保留 `general/one_on_one/project_sync/interview` 字段；当前运行时不读取、不展示、不转换，也不用它创建网络任务。
+- 图表白名单：timeline、flow、comparison、stat；没有显式证据即退化为段落/列表。
+- `action_candidates` 与 `action_items` 分表；采用候选是显式本机操作。
+- 刷新期间保留上一份可用结果；source fingerprint 未变时不显示“可更新”。
+
+## 8. Q2 实现
+
+1. 构造只包含当前 binding 的 source stream。
+2. 本地 embedding 检索问题相关 segment，保留相邻上下文和来源版本。
+3. 一次 attributed reader 输出答案与 source IDs。
+4. 服务器校验引用归属、原文定位和问题相关性；越界引用使结果失败关闭。
+5. 结果与 task revision 原子提交，本机按 request ID 去重。
+
+笔记默认可作为来源；附件必须本次授权。旧 Q0、多轮 verifier/editor 和样本答案不得回到 active provider。
+
+## 9. 服务端实现
+
+### 9.1 `laoji-api`
+
+- FastAPI 只暴露公网 API 的业务入口；内部 provider 地址来自部署环境。
+- SQLite task store 开启 WAL/busy timeout/integrity check；进程重启扫描可恢复 lease。
+- 所有 LLM 调用经过 `app/services/llm_provider.py`；选择 Ollama 或 DashScope 是部署级显式配置。
+- `ffmpeg`、VAD、CAM++ 是 task 内部步骤，不成为常驻业务服务。
+- `/api/ready` 报告 ASR、生成、embedding、worker、队列、磁盘和最近真实推理；不返回密钥、正文、文件名或坐标。
+
+### 9.2 `laoji-asr`
+
+- 启动固定 Qwen3-ASR model revision；未固定或未预热时 fail closed。
+- 队列、batch、音频时长/字节和并发均有上限；过载返回可重试错误，不在 API 进程加载第二个模型。
+
+### 9.3 Ollama/provider
+
+- 生产保留一个生成模型和 `qwen3-embedding:0.6b`。
+- `NUM_PARALLEL=1`，交互请求优先；长整理在章边界让出队列。
+- 云端 provider 只能显式切换，结果仍走同一 schema/grounding；本地失败不自动外传。
+
+## 10. 状态、错误和隐私
+
+- durable stage：`queued/preparing/generating/verifying/persisting/success/failure`；媒体和 transcript 可有领域子阶段，但 UI 映射到少量可理解状态。
+- 列表与详情只读同一 operation revision。页面 state 不自行推断“正在处理”。
+- 日志记录 ID hash、revision、stage、duration、bytes、provider/model revision 和错误码；禁止正文、引用、坐标、密钥、文件名和人物信息。
+- 用户错误由领域错误码映射为中文结果与下一动作；异常堆栈、bridge 文本和内部函数名不得展示。
+- 低磁盘先停止新云端接纳并保留本机任务，不自动删除正常录音。
+
+## 11. 发布与验收
+
+### 11.1 发布不变量
+
+1. `app.config.js`、`android/app/build.gradle` 和 APK metadata 的 versionName/versionCode 一致。
+2. 构建按目标 ABI：真机 arm64、专用 `emulator-5562` x86_64；release 不携带无关 ABI、样本媒体、日志、备份或测试模型。
+3. `tools/app-update/latest.json` 的 URL、hash、size、版本与公开 APK 一致。
+4. 发布说明为简短功能变化，不暴露内部修复过程。
+
+### 11.2 最低真实验收
+
+| 领域 | 必须验证 |
 | --- | --- |
-| 数据 | migration 前后 integrity、外键、实体计数、随机回放；笔记/附件只迁当前真实 revision；account/sync/mirror/share/task purge scope；删除/恢复/epoch fault |
-| API | challenge/token/key rotation、binding/purge/source stream 分页/空壳配额、task/attempt lineage、idempotency/cancel/replay/restart、v1/v2 隔离 |
-| 上传 | 1 MiB/31 MiB/33 MiB/1 GiB 与超限 1 GiB+，2/4 session、2/4 GiB reservation，断网/kill/prune/expiry/delete/late PUT/HEAD release |
-| ASR | realtime/import/no-speech，多格式，首 partial/stable/final、chunk/event cursor 断线重放、token 到期/轮换、RTF、CER/数字时间准确率、标点边界 |
-| speaker | registered/unknown/short/overlap，attribution F1、manual CAS/rebase/revoke |
-| summary | short/long、notes/attachments、Knowledge V4、V3 compatibility、单一自适应页面、primary-owner 去重、观点/图表负向准入、板块显隐、依据去重、actions、chapter retry、source mutation |
-| Q&A | direct/implicit/absence/open/follow-up，跨会议/旧 revision/无关引用/timeout |
-| schedule | independent natural holdout 完全正确率、关键字段召回、错误保存率；simple/complex/correction/range/clarify/query/delete/OOD |
-| local features | recurrence/reminder/location/widget/marker/clip/series/tag/trash/share/update/app-lock；ActionItem 全 CRUD/提醒/后续日程 |
-| UI | cold/warm launch、process death、rotation/recreate、stale envelope、状态几何稳定 |
-| privacy | log scan、payload/artifact/task/share 明确 TTL、device/share revoke（含在途分块中止）、R2 HEAD/list、无公开对象 URL、registering clear、90 天 orphan epoch purge、4096/16384 cleanup 水位与 high-water tombstone 压缩 |
-| recovery | 本机 RPO 0；server restart 后查询/续跑 RTO、双 checkpoint 槽切换/损坏/当前章重放、3-attempt backoff、late attempt/epoch/binding fence |
-| resource | GPU `<=16 GiB`、总 RSS `<=8 GiB`、CPU p95 `<=16` 核、temp `<=4 GiB`、2/4 realtime、2/4 upload 与 2/4 GiB R2、2/8 stream 与 8/16 MiB manifest、256/512 MiB source、每 Task 2x4 MiB checkpoint 与 16/64 MiB reservation、32/128 share 与 8/32 GiB、4096/16384 cleanup、4/8/32 队列混合负载 |
-| release | version fields、APK metadata/signature/hash/size、manifest、headers、standalone launch |
+| 启动/导航 | 冷启动、后台恢复、主题切换、页面重进无白屏/错位/闪变 |
+| 日程 | 手动/语音、复杂解析、补充、增删改查、搜索、视图和提醒 |
+| 媒体 | 手机录音、音频/视频导入、多任务、重启恢复、永久删除 |
+| 转写 | stable 连续出现、final 唯一、no_speech、speaker 异步、服务重启 |
+| 整理 | 短会/长会、笔记/附件、来源引用、自适应板块、无模板网络请求 |
+| 问答 | 常见/追问/无答案/数字时间、引用归属和相关性 |
+| 硬件 | USB/BLE live、断线、页面重建、pending ack、无静默换源 |
+| 服务 | readiness、队列优先级、磁盘、R2 cleanup、provider revision、日志脱敏 |
 
-质量样本和自动化流量必须带 `traffic_class`。公开/合成样本可自动回放；私人会议只能在用户明确
-授权的验收阶段使用，日志和报告不得保存正文。
+性能至少记录触发到首个可用结果、完整完成、RTF/吞吐、p50/p95 和资源峰值。单元测试、mock、截图或一次成功不替代完整真实流程。
+
+## 12. 遗留删除规则
+
+删除旧代码/表/接口前形成机器可核对清单：
+
+1. 当前构建无 import、反射、路由、feature flag、配置、原生 manifest 或脚本引用；
+2. 当前数据库无只被旧 reader 理解的数据，或已完成可恢复迁移；
+3. 服务端无活跃 task/lease/object/open file；
+4. 当前发布已走唯一 writer，回滚资产在 Git/服务器归档可恢复；
+5. 删除后通过类型检查、原生编译、服务测试和真实流程。
+
+不确定但有追溯价值的内容移到仓库外的校验归档；确定可由 Git/构建系统恢复的 APK、cache、venv、候选源码副本和 Stage 证据直接清理。不得在活跃树继续创建 `backup-*`、第二工作区副本或长期 candidate 链。

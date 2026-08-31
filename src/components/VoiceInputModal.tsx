@@ -3,7 +3,7 @@ import {
   Animated, Modal, View, Text, TextInput, TouchableOpacity, Pressable,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -19,7 +19,7 @@ import {
   parseAudio,
   parseText,
   ParseResult,
-} from '../services/api';
+} from '../services/scheduleParsing';
 import { getLocalDeviceRealtimeAuth, type DeviceRealtimeAuth } from '../services/deviceApi';
 import {
   RealtimeAsrAudioStats,
@@ -1026,8 +1026,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                         {micInteraction === 'holding'
                           ? '松开结束'
                           : recordingMode === 'realtime'
-                            ? '实时识别中，轻点结束'
-                            : '录音中，轻点结束'}
+                            ? '实时识别中'
+                            : '录音中'}
                       </Text>
                     )}
                   </View>

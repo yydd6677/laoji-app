@@ -3,13 +3,13 @@ import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'r
 import Constants from 'expo-constants';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
 import { RootStackParamList } from '../types';
 import { getApiConfig } from '../services/config';
 import { useAppDialog } from '../components/AppDialog';
-import { FEISHU_DIMENSIONS, getFeishuTokens } from '../theme/feishuTokens';
+import { UI_DIMENSIONS, getUiTokens } from '../theme/uiTokens';
 import {
   checkForAppUpdate,
   appUpdateUserMessage,
@@ -19,7 +19,7 @@ import {
 } from '../services/appUpdate';
 import { openApkInstallSettings } from 'laoji-native-platform';
 
-const { colors: F } = getFeishuTokens();
+const { colors: F } = getUiTokens();
 
 // UI-SHELL-001 / UI-TOKENS-001: legal documents use the same title and semantic text hierarchy.
 
@@ -29,6 +29,7 @@ type Props = {
 };
 
 const APP_VERSION = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '未知';
+const APP_BUILD_NUMBER = currentVersionCode();
 
 const DOCS: Record<RootStackParamList['Legal']['kind'], {
   title: string;
@@ -54,7 +55,7 @@ const DOCS: Record<RootStackParamList['Legal']['kind'], {
       { heading: '本机资料', body: '日程、提醒、会议索引、原始录音、我的笔记、文字记录、整理结果、问答记录、标签和讲话人名称主要保存在当前设备。老记不以账号云盘方式长期保存这些资料。' },
       { heading: '在线处理', body: '日程语音和会议音频会在需要识别时发送到老记服务；整理会使用当前文字记录和我的笔记，会议问答也会将它们作为可引用来源。导入视频时，手机先提取音频，再上传用于转写。' },
       { heading: '临时音频', body: '待处理音频可能通过受控对象存储直接传输，并按临时对象清理规则删除。它只用于完成转写和任务恢复，不作为长期会议资料库。手机中的原始录音不会因此被覆盖。' },
-      { heading: '生成结果保留', body: '转写和生成结果会回到本机保存。关闭“帮助改进生成质量”时，问答等生成任务默认按临时方式处理；开启后，服务可在设备隔离的数据域内保留匿名结果，用于恢复任务和质量评估。' },
+      { heading: '生成结果保留', body: '转写和生成结果会回到本机保存。关闭“保留匿名生成结果”时，问答等生成任务默认按临时方式处理；开启后，服务可在设备隔离的数据域内保留匿名结果，用于恢复任务和质量评估。' },
       { heading: '讲话人声纹', body: '你可以主动创建讲话人并录制一段朗读音频，用于在会议转写中辅助区分讲话人。只有在录入页单独勾选同意并点击保存后，讲话人名称和本次 WAV 录音才会上传到声纹服务。你可以重新录制、放弃上传，或在讲话人管理中删除已保存的讲话人资料。' },
       { heading: '本机权限', body: '麦克风用于语音日程和会议录音；文件访问用于选择导入资料；通知用于日程提醒和录音状态；位置用于填写地址；系统验证用于启动保护；安装权限仅在你确认应用更新时使用。未授权的能力不会在后台自行启用。' },
       { heading: '存储与同步', body: '日程和会议操作直接写入本机数据库，不通过云端同步。通知提醒由当前设备本机调度；跨设备同步和账号迁移不在当前版本提供。' },
@@ -147,21 +148,33 @@ export function LegalDocumentScreen({ navigation, route }: Props) {
         });
       }
     };
-    const updateLabel = update.status === 'checking'
+    const downloadPercent = update.status === 'downloading' && update.progress !== null
+      ? Math.round(update.progress * 100)
+      : null;
+    const hasNewerManifest = Boolean(
+      update.manifest && update.manifest.version_code > APP_BUILD_NUMBER,
+    );
+    const showUpdateNotice = hasNewerManifest && [
+      'available',
+      'downloading',
+      'ready_to_install',
+      'failed',
+    ].includes(update.status);
+    const checkLabel = update.status === 'checking'
       ? '正在检查'
-      : update.status === 'downloading'
-        ? '正在下载'
-        : update.status === 'ready_to_install'
-          ? '安装更新'
-          : '检查更新';
-    const updateAction = update.status === 'available' || update.status === 'ready_to_install'
-      ? installUpdate
-      : checkUpdate;
+      : update.status === 'failed'
+        ? '重试检查'
+        : '检查更新';
     const updateValue = update.status === 'up_to_date'
       ? '已是最新版本'
-      : update.status === 'downloading' && update.progress !== null
-        ? `${Math.round(update.progress * 100)}%`
-        : update.manifest?.version_name ?? undefined;
+      : undefined;
+    const noticeActionLabel = update.status === 'downloading'
+      ? downloadPercent === null ? '正在下载' : `正在下载 ${downloadPercent}%`
+      : update.status === 'ready_to_install'
+        ? '安装更新'
+        : update.status === 'failed'
+          ? '重试下载'
+          : '下载并安装';
     return (
       <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
         <SettingsTitleBar title="版本信息" onBack={() => navigation.goBack()} />
@@ -170,43 +183,48 @@ export function LegalDocumentScreen({ navigation, route }: Props) {
             <View style={s.aboutLogo} testID="legal-about-logo">
               <Ionicons name="calendar-clear-outline" size={32} color={F.onPrimary} />
             </View>
-            <View style={s.aboutVersionLine}>
-              <Text style={s.aboutName}>老记</Text>
-              <Text style={s.aboutVersion} testID="legal-about-version">{APP_VERSION}</Text>
-            </View>
+            <Text style={s.aboutVersionLine} numberOfLines={1} testID="legal-about-version">
+              {`老记 ${APP_VERSION}`}
+            </Text>
           </View>
 
           <SettingsGroup testID="legal-about-group">
-            <SettingsRow label="当前版本" value={APP_VERSION} />
-            <SettingsRow label="构建编号" value={String(currentVersionCode() || '未知')} />
-            <SettingsRow
-              label={updateLabel}
-              value={updateValue}
-              onPress={update.status === 'checking' || update.status === 'downloading' ? undefined : updateAction}
-              disabled={update.status === 'checking' || update.status === 'downloading'}
-              last
-              testID="legal-check-update"
-            />
+            <SettingsRow label="构建编号" value={String(APP_BUILD_NUMBER || '未知')} />
+            {!showUpdateNotice ? (
+              <SettingsRow
+                label={checkLabel}
+                value={updateValue}
+                onPress={update.status === 'checking' ? undefined : checkUpdate}
+                disabled={update.status === 'checking'}
+                last
+                testID="legal-check-update"
+              />
+            ) : null}
           </SettingsGroup>
 
-          {update.status === 'available' && update.manifest ? (
+          {showUpdateNotice && update.manifest ? (
             <View style={s.updateNotice} testID="legal-update-available">
               <Text style={s.updateTitle}>发现新版本 {update.manifest.version_name}</Text>
               {update.manifest.release_notes.length ? (
                 <Text style={s.updateNotes}>{update.manifest.release_notes.join('；')}</Text>
               ) : null}
+              {update.status === 'failed' && update.message ? (
+                <Text style={s.updateError}>{update.message}</Text>
+              ) : null}
               <TouchableOpacity
-                style={s.updateButton}
+                style={[s.updateButton, update.status === 'downloading' && s.updateButtonDisabled]}
                 onPress={installUpdate}
+                disabled={update.status === 'downloading'}
                 accessibilityRole="button"
-                accessibilityLabel="下载并安装更新"
+                accessibilityLabel={noticeActionLabel}
+                testID="legal-update-install"
               >
                 <Ionicons name="download-outline" size={18} color={F.onPrimary} />
-                <Text style={s.updateButtonText}>下载并安装</Text>
+                <Text style={s.updateButtonText}>{noticeActionLabel}</Text>
               </TouchableOpacity>
             </View>
           ) : null}
-          {update.message && ['failed', 'downloading', 'ready_to_install'].includes(update.status) ? (
+          {update.message && update.status === 'failed' && !showUpdateNotice ? (
             <Text style={s.updateMessage} testID="legal-update-message">{update.message}</Text>
           ) : null}
 
@@ -273,20 +291,20 @@ const s = StyleSheet.create({
   firstSection: { marginTop: 20 },
   heading: { fontSize: 17, lineHeight: 24, color: F.textTitle, fontWeight: '600', marginBottom: 8 },
   body: { fontSize: 14, color: F.textCaption, lineHeight: 24 },
-  documentLink: { minHeight: 52, marginTop: 12, borderTopWidth: FEISHU_DIMENSIONS.divider, borderTopColor: F.divider, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  documentLink: { minHeight: 52, marginTop: 12, borderTopWidth: UI_DIMENSIONS.divider, borderTopColor: F.divider, flexDirection: 'row', alignItems: 'center', gap: 8 },
   linkText: { flex: 1, minWidth: 0, fontSize: 14, lineHeight: 20, color: F.textLink },
   onlineActions: { marginTop: 24 },
   onlineDangerText: { color: F.danger },
   aboutContent: { paddingBottom: 32 },
   aboutBrand: { alignItems: 'center' },
   aboutLogo: { width: 72, height: 72, marginTop: 18, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: F.primary },
-  aboutVersionLine: { minHeight: 44, marginTop: 2, marginBottom: 9, paddingVertical: 8, flexDirection: 'row', alignItems: 'center' },
-  aboutName: { minHeight: 28, fontSize: 20, lineHeight: 28, fontWeight: '600', color: F.textTitle },
-  aboutVersion: { minHeight: 24, marginLeft: 7, fontSize: 18, lineHeight: 24, color: F.textCaption },
+  aboutVersionLine: { width: '100%', minHeight: 44, marginTop: 2, marginBottom: 9, paddingVertical: 8, fontSize: 20, lineHeight: 28, fontWeight: '600', textAlign: 'center', color: F.textTitle },
   updateNotice: { marginHorizontal: 16, marginTop: 16, padding: 16, borderRadius: 8, backgroundColor: F.primarySoft },
   updateTitle: { fontSize: 16, lineHeight: 22, fontWeight: '600', color: F.textTitle },
   updateNotes: { marginTop: 6, fontSize: 14, lineHeight: 21, color: F.textCaption },
+  updateError: { marginTop: 8, fontSize: 13, lineHeight: 19, color: F.danger },
   updateButton: { minHeight: 40, marginTop: 14, paddingHorizontal: 14, borderRadius: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: F.primary },
+  updateButtonDisabled: { opacity: 0.62 },
   updateButtonText: { fontSize: 15, lineHeight: 20, fontWeight: '600', color: F.onPrimary },
   updateMessage: { marginHorizontal: 16, marginTop: 14, fontSize: 13, lineHeight: 19, color: F.textCaption },
 });

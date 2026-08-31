@@ -69,67 +69,17 @@ async def test_qwen_meeting_route_keeps_speakers_and_persistence(monkeypatch):
     }
 
 
-def test_qwen_speaker_profiles_remain_user_scoped():
+def test_qwen_speaker_profiles_are_device_epoch_scoped():
     class SpeakerDb:
-        def load_for_owner(self, owner_id, **_kwargs):
-            return ["user-%s" % owner_id]
+        def load_for_owner_epoch(self, owner_id, epoch_id, **_kwargs):
+            return [f"device-{owner_id}-{epoch_id}"]
 
-        def load_all(self, **_kwargs):
-            return ["prototype"]
-
-    database = SpeakerDb()
-    user = type("Context", (), {"mode": "user", "user_id": 7})()
-    guest = type("Context", (), {"mode": "guest", "user_id": None})()
-    prototype = type("Context", (), {"mode": "prototype", "user_id": None})()
-
-    assert qwen_ws._speaker_profiles_for_context(database, user) == ["user-7"]
-    assert qwen_ws._speaker_profiles_for_context(database, guest) == []
-    assert qwen_ws._speaker_profiles_for_context(database, prototype) == ["prototype"]
-
-
-def test_qwen_guest_final_transcript_is_cached_with_stable_id(monkeypatch):
-    captured = {}
-
-    def append(meeting_id, **line):
-        captured.update(meeting_id=meeting_id, **line)
-        return {"id": "guest-line-1"}
-
-    monkeypatch.setattr(qwen_ws, "append_guest_transcript", append)
-    guest = type("Context", (), {"mode": "guest", "user_id": None})()
-    message = {
-        "type": "transcript.completed",
-        "speaker_id": "speaker_1",
-        "speaker_name": "发言人 1",
-        "text": "项目进度正常",
-        "start_time": 0.5,
-        "end_time": 1.5,
-        "speaker_confidence": 0.8,
-    }
-
-    result = qwen_ws._cache_guest_transcript(guest, "guest-session-1", message)
-
-    assert result["id"] == "guest-line-1"
-    assert captured == {
-        "meeting_id": "guest-session-1",
-        "speaker_id": "speaker_1",
-        "speaker_label": "发言人 1",
-        "text": "项目进度正常",
-        "start_time": 0.5,
-        "end_time": 1.5,
-        "confidence": 0.8,
-    }
-
-
-def test_qwen_user_transcript_does_not_enter_guest_cache(monkeypatch):
-    monkeypatch.setattr(
-        qwen_ws,
-        "append_guest_transcript",
-        lambda *_args, **_kwargs: pytest.fail("user transcript entered guest cache"),
-    )
-    user = type("Context", (), {"mode": "user", "user_id": 7})()
-    message = {"type": "transcript.completed", "text": "用户字幕"}
-
-    assert qwen_ws._cache_guest_transcript(user, "meeting-1", message) is message
+    context = type("Context", (), {
+        "mode": "device", "user_id": 7, "epoch_id": "epoch-a",
+    })()
+    assert qwen_ws._speaker_profiles_for_context(SpeakerDb(), context) == [
+        "device-7-epoch-a"
+    ]
 
 
 def test_qwen_transcribe_url_encodes_language(monkeypatch):

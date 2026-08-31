@@ -16,13 +16,8 @@ import {
   createInitialProcessingStages,
   secureClientIdFactory,
 } from '../../domain/meeting';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-  RecordingAssetLocalState,
-  RecordingAssetOrigin,
-} from '../../data/repositories';
-import { canonicalRecordingSourceSha256 } from '../../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository, RecordingAssetLocalState, RecordingAssetOrigin } from "../../data/repositories/meetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 
 export interface InitialRecordingAssetInput {
   id?: string;
@@ -62,7 +57,6 @@ export interface CreateMeetingNoteInput {
   scheduleSnapshot?: ScheduleSnapshot | null;
   recurrenceSegmentId?: string | null;
   seriesKey?: string | null;
-  supersededRemoteMeetingId?: string | null;
   recordingAsset?: InitialRecordingAssetInput | null;
   initialStageStatuses?: Partial<MeetingProcessingStatuses>;
   canonicalWrite?: boolean;
@@ -125,7 +119,7 @@ function normalizeParticipants(values: readonly string[] | undefined): readonly 
 
 function normalizeMode(value: MeetingCaptureMode | null | undefined): MeetingCaptureMode | null {
   if (value === null || value === undefined) return null;
-  if (!['realtime', 'offline', 'whisper', 'qwen'].includes(value)) {
+  if (!['realtime', 'offline'].includes(value)) {
     throw new Error('meeting mode is invalid');
   }
   return value;
@@ -224,14 +218,6 @@ export class CreateMeetingNoteUseCase {
     const seriesKey = occurrence
       ? calendarMeetingSeriesKey(input.scopeKey, occurrence.sourceEventId)
       : normalizeOptionalText(input.seriesKey, 512, 'calendar series key');
-    const supersededRemoteMeetingId = normalizeOptionalText(
-      input.supersededRemoteMeetingId,
-      160,
-      'superseded meeting remote ID',
-    );
-    if (supersededRemoteMeetingId && !occurrence) {
-      throw new Error('superseded meeting requires a calendar occurrence');
-    }
     const title = input.title?.trim() ?? '';
     const description = normalizeOptionalText(input.description, 100_000, 'meeting description');
     const participants = normalizeParticipants(input.participants);
@@ -289,8 +275,6 @@ export class CreateMeetingNoteUseCase {
         meetingId: requestedId,
         content: '',
         revision: 0,
-        baseRemoteRevision: null,
-        dirty: false,
         lastSavedAtMs: nowMs,
         userEditedAtMs: null,
       }, input.scopeKey);
@@ -300,13 +284,12 @@ export class CreateMeetingNoteUseCase {
       };
       if (input.recordingAsset?.localState === 'local_ready') {
         stageOverrides.capture ??= 'local_ready';
-        stageOverrides.upload ??= input.scopeKey === 'guest' ? 'not_required' : 'queued';
+        stageOverrides.upload ??= 'queued';
       } else if (input.recordingAsset?.localState === 'capturing') {
         stageOverrides.capture ??= 'preparing';
       }
       const stages = createInitialProcessingStages(
         requestedId,
-        input.scopeKey,
         nowMs,
         stageOverrides,
       );
@@ -358,61 +341,6 @@ export class CreateMeetingNoteUseCase {
         }, input.scopeKey);
       }
 
-      if (input.scopeKey !== 'guest') {
-        await transaction.insertOutbox({
-          operationId: `meeting.create:${requestedId}`,
-          scopeKey: input.scopeKey,
-          aggregateType: 'meeting_note',
-          aggregateId: requestedId,
-          operationType: 'meeting.create',
-          baseRevision: null,
-          payloadJson: JSON.stringify({
-            schema_version: 1,
-            client_note_id: requestedId,
-            origin: input.origin,
-            entry_point: input.entryPoint,
-            title,
-            description,
-            participants,
-            location,
-            mode,
-            client_request_id: clientRequestId,
-            recorded_at_ms: recordedAtMs,
-            started_at_ms: startedAtMs,
-            occurrence_ref: occurrence ? {
-              ...occurrence,
-              calendarRevision: snapshot?.capturedEventRevision ?? null,
-              recurrenceSegmentId,
-              seriesKey,
-            } : null,
-            schedule_snapshot: snapshot,
-            superseded_remote_meeting_id: supersededRemoteMeetingId,
-          }),
-          createdAtMs: nowMs,
-        });
-        if (occurrence && snapshot) {
-          await transaction.insertOutbox({
-            operationId: `occurrence.upsert:${requestedId}:${nowMs}`,
-            scopeKey: input.scopeKey,
-            aggregateType: 'meeting_occurrence',
-            aggregateId: requestedId,
-            operationType: 'occurrence.upsert',
-            baseRevision: null,
-            payloadJson: JSON.stringify({
-              schema_version: 2,
-              source_event_id: occurrence.sourceEventId,
-              occurrence_date: occurrence.occurrenceDate,
-              calendar_revision: snapshot.capturedEventRevision,
-              recurrence_segment_id: recurrenceSegmentId,
-              series_key: seriesKey,
-              link_state: 'active',
-              client_updated_at_ms: nowMs,
-              schedule_snapshot: snapshot,
-            }),
-            createdAtMs: nowMs,
-          });
-        }
-      }
       if (input.canonicalWrite) {
         canonicalRevision = await transaction.advanceCanonicalWrite(input.scopeKey, nowMs);
       }

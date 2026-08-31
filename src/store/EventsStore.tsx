@@ -1,24 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { CalEvent, EventRecurrenceScope, EventRef } from '../types';
-import {
-  ApiEvent,
-  ApiEventEditCommandResponse,
-  commandEventEdit,
-  commandEventState,
-  fetchEventEditCommand,
-  fetchEvents,
-  saveEvent,
-} from '../services/api';
-import { useAuth } from './AuthStore';
 import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
 import {
   EventDisplayMetadata,
-  apiEventClientId,
-  apiEventToCalEvent,
   applyEventMetadata,
-  calEventChangesToApiEditPatch,
-  calEventToApiEvent,
   eventSeriesDraft,
   sourceEventId,
 } from '../services/eventMapper';
@@ -40,36 +26,16 @@ import {
 import { getAppStorageItem, writeAppStorageJson } from '../services/appStorage';
 import { evaluateEventConflicts, type EventConflict } from '../utils/eventUtils';
 import { EventDraftValidationError, validateEventDraft } from '../utils/eventDraftValidation';
-import { HttpResponseError } from '../services/errors';
 import { EventDeleteCoordinator } from '../services/eventDeleteCoordinator';
 import {
   applyGuestTransactionToSeries,
   createEventDeleteTransaction,
-  eventIsInRecurrenceScope,
   hideTransactionScope,
-  restoreTransactionScope,
   type EventDeleteTransaction,
 } from '../services/eventDeleteTransactions';
-import {
-  EventEditCoordinator,
-  type EventEditFailureKind,
-} from '../services/eventEditCoordinator';
-import {
-  createEventEditJournal,
-  createEventEditTransaction,
-  parseEventEditJournal,
-  type EventEditTransaction,
-} from '../services/eventEditTransactions';
 import { applyGuestRecurrenceEdit } from '../services/guestRecurrenceEdit';
 import {
-  type EventCacheRecoveryNotice,
   type EventMonthAccess,
-  clearEventCacheRecoveryNotice,
-  filterEventsToMonthAccess,
-  loadEventCatalogCache,
-  loadEventMonthCache,
-  saveEventCatalogCache,
-  saveEventMonthCache,
   touchEventMonth,
 } from '../services/eventCache';
 import { eventEffectiveEndDate, eventOverlapsDateRange } from '../utils/eventDateSemantics';
@@ -88,7 +54,6 @@ type EventMetadataMap = Record<string, EventMetadata>;
 const EVENT_METADATA_KEY = '@laoji:eventMetadata:v1';
 const GUEST_EVENTS_KEY = '@laoji:guestEvents:v1';
 const EVENT_DELETE_TRANSACTIONS_KEY = '@laoji:eventDeleteTransactions:v1';
-const EVENT_EDIT_TRANSACTIONS_KEY = '@laoji:eventEditTransactions:v1';
 
 function cleanMetadata(meta: EventMetadata): EventMetadata {
   const cleaned: EventMetadata = {};
@@ -103,16 +68,6 @@ function cleanMetadata(meta: EventMetadata): EventMetadata {
     cleaned.notificationId = meta.notificationId.trim();
   }
   return cleaned;
-}
-
-function metadataFromEvent(ev: Omit<CalEvent, 'id'>): EventMetadata {
-  return cleanMetadata({
-    color: ev.color,
-    location: ev.location,
-    category: ev.category,
-    detail: ev.detail,
-    reminderMinutes: ev.reminderMinutes,
-  });
 }
 
 function mergeMetadata(map: EventMetadataMap, id: string, patch: EventMetadata): EventMetadataMap {
@@ -172,17 +127,6 @@ function sourceCatalog(events: CalEvent[]): CalEvent[] {
     });
   }
   return [...bySource.values()];
-}
-
-function metadataForApiEvent(event: ApiEvent & { id: number }, map: EventMetadataMap): EventMetadata | undefined {
-  const clientId = apiEventClientId(event);
-  const stableKey = eventRefKey({
-    sourceEventId: String(event.source_event_id ?? event.id),
-    occurrenceDate: event.occurrence_date ?? event.start_date,
-  });
-  const saved = map[stableKey] ?? map[clientId] ?? map[String(event.id)];
-  if (!Object.prototype.hasOwnProperty.call(event, 'reminder_minutes')) return saved;
-  return { ...saved, reminderMinutes: event.reminder_minutes ?? null };
 }
 
 function monthWindow(year: number, month: number): { start: string; end: string } {
@@ -294,115 +238,6 @@ function removeMutationMetadata(
   if (recurrenceScope === 'series') delete map[ref.sourceEventId];
 }
 
-function normalizeEditResponseEvent(
-  transaction: EventEditTransaction,
-  response: ApiEventEditCommandResponse,
-  metadata?: EventMetadata,
-): CalEvent {
-  const event = apiEventToCalEvent(response.event, metadata);
-  const sourceId = transaction.ref.sourceEventId;
-  if (transaction.recurrenceScope === 'occurrence') {
-    return {
-      ...event,
-      id: event.id === sourceId
-        ? `${sourceId}@${transaction.ref.occurrenceDate}:exception`
-        : event.id,
-      sourceEventId: sourceId,
-      occurrenceDate: transaction.ref.occurrenceDate,
-      isRecurrenceException: true,
-      isExpandedOccurrence: false,
-    };
-  }
-  if (transaction.recurrenceScope === 'following') {
-    const segmentId = response.segment_id ?? event.recurrenceSegmentId ?? transaction.id;
-    return {
-      ...event,
-      id: event.id === sourceId ? `${sourceId}:segment:${segmentId}` : event.id,
-      sourceEventId: sourceId,
-      occurrenceDate: transaction.ref.occurrenceDate,
-      recurrenceSegmentId: segmentId,
-      recurrenceEffectiveFromDate: transaction.ref.occurrenceDate,
-      isExpandedOccurrence: false,
-      seriesStartDate: event.seriesStartDate ?? event.startDate,
-    };
-  }
-  return {
-    ...event,
-    sourceEventId: sourceId,
-    occurrenceDate: event.occurrenceDate ?? event.seriesStartDate ?? event.startDate,
-    isExpandedOccurrence: false,
-  };
-}
-
-function projectEditResponse(
-  events: CalEvent[],
-  catalog: CalEvent[],
-  transaction: EventEditTransaction,
-  responseEvent: CalEvent,
-  loadedMonths: string[],
-): { events: CalEvent[]; catalog: CalEvent[] } {
-  const sourceId = transaction.ref.sourceEventId;
-  const retainedEvents = events.filter(event => !eventIsInRecurrenceScope(
-    event,
-    transaction.ref,
-    transaction.recurrenceScope,
-  ));
-  const projectedResponse = responseEvent.isRecurrenceException
-    || !responseEvent.repeat
-    || responseEvent.repeat === 'once'
-    ? [responseEvent]
-    : expandEventsForMonths([responseEvent], loadedMonths);
-
-  let nextCatalog: CalEvent[];
-  if (transaction.recurrenceScope === 'series') {
-    nextCatalog = [...catalog.filter(event => stableSourceEventId(event) !== sourceId), responseEvent];
-  } else if (transaction.recurrenceScope === 'occurrence') {
-    nextCatalog = catalog
-      .filter(event => !(
-        event.isRecurrenceException
-        && eventIsInRecurrenceScope(event, transaction.ref, 'occurrence')
-      ))
-      .map(event => stableSourceEventId(event) === sourceId && !event.isRecurrenceException
-        ? {
-          ...event,
-          excludedOccurrenceDates: [...new Set([
-            ...(event.excludedOccurrenceDates ?? []),
-            transaction.ref.occurrenceDate,
-          ])].sort(),
-        }
-        : event);
-    nextCatalog.push(responseEvent);
-  } else {
-    nextCatalog = catalog
-      .filter(event => !(
-        stableSourceEventId(event) === sourceId
-        && event.recurrenceSegmentId != null
-        && (event.seriesStartDate ?? event.startDate) >= transaction.ref.occurrenceDate
-      ))
-      .map(event => stableSourceEventId(event) === sourceId
-        && (event.seriesStartDate ?? event.startDate) < transaction.ref.occurrenceDate
-        ? { ...event, excludedAfterDate: transaction.ref.occurrenceDate }
-        : event);
-    nextCatalog.push(responseEvent);
-  }
-  return {
-    events: uniqueEvents([...retainedEvents, ...projectedResponse]),
-    catalog: uniqueEvents(nextCatalog),
-  };
-}
-
-function classifyEventEditFailure(
-  error: unknown,
-  operation: 'execute' | 'recover',
-): EventEditFailureKind {
-  if (operation === 'recover' && error instanceof HttpResponseError && error.status === 404) {
-    return 'command-missing';
-  }
-  if (error instanceof HttpResponseError
-    && [400, 403, 404, 409, 422].includes(error.status)) return 'permanent';
-  return 'retryable';
-}
-
 function monthKeysForRange(startDate: string, endDate: string): string[] {
   const [startYear, startMonth] = startDate.split('-').map(Number);
   const [endYear, endMonth] = endDate.split('-').map(Number);
@@ -432,27 +267,13 @@ function projectDeletionTransactions(
   );
 }
 
-function projectCatalogTransactions(
-  catalog: CalEvent[],
-  transactions: EventDeleteTransaction[],
-): CalEvent[] {
-  return transactions.reduce((projected, transaction) => {
-    if (transaction.recurrenceScope === 'series') {
-      return projected.filter(event => stableSourceEventId(event) !== transaction.ref.sourceEventId);
-    }
-    return projected.map(event => stableSourceEventId(event) === transaction.ref.sourceEventId
-      ? applyGuestTransactionToSeries(event, transaction, 'absent')
-      : event);
-  }, catalog);
-}
-
 interface EventsContextType {
   events: CalEvent[];
   searchableEvents: CalEvent[];
   loading: boolean;
   error: string | null;
   monthStates: Record<string, EventMonthLoadState>;
-  cacheRecoveryNotice: EventCacheRecoveryNotice | null;
+  cacheRecoveryNotice: null;
   hydratedScope: string | null;
   addEvent: (ev: Omit<CalEvent, 'id'>) => Promise<EventCreateResult>;
   deleteEvent: (ref: EventRef, scope?: EventRecurrenceScope) => Promise<void>;
@@ -483,7 +304,6 @@ export type EventReminderDelivery = 'not-required' | 'scheduled' | 'unavailable'
 
 export interface EventMutationResult {
   reminderDelivery: EventReminderDelivery;
-  syncStatus?: 'pending';
 }
 
 export interface EventCreateResult extends EventMutationResult {
@@ -538,26 +358,22 @@ function reminderDeliveryForUpdatedEvents(
 const EventsContext = createContext<EventsContextType | null>(null);
 
 export function EventsProvider({ children }: { children: React.ReactNode }) {
-  const { mode, session, accessToken } = useAuth();
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [searchableEvents, setSearchableEvents] = useState<CalEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [monthStates, setMonthStates] = useState<Record<string, EventMonthLoadState>>({});
-  const [cacheRecoveryNotice, setCacheRecoveryNotice] = useState<EventCacheRecoveryNotice | null>(null);
+  const cacheRecoveryNotice = null;
   const [hydratedScope, setHydratedScope] = useState<string | null>(null);
-  const [editJournalHydratedScope, setEditJournalHydratedScope] = useState<string | null>(null);
   const [lastDeleted, setLastDeleted] = useState<CalEvent | null>(null);
   const lastDeletedTransactionIdRef = useRef<string | null>(null);
   const deleteCoordinatorRef = useRef<EventDeleteCoordinator | null>(null);
-  const editCoordinatorRef = useRef<EventEditCoordinator<EventMutationResult> | null>(null);
   const eventMetadataRef = useRef<EventMetadataMap>({});
   const guestBaseEventsRef = useRef<CalEvent[]>([]);
   const loadedGuestMonthsRef = useRef<Set<string>>(new Set());
   const monthAccessRef = useRef<EventMonthAccess>({});
   const monthStatesRef = useRef<Record<string, EventMonthLoadState>>({});
   const monthRequestSequenceRef = useRef<Map<string, number>>(new Map());
-  const catalogRequestSequenceRef = useRef(0);
   const activeLoadCountRef = useRef(0);
   const foregroundRefreshRef = useRef<Promise<void> | null>(null);
   const appStateRef = useRef(AppState.currentState);
@@ -567,15 +383,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
   const activeScopeRef = useRef<string | null>(null);
   const guestMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
 
-  const scope = useMemo(() => {
-    if (mode === 'authenticated' && session) return `user:${session.user.id}`;
-    if (mode === 'guest') return 'guest';
-    return 'signed_out';
-  }, [mode, session?.user.id]);
+  const scope = 'guest';
 
   const metadataStorageKey = `${EVENT_METADATA_KEY}:${scope}`;
   const eventDeleteTransactionsKey = `${EVENT_DELETE_TRANSACTIONS_KEY}:${scope}`;
-  const eventEditTransactionsKey = `${EVENT_EDIT_TRANSACTIONS_KEY}:${scope}`;
 
   const beginLoading = useCallback(() => {
     const generation = generationRef.current;
@@ -609,8 +420,6 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     generationRef.current += 1;
     deleteCoordinatorRef.current?.dispose();
     deleteCoordinatorRef.current = null;
-    editCoordinatorRef.current?.dispose();
-    editCoordinatorRef.current = null;
     lastDeletedTransactionIdRef.current = null;
     activeScopeRef.current = scope;
     eventsRef.current = [];
@@ -621,7 +430,6 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     monthAccessRef.current = {};
     monthStatesRef.current = {};
     monthRequestSequenceRef.current = new Map();
-    catalogRequestSequenceRef.current += 1;
     activeLoadCountRef.current = 0;
     foregroundRefreshRef.current = null;
     appStateRef.current = AppState.currentState;
@@ -630,14 +438,12 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     setLastDeleted(null);
     setError(null);
     setMonthStates({});
-    setCacheRecoveryNotice(null);
     setHydratedScope(null);
-    setEditJournalHydratedScope(null);
     setLoading(false);
 
     void switchEventNotificationScope(
-      previousScope === 'signed_out' ? null : previousScope,
-      scope === 'signed_out' ? null : scope,
+      previousScope,
+      scope,
       previousEvents,
     ).catch(() => undefined);
   }, [scope]);
@@ -646,27 +452,9 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     return persistJson(metadataStorageKey, map);
   }, [metadataStorageKey]);
 
-  const persistEvents = useCallback((next: CalEvent[]) => {
-    if (mode !== 'authenticated') return Promise.resolve();
-    return saveEventMonthCache(scope, next, monthAccessRef.current).catch(() => undefined);
-  }, [mode, scope]);
-
-  const persistEventCatalog = useCallback((next: CalEvent[]) => {
-    if (mode !== 'authenticated') return Promise.resolve();
-    return saveEventCatalogCache(scope, next).catch(() => undefined);
-  }, [mode, scope]);
-
   const dismissCacheRecoveryNotice = useCallback(async () => {
-    await clearEventCacheRecoveryNotice(scope);
-    if (activeScopeRef.current === scope) setCacheRecoveryNotice(null);
-  }, [scope]);
-
-  const saveMetadataPatch = useCallback(async (id: string, patch: EventMetadata) => {
-    const nextMap = mergeMetadata(eventMetadataRef.current, id, patch);
-    eventMetadataRef.current = nextMap;
-    await persistMetadata(nextMap);
-    return nextMap[id];
-  }, [persistMetadata]);
+    // Account cache recovery no longer exists; kept as a stable context action.
+  }, []);
 
   const persistGuestEvents = useCallback((next: CalEvent[]) => {
     // Calendar CRUD is device-primary.  AsyncStorage is read only once below
@@ -681,56 +469,16 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, []);
 
-  const persistNotificationId = useCallback(async (event: CalEvent, notificationId: string | null) => {
-    const patched = { ...event, notificationId };
-    await saveMetadataPatch(metadataKeyForEvent(event), { reminderMinutes: patched.reminderMinutes, notificationId });
-    return patched;
-  }, [saveMetadataPatch]);
-
   const refreshEventCatalog = useCallback(async () => {
-    const requestGeneration = generationRef.current;
-    const requestSequence = catalogRequestSequenceRef.current + 1;
-    catalogRequestSequenceRef.current = requestSequence;
-    const isCurrentRequest = () => generationRef.current === requestGeneration
-      && activeScopeRef.current === scope
-      && catalogRequestSequenceRef.current === requestSequence;
     if (activeScopeRef.current !== scope) return;
-    if (mode === 'signed_out') {
-      searchableEventsRef.current = [];
-      setSearchableEvents([]);
-      return;
-    }
-    if (mode === 'guest') {
-      searchableEventsRef.current = guestBaseEventsRef.current;
-      setSearchableEvents(guestBaseEventsRef.current);
-      try {
-        await reconcileEventNotificationHorizon(scope, guestBaseEventsRef.current);
-      } catch {
-        // The guest catalog remains available when reminder scheduling is unavailable.
-      }
-      return;
-    }
-    if (!accessToken) return;
-    const data = await fetchEvents(undefined, undefined, accessToken);
-    if (!isCurrentRequest()) return;
-    const loadedCatalog = (data as (ApiEvent & { id: number })[]).map(event => {
-      return apiEventToCalEvent(event, metadataForApiEvent(event, eventMetadataRef.current));
-    });
-    const catalog = projectCatalogTransactions(
-      loadedCatalog,
-      deleteCoordinatorRef.current?.list() ?? [],
-    );
-    searchableEventsRef.current = catalog;
-    setSearchableEvents(catalog);
-    if (!isCurrentRequest()) return;
-    await persistEventCatalog(catalog);
-    if (!isCurrentRequest()) return;
+    searchableEventsRef.current = guestBaseEventsRef.current;
+    setSearchableEvents(guestBaseEventsRef.current);
     try {
-      await reconcileEventNotificationHorizon(scope, catalog);
+      await reconcileEventNotificationHorizon(scope, guestBaseEventsRef.current);
     } catch {
-      // Catalog synchronization is independent from local reminder delivery.
+      // Local calendar stays available when reminder scheduling is unavailable.
     }
-  }, [accessToken, mode, persistEventCatalog, scope]);
+  }, [scope]);
 
   const refreshEvents = useCallback(async (year: number, month: number): Promise<EventRefreshResult> => {
     const requestGeneration = generationRef.current;
@@ -750,14 +498,6 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     let result = emptyResult;
 
     try {
-    if (mode === 'signed_out') {
-      eventsRef.current = [];
-      setEvents([]);
-      result = { dataLoaded: true, reminderSyncConfirmed: true };
-      if (isCurrentRequest()) updateMonthState(monthKey, { status: 'loaded', error: null, updatedAt: Date.now() });
-      return result;
-    }
-    if (mode === 'guest') {
       monthAccessRef.current = touchEventMonth(monthAccessRef.current, monthKey);
       loadedGuestMonthsRef.current = new Set(Object.keys(monthAccessRef.current));
       const expanded = projectDeletionTransactions(
@@ -778,7 +518,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           previousEvents: previous,
         });
       } catch {
-        // Notification persistence must not block the guest calendar.
+        // Notification persistence must not block the local calendar.
         reminderSyncConfirmed = false;
       }
       if (!isCurrentRequest()) return emptyResult;
@@ -792,7 +532,6 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       eventsRef.current = withNotifications;
       setEvents(withNotifications);
 
-      const incomingIds = new Set(expanded.map(event => event.id));
       let nextMetadata = { ...eventMetadataRef.current };
       for (const event of withNotifications) {
         nextMetadata = mergeEventDisplayMetadata(nextMetadata, event);
@@ -802,64 +541,6 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       result = { dataLoaded: true, reminderSyncConfirmed };
       if (isCurrentRequest()) updateMonthState(monthKey, { status: 'loaded', error: null, updatedAt: Date.now() });
       return result;
-    }
-    if (!accessToken) throw new Error('登录状态待恢复，当前显示本机缓存');
-
-    const data = await fetchEvents(year, month, accessToken);
-      if (!isCurrentRequest()) return result;
-      const loadedLocal = (data as (ApiEvent & { id: number })[]).map(e => {
-        return apiEventToCalEvent(e, metadataForApiEvent(e, eventMetadataRef.current));
-      });
-      const local = projectDeletionTransactions(
-        loadedLocal,
-        deleteCoordinatorRef.current?.list() ?? [],
-      );
-      const window = monthWindow(year, month);
-      const previous = eventsRef.current;
-      const incomingIds = new Set(local.map(event => event.id));
-      const retained = previous.filter(event => {
-        if (incomingIds.has(event.id)) return false;
-        return !eventOverlapsDateRange(event, window.start, window.end);
-      });
-      monthAccessRef.current = touchEventMonth(monthAccessRef.current, monthKey);
-      const next = filterEventsToMonthAccess([...retained, ...local], monthAccessRef.current);
-      eventsRef.current = next;
-      setEvents(next);
-      await persistEvents(next);
-      if (!isCurrentRequest()) return result;
-
-      let notificationIds: Record<string, string | null> = {};
-      let reminderSyncConfirmed = true;
-      try {
-        notificationIds = await reconcileEventNotifications(scope, local, {
-          windowStart: window.start,
-          windowEnd: window.end,
-          previousEvents: previous,
-        });
-      } catch {
-        // The cloud calendar remains usable when local notification storage fails.
-        reminderSyncConfirmed = false;
-      }
-      if (!isCurrentRequest()) return result;
-
-      const withNotifications = eventsRef.current.map(event => (
-        incomingIds.has(event.id) && Object.prototype.hasOwnProperty.call(notificationIds, event.id)
-          ? { ...event, notificationId: notificationIds[event.id] }
-          : event
-      ));
-      eventsRef.current = withNotifications;
-      setEvents(withNotifications);
-      await persistEvents(withNotifications);
-      if (!isCurrentRequest()) return result;
-
-      let nextMetadata = { ...eventMetadataRef.current };
-      for (const event of withNotifications.filter(event => incomingIds.has(event.id))) {
-        nextMetadata = mergeEventDisplayMetadata(nextMetadata, event);
-      }
-      eventMetadataRef.current = nextMetadata;
-      await persistMetadata(nextMetadata);
-      result = { dataLoaded: true, reminderSyncConfirmed };
-      if (isCurrentRequest()) updateMonthState(monthKey, { status: 'loaded', error: null, updatedAt: Date.now() });
     } catch (err) {
       if (!isCurrentRequest()) return result;
       updateMonthState(monthKey, {
@@ -870,7 +551,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       endLoading(loadGeneration);
     }
     return result;
-  }, [accessToken, beginLoading, endLoading, mode, persistEvents, persistMetadata, scope, updateMonthState]);
+  }, [beginLoading, endLoading, persistMetadata, scope, updateMonthState]);
 
   useEffect(() => {
     let alive = true;
@@ -879,64 +560,30 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       && generationRef.current === loadGeneration
       && activeScopeRef.current === scope;
     async function loadForScope() {
-      if (mode === 'signed_out') {
-        return;
-      }
       const hydrationLoadGeneration = beginLoading();
       try {
         const metadata = await loadJson<EventMetadataMap>(metadataStorageKey, {});
         if (!isCurrent()) return;
         eventMetadataRef.current = metadata;
-        if (mode === 'guest') {
-          let guestEvents = await loadLocalScheduleEvents().catch(() => []);
-          if (guestEvents.length === 0) {
-            const legacyGuestEvents = await loadJson<CalEvent[]>(GUEST_EVENTS_KEY, []);
-            if (legacyGuestEvents.length > 0) {
-              guestEvents = legacyGuestEvents;
-              await replaceLocalScheduleEvents(legacyGuestEvents).catch(() => undefined);
-            }
+        let guestEvents = await loadLocalScheduleEvents().catch(() => []);
+        if (guestEvents.length === 0) {
+          const legacyGuestEvents = await loadJson<CalEvent[]>(GUEST_EVENTS_KEY, []);
+          if (legacyGuestEvents.length > 0) {
+            guestEvents = legacyGuestEvents;
+            await replaceLocalScheduleEvents(legacyGuestEvents).catch(() => undefined);
           }
-          if (!isCurrent()) return;
-          guestBaseEventsRef.current = guestEvents;
-          searchableEventsRef.current = guestEvents;
-          setSearchableEvents(guestEvents);
-          const now = new Date();
-          monthAccessRef.current = touchEventMonth(
-            {},
-            `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
-          );
-          loadedGuestMonthsRef.current = new Set(Object.keys(monthAccessRef.current));
-          await refreshEvents(now.getFullYear(), now.getMonth() + 1);
-          return;
         }
+        if (!isCurrent()) return;
+        guestBaseEventsRef.current = guestEvents;
+        searchableEventsRef.current = guestEvents;
+        setSearchableEvents(guestEvents);
         const now = new Date();
-        const cachedMonths = await loadEventMonthCache(scope, now);
-        const cachedCatalog = await loadEventCatalogCache(scope, now.getTime());
-        if (!isCurrent()) return;
-        monthAccessRef.current = cachedMonths.monthAccess;
-        setCacheRecoveryNotice(cachedCatalog.recoveryNotice ?? cachedMonths.recoveryNotice);
-        const hydratedEvents = projectDeletionTransactions(
-          cachedMonths.events.map(event => applyEventMetadata(event, metadataForEvent(metadata, event))),
-          deleteCoordinatorRef.current?.list() ?? [],
+        monthAccessRef.current = touchEventMonth(
+          {},
+          `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
         );
-        const hydratedCatalog = projectCatalogTransactions(
-          (cachedCatalog.events.length > 0 ? cachedCatalog.events : sourceCatalog(hydratedEvents))
-            .map(event => applyEventMetadata(event, metadataForEvent(metadata, event))),
-          deleteCoordinatorRef.current?.list() ?? [],
-        );
-        eventsRef.current = hydratedEvents;
-        searchableEventsRef.current = hydratedCatalog;
-        setEvents(hydratedEvents);
-        setSearchableEvents(hydratedCatalog);
-        if (cachedMonths.migratedFromLegacy) await persistEvents(hydratedEvents);
-        if (cachedCatalog.migratedFromLegacy) await persistEventCatalog(hydratedCatalog);
+        loadedGuestMonthsRef.current = new Set(Object.keys(monthAccessRef.current));
         await refreshEvents(now.getFullYear(), now.getMonth() + 1);
-        if (!isCurrent()) return;
-        try {
-          await refreshEventCatalog();
-        } catch {
-          // The cached global catalog remains searchable while offline.
-        }
       } finally {
         if (isCurrent()) {
           setHydratedScope(scope);
@@ -950,16 +597,12 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     beginLoading,
     endLoading,
     metadataStorageKey,
-    mode,
-    persistEventCatalog,
-    persistEvents,
-    refreshEventCatalog,
     refreshEvents,
     scope,
   ]);
 
   useEffect(() => {
-    if (mode === 'signed_out' || hydratedScope !== scope) return undefined;
+    if (hydratedScope !== scope) return undefined;
     let active = true;
     const refreshForegroundRanges = () => {
       if (foregroundRefreshRef.current) return;
@@ -983,7 +626,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       active = false;
       subscription.remove();
     };
-  }, [hydratedScope, mode, refreshEventCatalog, refreshEvents, scope]);
+  }, [hydratedScope, refreshEventCatalog, refreshEvents, scope]);
 
   const addEvent = useCallback(async (input: Omit<CalEvent, 'id'>): Promise<EventCreateResult> => {
     const validation = validateEventDraft(input);
@@ -991,8 +634,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     const ev = validation.value;
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) throw new Error('event scope changed');
-    if (mode === 'guest') {
-      return enqueueGuestMutation(async () => {
+    return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
           throw new Error('event scope changed');
         }
@@ -1047,110 +689,15 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
             !refreshResult.dataLoaded || !refreshResult.reminderSyncConfirmed || !horizonConfirmed,
           ),
         };
-      });
-    }
-    if (!accessToken) throw new Error('not authenticated');
-
-    const localReplay = eventWithClientRequestId(searchableEventsRef.current, ev.clientRequestId);
-    if (localReplay) {
-      return {
-        eventRef: eventRefForEvent(localReplay),
-        reminderDelivery: reminderDeliveryForEvent(localReplay, localReplay.notificationId),
-      };
-    }
-    let saved: ApiEvent;
-    try {
-      saved = await saveEvent(calEventToApiEvent(ev), accessToken);
-    } catch (reason) {
-      if (!(reason instanceof HttpResponseError) || reason.status !== 409 || !ev.clientRequestId?.trim()) {
-        throw reason;
-      }
-      await refreshEventCatalog();
-      const replay = eventWithClientRequestId(searchableEventsRef.current, ev.clientRequestId);
-      if (!replay) throw reason;
-      return {
-        eventRef: eventRefForEvent(replay),
-        reminderDelivery: reminderDeliveryForEvent(replay, replay.notificationId),
-      };
-    }
-    const savedEvent = saved as ApiEvent & { id: number };
-    const savedEventRef: EventRef = {
-      sourceEventId: String(savedEvent.id),
-      occurrenceDate: savedEvent.occurrence_date ?? savedEvent.start_date,
-    };
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-      return { eventRef: savedEventRef, reminderDelivery: 'unconfirmed' };
-    }
-    const savedId = String(savedEvent.id);
-    const savedRefKey = eventRefKey({
-      sourceEventId: savedId,
-      occurrenceDate: saved.occurrence_date ?? saved.start_date,
     });
-    const localMeta = await saveMetadataPatch(savedRefKey, metadataFromEvent(ev));
-    let localEv = apiEventToCalEvent(saved as ApiEvent & { id: number }, localMeta);
-    let notificationId: string | null = null;
-    let reminderUnconfirmed = false;
-    try {
-      notificationId = await scheduleEventNotificationForScope(scope, localEv);
-    } catch {
-      // The cloud event is already durable. A local notification registry
-      // failure must not invite the user to create the same event again.
-      reminderUnconfirmed = true;
-    }
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-      return {
-        eventRef: savedEventRef,
-        reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true),
-      };
-    }
-    if (notificationId) {
-      localEv = await persistNotificationId(localEv, notificationId);
-      if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-        return {
-          eventRef: savedEventRef,
-          reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, true),
-        };
-      }
-    }
-    for (const key of monthKeysForRange(localEv.startDate, eventEffectiveEndDate(localEv))) {
-      monthAccessRef.current = touchEventMonth(monthAccessRef.current, key);
-    }
-    setEvents(prev => {
-      const next = filterEventsToMonthAccess([...prev, localEv], monthAccessRef.current);
-      eventsRef.current = next;
-      void persistEvents(next);
-      return next;
-    });
-    const nextCatalog = [
-      ...searchableEventsRef.current.filter(event => sourceEventId(event) !== savedId),
-      localEv,
-    ];
-    searchableEventsRef.current = nextCatalog;
-    setSearchableEvents(nextCatalog);
-    void persistEventCatalog(nextCatalog);
-    try {
-      await reconcileEventNotificationHorizon(scope, nextCatalog);
-    } catch {
-      reminderUnconfirmed = true;
-    }
-    return {
-      eventRef: eventRefForEvent(localEv),
-      reminderDelivery: reminderDeliveryForEvent(localEv, notificationId, reminderUnconfirmed),
-    };
-  }, [accessToken, enqueueGuestMutation, mode, persistEventCatalog, persistEvents, persistGuestEvents, persistNotificationId, refreshEventCatalog, refreshEvents, saveMetadataPatch, scope]);
+  }, [enqueueGuestMutation, persistGuestEvents, refreshEvents, scope]);
 
   const findConflicts = useCallback(async (
     draft: Omit<CalEvent, 'id'>,
     excludeRef?: EventRef,
     excludeScope: EventRecurrenceScope = 'series',
   ): Promise<EventConflictQueryResult> => {
-    const operationGeneration = generationRef.current;
     const endDate = eventEffectiveEndDate(draft);
-    const fallbackCatalog = uniqueEvents([
-      ...searchableEventsRef.current,
-      ...eventsRef.current,
-      ...guestBaseEventsRef.current,
-    ]);
     const evaluate = (
       catalog: CalEvent[],
       status: EventConflictQueryResult['coverage']['status'],
@@ -1174,39 +721,8 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       };
     };
 
-    if (mode === 'guest') return evaluate(guestBaseEventsRef.current, 'complete');
-    if (mode !== 'authenticated' || !accessToken) {
-      return evaluate(fallbackCatalog, fallbackCatalog.length > 0 ? 'partial' : 'unavailable');
-    }
-
-    const responses = await Promise.allSettled(
-      monthKeysForRange(draft.startDate, endDate).map(async key => {
-        const [year, month] = key.split('-').map(Number);
-        return fetchEvents(year, month, accessToken);
-      }),
-    );
-    if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-      return evaluate(fallbackCatalog, fallbackCatalog.length > 0 ? 'partial' : 'unavailable');
-    }
-    const successful = responses.filter(
-      (response): response is PromiseFulfilledResult<ApiEvent[]> => response.status === 'fulfilled',
-    );
-    const loaded = successful.flatMap(response => response.value).map(event => {
-        const apiEvent = event as ApiEvent & { id: number };
-        return apiEventToCalEvent(apiEvent, metadataForApiEvent(apiEvent, eventMetadataRef.current));
-    });
-    const byRef = new Map<string, CalEvent>();
-    for (const event of [...fallbackCatalog, ...loaded]) {
-      byRef.set(eventRefKey({
-        sourceEventId: stableSourceEventId(event),
-        occurrenceDate: event.occurrenceDate ?? event.startDate,
-      }), event);
-    }
-    const status = successful.length === responses.length
-      ? 'complete'
-      : byRef.size > 0 ? 'partial' : 'unavailable';
-    return evaluate([...byRef.values()], status);
-  }, [accessToken, mode, scope]);
+    return evaluate(guestBaseEventsRef.current, 'complete');
+  }, []);
 
   const resolveEventRef = useCallback(async (ref: EventRef): Promise<EventResolutionResult> => {
     const resolveCurrent = () => resolveEventReference(
@@ -1217,175 +733,8 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     if (current) return { status: 'found', event: current };
     if (activeScopeRef.current !== scope) return { status: 'scope-changed', event: null };
     if (hydratedScope !== scope) return { status: 'retryable', event: null };
-    if (mode === 'guest' || mode === 'signed_out') return { status: 'not-found', event: null };
-    if (!accessToken) return { status: 'retryable', event: null };
-
-    const [year, month] = ref.occurrenceDate.split('-').map(Number);
-    if (!Number.isFinite(year) || !Number.isFinite(month)) return { status: 'not-found', event: null };
-    const refresh = await refreshEvents(year, month);
-    if (activeScopeRef.current !== scope) return { status: 'scope-changed', event: null };
-    let resolved = resolveCurrent();
-    if (resolved) return { status: 'found', event: resolved };
-    try {
-      await refreshEventCatalog();
-    } catch {
-      // The month result or cached catalog may still be enough below.
-    }
-    if (activeScopeRef.current !== scope) return { status: 'scope-changed', event: null };
-    resolved = resolveCurrent();
-    if (resolved) return { status: 'found', event: resolved };
-    return refresh.dataLoaded
-      ? { status: 'not-found', event: null }
-      : { status: 'retryable', event: null };
-  }, [accessToken, hydratedScope, mode, refreshEventCatalog, refreshEvents, scope]);
-
-  const persistEditTransactions = useCallback((transactions: EventEditTransaction[]) => {
-    return writeAppStorageJson(
-      eventEditTransactionsKey,
-      transactions.length > 0 ? createEventEditJournal(transactions) : [],
-      { removeIfEmpty: true },
-    );
-  }, [eventEditTransactionsKey]);
-
-  const applyEditCommandResult = useCallback(async (
-    transaction: EventEditTransaction,
-    response: ApiEventEditCommandResponse,
-  ): Promise<EventMutationResult> => {
-    if (activeScopeRef.current !== transaction.scopeKey) throw new Error('event scope changed');
-    const sourceId = transaction.ref.sourceEventId;
-    const relatedEvents = eventsRef.current.filter(event => stableSourceEventId(event) === sourceId);
-    let reminderUnconfirmed = false;
-    try {
-      await cancelEventNotificationsForMutation(
-        transaction.scopeKey,
-        transaction.ref,
-        transaction.recurrenceScope,
-        relatedEvents,
-      );
-    } catch {
-      reminderUnconfirmed = true;
-    }
-    if (activeScopeRef.current !== transaction.scopeKey) throw new Error('event scope changed');
-
-    const nextMetadata = { ...eventMetadataRef.current };
-    removeMutationMetadata(nextMetadata, transaction.ref, transaction.recurrenceScope, relatedEvents);
-    eventMetadataRef.current = nextMetadata;
-    await persistMetadata(nextMetadata);
-    if (activeScopeRef.current !== transaction.scopeKey) throw new Error('event scope changed');
-
-    const responseEvent = normalizeEditResponseEvent(
-      transaction,
-      response,
-      metadataForApiEvent(response.event, nextMetadata),
-    );
-    const loadedMonths = Object.keys(monthAccessRef.current);
-    const projected = projectEditResponse(
-      eventsRef.current,
-      searchableEventsRef.current,
-      transaction,
-      responseEvent,
-      loadedMonths,
-    );
-    const projectedEvents = filterEventsToMonthAccess(projected.events, monthAccessRef.current);
-    eventsRef.current = projectedEvents;
-    searchableEventsRef.current = projected.catalog;
-    setEvents(projectedEvents);
-    setSearchableEvents(projected.catalog);
-    await Promise.all([
-      persistEvents(projectedEvents),
-      persistEventCatalog(projected.catalog),
-    ]);
-
-    const months = new Set<string>();
-    const anchorMonth = transaction.ref.occurrenceDate.slice(0, 7);
-    for (const key of loadedMonths) {
-      if (transaction.recurrenceScope === 'series'
-        || (transaction.recurrenceScope === 'following' && key >= anchorMonth)) months.add(key);
-    }
-    for (const event of relatedEvents.filter(event => eventIsInRecurrenceScope(
-      event,
-      transaction.ref,
-      transaction.recurrenceScope,
-    ))) {
-      for (const key of monthKeysForRange(event.startDate, eventEffectiveEndDate(event))) months.add(key);
-    }
-    for (const key of monthKeysForRange(
-      responseEvent.startDate,
-      eventEffectiveEndDate(responseEvent),
-    )) months.add(key);
-    const affected = response.affected_range;
-    if (affected.from_occurrence_date && affected.through_occurrence_date) {
-      for (const key of monthKeysForRange(
-        affected.from_occurrence_date,
-        affected.through_occurrence_date,
-      )) months.add(key);
-    }
-
-    const refreshResults = await Promise.all([...months].map(key => {
-      const [year, month] = key.split('-').map(Number);
-      return Number.isFinite(year) && Number.isFinite(month)
-        ? refreshEvents(year, month)
-        : Promise.resolve({ dataLoaded: false, reminderSyncConfirmed: false });
-    }));
-    try {
-      await refreshEventCatalog();
-    } catch {
-      // The projected command response remains durable in the local catalog while offline.
-    }
-    if (activeScopeRef.current !== transaction.scopeKey) throw new Error('event scope changed');
-    const updatedEvents = eventsRef.current.filter(event => stableSourceEventId(event) === sourceId);
-    return {
-      reminderDelivery: reminderDeliveryForUpdatedEvents(
-        updatedEvents,
-        responseEvent,
-        reminderUnconfirmed || refreshResults.some(result => (
-          !result.dataLoaded || !result.reminderSyncConfirmed
-        )),
-      ),
-    };
-  }, [persistEventCatalog, persistEvents, persistMetadata, refreshEventCatalog, refreshEvents]);
-
-  const editCoordinator = useMemo(() => new EventEditCoordinator<EventMutationResult>({
-    persist: persistEditTransactions,
-    execute: async transaction => {
-      if (!accessToken) throw new HttpResponseError('not authenticated', 401);
-      const sourceId = Number(transaction.ref.sourceEventId);
-      if (!Number.isSafeInteger(sourceId)) throw new HttpResponseError('invalid event id', 400);
-      return commandEventEdit(sourceId, {
-        client_request_id: transaction.id,
-        scope: transaction.recurrenceScope,
-        occurrence_date: transaction.ref.occurrenceDate,
-        expected_revision: transaction.expectedRevision,
-        patch: transaction.patch,
-      }, accessToken);
-    },
-    recover: async transaction => {
-      if (!accessToken) throw new HttpResponseError('not authenticated', 401);
-      return fetchEventEditCommand(transaction.id, accessToken);
-    },
-    apply: applyEditCommandResult,
-    classifyFailure: classifyEventEditFailure,
-  }), [accessToken, applyEditCommandResult, persistEditTransactions]);
-
-  useEffect(() => {
-    let active = true;
-    editCoordinatorRef.current = editCoordinator;
-    void loadJson<unknown>(eventEditTransactionsKey, null).then(value => {
-      if (!active || activeScopeRef.current !== scope) return;
-      editCoordinator.hydrate(parseEventEditJournal(value).filter(item => item.scopeKey === scope));
-      setEditJournalHydratedScope(scope);
-    });
-    return () => {
-      active = false;
-      editCoordinator.dispose();
-      if (editCoordinatorRef.current === editCoordinator) editCoordinatorRef.current = null;
-    };
-  }, [editCoordinator, eventEditTransactionsKey, scope]);
-
-  useEffect(() => {
-    if (hydratedScope !== scope || editJournalHydratedScope !== scope) return;
-    void editCoordinator.resumeAll();
-  }, [editCoordinator, editJournalHydratedScope, hydratedScope, scope]);
+    return { status: 'not-found', event: null };
+  }, [hydratedScope, scope]);
 
   const persistDeleteTransactions = useCallback((transactions: EventDeleteTransaction[]) => {
     return writeAppStorageJson(eventDeleteTransactionsKey, transactions, { removeIfEmpty: true });
@@ -1393,8 +742,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
 
   const applyDeleteAbsent = useCallback(async (transaction: EventDeleteTransaction) => {
     if (activeScopeRef.current !== transaction.scopeKey) return;
-    if (mode === 'guest') {
-      const base = guestBaseEventsRef.current.find(event => (
+    const base = guestBaseEventsRef.current.find(event => (
         stableSourceEventId(event) === transaction.ref.sourceEventId
       )) ?? transaction.catalogEvent;
       if (!base) throw new Error('event series not found');
@@ -1414,26 +762,11 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       eventsRef.current = expanded;
       setSearchableEvents(nextGuestEvents);
       setEvents(expanded);
-      return;
-    }
-
-    const nextEvents = hideTransactionScope(eventsRef.current, transaction);
-    const nextCatalog = transaction.recurrenceScope === 'series'
-      ? searchableEventsRef.current.filter(event => stableSourceEventId(event) !== transaction.ref.sourceEventId)
-      : searchableEventsRef.current.map(event => stableSourceEventId(event) === transaction.ref.sourceEventId
-        ? applyGuestTransactionToSeries(event, transaction, 'absent')
-        : event);
-    eventsRef.current = nextEvents;
-    searchableEventsRef.current = nextCatalog;
-    setEvents(nextEvents);
-    setSearchableEvents(nextCatalog);
-    await Promise.all([persistEvents(nextEvents), persistEventCatalog(nextCatalog)]);
-  }, [mode, persistEventCatalog, persistEvents, persistGuestEvents]);
+  }, [persistGuestEvents]);
 
   const applyDeletePresent = useCallback(async (transaction: EventDeleteTransaction) => {
     if (activeScopeRef.current !== transaction.scopeKey) return;
-    if (mode === 'guest') {
-      let nextGuestEvents = guestBaseEventsRef.current;
+    let nextGuestEvents = guestBaseEventsRef.current;
       if (transaction.recurrenceScope === 'series') {
         if (transaction.catalogEvent && !nextGuestEvents.some(event => (
           stableSourceEventId(event) === transaction.ref.sourceEventId
@@ -1454,26 +787,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       eventsRef.current = expanded;
       setSearchableEvents(nextGuestEvents);
       setEvents(expanded);
-      return;
-    }
-
-    let nextCatalog = searchableEventsRef.current;
-    if (transaction.recurrenceScope === 'series') {
-      if (transaction.catalogEvent && !nextCatalog.some(event => (
-        stableSourceEventId(event) === transaction.ref.sourceEventId
-      ))) nextCatalog = [...nextCatalog, transaction.catalogEvent];
-    } else {
-      nextCatalog = nextCatalog.map(event => stableSourceEventId(event) === transaction.ref.sourceEventId
-        ? applyGuestTransactionToSeries(event, transaction, 'present')
-        : event);
-    }
-    const nextEvents = restoreTransactionScope(eventsRef.current, transaction);
-    eventsRef.current = nextEvents;
-    searchableEventsRef.current = nextCatalog;
-    setEvents(nextEvents);
-    setSearchableEvents(nextCatalog);
-    await Promise.all([persistEvents(nextEvents), persistEventCatalog(nextCatalog)]);
-  }, [mode, persistEventCatalog, persistEvents, persistGuestEvents]);
+  }, [persistGuestEvents]);
 
   const deleteCoordinator = useMemo(() => new EventDeleteCoordinator({
     persist: persistDeleteTransactions,
@@ -1503,35 +817,9 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         state: 'orphaned',
       });
     },
-    executeDelete: async transaction => {
-      if (mode === 'guest') return { observedState: 'absent', revision: transaction.revision };
-      if (!accessToken) throw new HttpResponseError('not authenticated', 401);
-      const sourceId = Number(transaction.ref.sourceEventId);
-      if (!Number.isSafeInteger(sourceId)) throw new HttpResponseError('invalid event id', 400);
-      const response = await commandEventState(sourceId, {
-        client_request_id: transaction.deleteRequestId,
-        desired_state: 'absent',
-        scope: transaction.recurrenceScope,
-        occurrence_date: transaction.ref.occurrenceDate,
-        expected_revision: transaction.deleteExpectedRevision,
-      }, accessToken);
-      return { observedState: response.observed_state, revision: response.revision };
-    },
-    executeRestore: async transaction => {
-      if (mode === 'guest') return { observedState: 'present', revision: transaction.revision };
-      if (!accessToken) throw new HttpResponseError('not authenticated', 401);
-      const sourceId = Number(transaction.ref.sourceEventId);
-      if (!Number.isSafeInteger(sourceId)) throw new HttpResponseError('invalid event id', 400);
-      const response = await commandEventState(sourceId, {
-        client_request_id: transaction.restoreRequestId,
-        desired_state: 'present',
-        scope: transaction.recurrenceScope,
-        occurrence_date: transaction.ref.occurrenceDate,
-        expected_revision: transaction.restoreExpectedRevision,
-      }, accessToken);
-      return { observedState: response.observed_state, revision: response.revision };
-    },
-    isKnownFailure: error => error instanceof HttpResponseError && error.status < 500,
+    executeDelete: async transaction => ({ observedState: 'absent', revision: transaction.revision }),
+    executeRestore: async transaction => ({ observedState: 'present', revision: transaction.revision }),
+    isKnownFailure: () => false,
     onUndoTarget: transaction => {
       if (transaction) {
         lastDeletedTransactionIdRef.current = transaction.id;
@@ -1544,7 +832,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       lastDeletedTransactionIdRef.current = latest?.id ?? null;
       setLastDeleted(latest?.snapshot ?? null);
     },
-  }), [accessToken, applyDeleteAbsent, applyDeletePresent, mode, persistDeleteTransactions, persistMetadata]);
+  }), [applyDeleteAbsent, applyDeletePresent, persistDeleteTransactions, persistMetadata]);
 
   useEffect(() => {
     let active = true;
@@ -1581,7 +869,6 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     recurrenceScope: EventRecurrenceScope = 'series',
   ) => {
     if (activeScopeRef.current !== scope) throw new Error('event scope changed');
-    if (mode !== 'guest' && !accessToken) throw new Error('not authenticated');
     const target = resolveEventReference(
       [...eventsRef.current, ...searchableEventsRef.current, ...guestBaseEventsRef.current],
       ref,
@@ -1599,7 +886,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
       catalogEvent,
     });
     await deleteCoordinator.begin(transaction);
-  }, [accessToken, deleteCoordinator, mode, scope]);
+  }, [deleteCoordinator, scope]);
 
   const updateEvent = useCallback(async (
     ref: EventRef,
@@ -1621,8 +908,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     const validation = validateEventDraft(candidate);
     if (!validation.valid || !validation.value) throw new EventDraftValidationError(validation.issues);
     const validated = validation.value;
-    if (mode === 'guest') {
-      return enqueueGuestMutation(async () => {
+    return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
           throw new Error('event scope changed');
         }
@@ -1714,34 +1000,8 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
             )),
           ),
         };
-      });
-    }
-    if (!accessToken) throw new Error('not authenticated');
-    const effectiveScope = !previous.repeat || previous.repeat === 'once'
-      ? 'series'
-      : previous.isRecurrenceException && recurrenceScope === 'following'
-        ? 'occurrence'
-        : recurrenceScope;
-    const patch = calEventChangesToApiEditPatch(previous, validated);
-    if (Object.keys(patch).length === 0) {
-      return {
-        reminderDelivery: reminderDeliveryForEvent(
-          previous,
-          previous.notificationId,
-        ),
-      };
-    }
-    const transaction = createEventEditTransaction({
-      scopeKey: scope,
-      target: previous,
-      recurrenceScope: effectiveScope,
-      patch,
     });
-    const result = await editCoordinator.begin(transaction);
-    return result.status === 'applied'
-      ? result.value
-      : { reminderDelivery: 'unconfirmed', syncStatus: 'pending' };
-  }, [accessToken, editCoordinator, enqueueGuestMutation, mode, persistGuestEvents, persistMetadata, refreshEvents, scope]);
+  }, [enqueueGuestMutation, persistGuestEvents, persistMetadata, refreshEvents, scope]);
 
   const undoDelete = useCallback(async () => {
     const transactionId = lastDeletedTransactionIdRef.current;

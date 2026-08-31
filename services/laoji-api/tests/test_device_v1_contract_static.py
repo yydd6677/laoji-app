@@ -38,8 +38,6 @@ def test_device_router_has_required_public_paths() -> None:
         "/assets/{asset_id}/transcription",
         "/tasks/{task_id}",
         "/meetings/{binding_id}/transcript",
-        "/meetings/{binding_id}/summary",
-        "/meetings/{binding_id}/questions",
         "/speakers",
         "/speakers/audio",
         "/speakers/{speaker_id}/samples",
@@ -55,12 +53,11 @@ def test_device_router_does_not_reach_into_private_module_state() -> None:
     assert "__dict__" not in source
 
 
-def test_device_capabilities_advertise_local_text_summary_attachments() -> None:
+def test_device_capabilities_advertise_text_summary_attachments() -> None:
     source = (ROOT / "app/api/device_v1.py").read_text(encoding="utf-8")
     capability_start = source.index("async def device_capabilities")
-    capability_end = source.index("def _vnext_error", capability_start)
+    capability_end = source.index('@router.put("/epochs/{epoch_id}")', capability_start)
     capability_block = source[capability_start:capability_end]
-    assert '"summary_contract_v3": True' in capability_block
     assert '"summary_attachments_text": True' in capability_block
 
 
@@ -88,14 +85,8 @@ def test_device_router_avoids_path_header_collision_and_sqlite_delete_lock() -> 
     )
 
 
-def test_device_questions_accept_only_verified_local_context_sources() -> None:
+def test_device_router_does_not_mount_retired_q0_or_template_summary() -> None:
     source = (ROOT / "app/api/device_v1.py").read_text(encoding="utf-8")
-    question_start = source.index("async def ask_device_question")
-    question_end = source.index('@router.get("/speakers")', question_start)
-    question_block = source[question_start:question_end]
-    assert "request.manual_note.content_sha256" in question_block
-    assert "source_hash_matches(" in question_block
-    assert "summary_sections=request.summary_sections" in question_block
-    assert "context=request.context" in question_block
-    assert 'kind == "manual_note"' in question_block
-    assert 'kind == "summary"' in question_block
+    assert '@router.post("/meetings/{binding_id}/questions")' not in source
+    assert '@router.post("/meetings/{binding_id}/summary"' not in source
+    assert "get_summary_template" not in source

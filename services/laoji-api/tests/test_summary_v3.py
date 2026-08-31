@@ -2,25 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 
 import pytest
 
-from app.config import settings
 from app.schemas.meeting_facts_v3 import (
     MeetingFactsModelResponseV3,
     OverviewV3,
     model_response_json_schema,
 )
 from app.services import (
-    device_identity,
     llm_provider,
-    summary_task_store,
     summary_v3_evidence,
     summary_v3_generator,
-    summary_v3_store,
 )
-from app.workers.summary_tasks import get_submitted_summary_status
 from app.services.summary_v3_evidence import (
     SummaryEvidenceIncomplete,
     build_evidence_package,
@@ -1151,208 +1145,6 @@ def test_evidence_payload_marks_attention_sources_without_promoting_background()
     ] == ["transcript:t1", "transcript:t2", "transcript:t0"]
 
 
-def test_plaintext_is_not_stored_in_source_payload(tmp_path, monkeypatch):
-    database = tmp_path / "summary.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    monkeypatch.setenv("LAOJI_SUMMARY_V3_PAYLOAD_KEY", "00" * 32)
-    summary_v3_store.reset_store_for_tests()
-    secret = "这段我的笔记不应以明文进入数据库"
-    payload_id = summary_v3_store.save_source_payload(
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        payload={"manual_note": {"content": secret}},
-    )
-    assert summary_v3_store.load_source_payload(
-        payload_id,
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-    )["manual_note"]["content"] == secret
-    assert secret.encode("utf-8") not in database.read_bytes()
-    with sqlite3.connect(database) as connection:
-        row = connection.execute(
-            "SELECT content_bytes, length(ciphertext) FROM summary_v3_source_payloads WHERE id = ?",
-            (payload_id,),
-        ).fetchone()
-    assert row is not None and row[0] > 0 and row[1] > row[0]
-
-
-def test_document_identity_is_immutable_and_idempotent(tmp_path, monkeypatch):
-    database = tmp_path / "summary.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    summary_v3_store.reset_store_for_tests()
-    active_package = package()
-    document = summary_v3_generator.verify_model_response(
-        MeetingFactsModelResponseV3.model_validate(valid_response(active_package)),
-        active_package,
-    ).model_dump(mode="json")
-    first = summary_v3_store.persist_document(
-        task_id="task-one",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        source_fingerprint=active_package.source_fingerprint,
-        transcript_revision=active_package.transcript_revision,
-        model_revision="ollama:qwen3.5:9b",
-        prompt_revision="facts-v3-r1",
-        document=document,
-        coverage=active_package.coverage,
-    )
-    second = summary_v3_store.persist_document(
-        task_id="task-two",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        source_fingerprint=active_package.source_fingerprint,
-        transcript_revision=active_package.transcript_revision,
-        model_revision="ollama:qwen3.5:9b",
-        prompt_revision="facts-v3-r1",
-        document=document,
-        coverage=active_package.coverage,
-    )
-    assert second["id"] == first["id"]
-    assert second["task_id"] == "task-one"
-    with sqlite3.connect(database) as connection:
-        count = connection.execute("SELECT COUNT(*) FROM summary_v3_documents").fetchone()[0]
-    assert count == 1
-
-
-def test_document_and_task_success_commit_together(tmp_path, monkeypatch):
-    database = tmp_path / "summary-atomic.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    summary_task_store.reset_store_for_tests()
-    summary_v3_store.reset_store_for_tests()
-    active_package = package()
-    document = summary_v3_generator.verify_model_response(
-        MeetingFactsModelResponseV3.model_validate(valid_response(active_package)),
-        active_package,
-    ).model_dump(mode="json")
-    summary_task_store.create_task(
-        task_id="task-v3-atomic",
-        task_kind="device-summary-v3",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        dedupe_key="atomic-a",
-        request={"worker_args": ["meeting-a", "device:1:epoch", "payload-a", active_package.source_fingerprint, "ollama:test"]},
-        force=False,
-        retain_generated_result=True,
-    )
-    assert summary_task_store.claim_task("task-v3-atomic", "worker:atomic")
-    persisted = summary_v3_store.persist_document_and_mark_task_success(
-        task_id="task-v3-atomic",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        source_fingerprint=active_package.source_fingerprint,
-        transcript_revision=active_package.transcript_revision,
-        model_revision="ollama:test",
-        prompt_revision="facts-v3-r5",
-        document=document,
-        coverage=active_package.coverage,
-        task_result={"schema_version": 3, "meeting_id": "meeting-a", "facts_document": document},
-        lease_owner="worker:atomic",
-    )
-    task = summary_task_store.get_task("task-v3-atomic")
-    assert persisted["id"]
-    assert task is not None and task["status"] == "success"
-    assert task["result"]["document_id"] == persisted["id"]
-    with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM summary_v3_documents").fetchone()[0] == 1
-
-    summary_task_store.create_task(
-        task_id="task-v3-atomic-rollback",
-        task_kind="device-summary-v3",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-b",
-        dedupe_key="atomic-b",
-        request={"worker_args": ["meeting-b", "device:1:epoch", "payload-b", active_package.source_fingerprint, "ollama:test"]},
-        force=False,
-        retain_generated_result=True,
-    )
-    assert summary_task_store.claim_task("task-v3-atomic-rollback", "worker:rollback")
-    with pytest.raises(summary_v3_store.SummaryV3StoreError, match="summary_task_lease_lost"):
-        summary_v3_store.persist_document_and_mark_task_success(
-            task_id="task-v3-atomic-rollback",
-            task_scope="device:1:epoch",
-            meeting_id="meeting-b",
-            source_fingerprint=active_package.source_fingerprint,
-            transcript_revision=active_package.transcript_revision,
-            model_revision="ollama:test",
-            prompt_revision="facts-v3-r5",
-            document=document,
-            coverage=active_package.coverage,
-            task_result={"schema_version": 3},
-            lease_owner="wrong-owner",
-        )
-    with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM summary_v3_documents WHERE meeting_id = 'meeting-b'").fetchone()[0] == 0
-    assert summary_task_store.get_task("task-v3-atomic-rollback")["status"] == "running"
-
-
-def test_closing_device_epoch_removes_v3_payloads_documents_and_tasks(tmp_path, monkeypatch):
-    database = tmp_path / "device-summary.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    monkeypatch.setenv("LAOJI_SUMMARY_V3_PAYLOAD_KEY", "11" * 32)
-    monkeypatch.setattr(device_identity, "drain_speaker_cleanup_outbox", lambda limit=8: (0, 0))
-    device_identity._SCHEMA_READY.clear()
-    summary_task_store.reset_store_for_tests()
-    summary_v3_store.reset_store_for_tests()
-    with sqlite3.connect(database) as connection:
-        connection.execute(
-            """CREATE TABLE meetings (
-                 id TEXT PRIMARY KEY, user_id INTEGER, data_epoch_id TEXT,
-                 updated_at TEXT
-               )"""
-        )
-        connection.commit()
-
-    device_id = "10000000-0000-4000-8000-000000000001"
-    epoch_id = "20000000-0000-4000-8000-000000000002"
-    meeting_id = "30000000-0000-4000-8000-000000000003"
-    secret = "A" * 43
-    device_identity.register_device(device_id, secret, epoch_id)
-    context = device_identity.authenticate(device_id, secret, epoch_id)
-    task_scope = f"device:{context.principal_id}:{epoch_id}"
-    with sqlite3.connect(database) as connection:
-        connection.execute(
-            "INSERT INTO meetings(id, user_id, data_epoch_id, updated_at) VALUES (?, ?, ?, ?)",
-            (meeting_id, context.principal_id, epoch_id, "2026-08-15T00:00:00+00:00"),
-        )
-        connection.commit()
-    summary_task_store.create_task(
-        task_id="summary-task-v3-close",
-        task_kind="device-summary-v3",
-        task_scope=task_scope,
-        meeting_id=meeting_id,
-        dedupe_key="close-epoch",
-        request={"worker_args": [meeting_id]},
-        force=False,
-        retain_generated_result=True,
-    )
-    summary_v3_store.save_source_payload(
-        task_scope=task_scope,
-        meeting_id=meeting_id,
-        payload={"manual_note": {"content": "待删除"}},
-    )
-    summary_v3_store.persist_document(
-        task_id="summary-task-v3-close",
-        task_scope=task_scope,
-        meeting_id=meeting_id,
-        source_fingerprint="sha256:" + "1" * 64,
-        transcript_revision="sha256:" + "2" * 64,
-        model_revision="ollama:qwen3.5:9b",
-        prompt_revision="facts-v3-r4",
-        document={"schema_version": 3},
-        coverage={},
-    )
-
-    result = device_identity.close_epoch(context, epoch_id)
-
-    assert result["summary_tasks_deleted"] == 1
-    assert result["summary_v3_payloads_deleted"] == 1
-    assert result["summary_v3_documents_deleted"] == 1
-    with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM summary_tasks_v2").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM summary_v3_source_payloads").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM summary_v3_documents").fetchone()[0] == 0
-
-
 def test_prompt_has_no_known_sample_pollution():
     prompt = summary_v3_generator._system_prompt()
     forbidden = [
@@ -1858,66 +1650,3 @@ def test_protocol_rejects_rich_markup_and_presentation_code(value):
 def test_protocol_allows_a_meeting_fact_about_visual_design():
     value = OverviewV3(text="客户要求将按钮颜色改成蓝色。", fact_ids=["f1"])
     assert value.text == "客户要求将按钮颜色改成蓝色。"
-
-
-def test_persistent_task_stage_is_monotonic(tmp_path, monkeypatch):
-    database = tmp_path / "tasks.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    summary_task_store.reset_store_for_tests()
-    record, reused = summary_task_store.create_task(
-        task_id="task-v3",
-        task_kind="device-summary-v3",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        dedupe_key="identity-a",
-        request={"worker_args": ["payload-a"]},
-        force=False,
-        retain_generated_result=True,
-    )
-    assert not reused and record["stage"] == "queued"
-    assert summary_task_store.claim_task("task-v3", "host:1:worker")
-    assert summary_task_store.get_task("task-v3")["stage"] == "preparing"
-    for stage in ("generating", "verifying", "persisting"):
-        assert summary_task_store.update_stage("task-v3", stage, lease_owner="host:1:worker")
-        assert summary_task_store.get_task("task-v3")["stage"] == stage
-    assert summary_task_store.mark_success(
-        "task-v3",
-        {"schema_version": 3},
-        lease_owner="host:1:worker",
-    )
-    assert summary_task_store.get_task("task-v3")["stage"] == "success"
-
-
-def test_v3_task_status_exposes_matching_identity(tmp_path, monkeypatch):
-    database = tmp_path / "task-identity.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    summary_task_store.reset_store_for_tests()
-    source_fingerprint = "sha256:" + "a" * 64
-    record, reused = summary_task_store.create_task(
-        task_id="task-v3-identity",
-        task_kind="device-summary-v3",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        dedupe_key="identity-a",
-        request={
-            "worker_args": [
-                "meeting-a",
-                "device:1:epoch",
-                "payload-a",
-                source_fingerprint,
-                "ollama:qwen3.5:9b",
-            ],
-        },
-        force=False,
-        retain_generated_result=True,
-    )
-    assert not reused and record["status"] == "queued"
-    status = get_submitted_summary_status(
-        "task-v3-identity",
-        expected_scope="device:1:epoch",
-        expected_meeting_id="meeting-a",
-    )
-    assert status is not None
-    assert status["source_fingerprint"] == source_fingerprint
-    assert status["model_revision"] == "ollama:qwen3.5:9b"
-    assert status["prompt_revision"].startswith("facts-v3-")

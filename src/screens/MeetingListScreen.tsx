@@ -10,7 +10,7 @@ import {
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { CompositeNavigationProp } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import type { MainTabsParamList, RootStackParamList } from '../types';

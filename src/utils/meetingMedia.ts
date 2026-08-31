@@ -11,16 +11,9 @@ type ResumableMeetingLike = {
   audioLocalUri?: string | null;
 };
 
-type RemoteMeetingIdentityLike = {
-  id: string;
-  remoteId?: string | null;
-  source?: 'cloud' | 'guest';
-};
-
 const MEETING_STATUS_PRIORITY = [
   '上传受阻',
   '待上传',
-  '待同步',
   '录音中',
   '录音已暂停',
   '处理中',
@@ -29,7 +22,7 @@ const MEETING_STATUS_PRIORITY = [
   '未开始',
 ] as const;
 
-// MIN-PLAYER-001: matches the Feishu 7.71.8 speed picker contract.
+// MIN-PLAYER-001: shared playback-speed picker contract.
 export const MEETING_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
 export function nextMeetingPlaybackRate(current: number): number {
@@ -41,20 +34,6 @@ export function nextMeetingPlaybackRate(current: number): number {
 export function canResumeMeetingRecording(meeting: ResumableMeetingLike): boolean {
   if (meeting.audioAvailable || meeting.audioLocalUri) return false;
   return ['created', 'recording', 'failed'].includes(meeting.status ?? 'created');
-}
-
-export function meetingRemoteIdentity(meeting: RemoteMeetingIdentityLike): string | null {
-  if (Object.prototype.hasOwnProperty.call(meeting, 'remoteId')) {
-    return meeting.remoteId?.trim() || null;
-  }
-  // Legacy account cache rows predate remoteId and used the server ID as id.
-  return meeting.source === 'cloud' ? meeting.id.trim() || null : null;
-}
-
-export function requireMeetingRemoteIdentity(meeting: RemoteMeetingIdentityLike): string {
-  const remoteId = meetingRemoteIdentity(meeting);
-  if (!remoteId) throw new Error('会议正在同步，请稍后重试。');
-  return remoteId;
 }
 
 export function preferredMeetingStatusLabel(tags: ReadonlyArray<{ label: string }>): string {

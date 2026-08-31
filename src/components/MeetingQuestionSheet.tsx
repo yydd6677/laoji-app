@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -22,7 +22,7 @@ import type {
   MeetingSummaryAttachmentAuthorization,
   ScopeKey,
 } from '../domain/meeting';
-import type { MeetingAttachmentRecord } from '../data/repositories';
+import type { MeetingAttachmentRecord } from "../data/repositories/meetingNoteRepository";
 import { MeetingSummaryAttachmentSheet } from './MeetingSummaryAttachmentSheet';
 import { readableErrorMessage } from '../services/errors';
 import { authorizeMeetingQuestionAttachments } from '../services/meetingQuestionAttachments';
@@ -35,9 +35,7 @@ import {
   type MeetingQuestionSession,
 } from '../services/meetingQuestions';
 import { Q2EvidenceChangedError } from '../services/meetingQuestionsQ2';
-import { beginSummaryV3InteractiveWork } from '../services/meetingSummaryV3Upgrade';
-import { getFeatureFlags } from '../config/featureFlags';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 const MOTION_MS = 300;
 
@@ -120,7 +118,7 @@ function QuestionTurnView({
   turn: MeetingQuestionTurn;
   onCitation: (citation: MeetingQuestionCitation) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const [citationsExpanded, setCitationsExpanded] = useState(false);
   return (
     <View style={styles.turn} testID={`meeting-question-turn-${turn.ordinal}`}>
@@ -183,7 +181,7 @@ function QuestionTurnView({
 }
 
 function PendingQuestionView({ question }: { question: string }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   return (
     <View
       style={styles.turn}
@@ -202,15 +200,13 @@ function PendingQuestionView({ question }: { question: string }) {
 }
 
 /**
- * [INFERENCE] LaoJi-only Minutes secondary page. The title bar, state hierarchy,
- * input geometry, tokens and motion follow the nearest Feishu page families.
+ * Meeting question page using LaoJi's shared title, state, input, token and motion owners.
  */
 export function MeetingQuestionSheet({
   visible,
   meetingTitle,
   meetingId,
   scopeKey,
-  accessToken,
   onClose,
   onOpenCitation,
 }: {
@@ -218,12 +214,11 @@ export function MeetingQuestionSheet({
   meetingTitle: string;
   meetingId: string;
   scopeKey: ScopeKey | null;
-  accessToken?: string | null;
   onClose: () => void;
   onOpenCitation: (target: MeetingQuestionCitationTarget) => void;
 }) {
-  const { colors } = getFeishuTokens();
-  const questionAttachmentsEnabled = getFeatureFlags().meetingQuestionsQ2Candidate;
+  const { colors } = getUiTokens();
+  const questionAttachmentsEnabled = true;
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -280,7 +275,7 @@ export function MeetingQuestionSheet({
   ) => {
     if (!scopeKey) {
       setSession(null);
-      setError('登录状态尚未准备好，请稍后重试。');
+      setError('设备状态尚未准备好，请稍后重试。');
       return;
     }
     const generation = loadGenerationRef.current + 1;
@@ -393,15 +388,12 @@ export function MeetingQuestionSheet({
     setSending(true);
     setError('');
     setStatus('');
-    const releaseInteractivePriority = beginSummaryV3InteractiveWork();
     try {
       const next = await askMeetingQuestion({
         scopeKey,
         navigationMeetingId: meetingId,
         session,
         question,
-        accessToken,
-        signal: controller.signal,
       });
       if (!mountedRef.current || controller.signal.aborted) return;
       setSession(next);
@@ -417,7 +409,6 @@ export function MeetingQuestionSheet({
         setError(readableErrorMessage(reason, '暂时未能回答，请稍后重试。'));
       }
     } finally {
-      releaseInteractivePriority();
       if (requestControllerRef.current === controller) requestControllerRef.current = null;
       if (mountedRef.current) setSending(false);
     }
@@ -703,8 +694,7 @@ const styles = StyleSheet.create({
   answerCard: { marginTop: 10, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 12 },
   answerText: { fontSize: 16, lineHeight: 25 },
   citations: { marginTop: 8, gap: 8 },
-  // [INFERENCE] LaoJi-only evidence disclosure. Keep the Feishu-neutral
-  // container family and a 44dp action target while collapsing verbose source
+  // Keep the shared neutral container and a 44dp action target while collapsing verbose source
   // excerpts by default.
   citationsToggle: {
     minHeight: 44,

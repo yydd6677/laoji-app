@@ -189,6 +189,8 @@ class RecorderStartConfig(
   val stopTimeoutMs: Long,
   val levelIntervalMs: Long,
   val deviceV2: DeviceV2RealtimeConfig?,
+  /** The microphone is already allowed to capture while JS resolves the realtime fence. */
+  val realtimeAttachPending: Boolean,
 ) {
   override fun toString(): String =
     "RecorderStartConfig(sessionId=$sessionId, purpose=${purpose.wireValue}, mode=${mode.wireValue}, " +
@@ -196,6 +198,7 @@ class RecorderStartConfig(
       "websocketUrl=[REDACTED], " +
       "credentials=$credentials, allowInsecureDevelopment=$allowInsecureDevelopment, " +
       "deviceV2=${if (deviceV2 == null) "disabled" else "enabled"}, " +
+      "realtimeAttachPending=$realtimeAttachPending, " +
       "connectionTimeoutMs=$connectionTimeoutMs, " +
       "stopTimeoutMs=$stopTimeoutMs, levelIntervalMs=$levelIntervalMs)"
 
@@ -252,6 +255,7 @@ class RecorderStartConfig(
           "levelIntervalMs",
         ),
         deviceV2 = null,
+        realtimeAttachPending = false,
       )
     }
 
@@ -330,6 +334,7 @@ class RecorderStartConfig(
           assetGeneration = assetGeneration,
           expiresAtEpoch = expiresAtEpoch,
         ),
+        realtimeAttachPending = false,
       )
     }
 
@@ -354,6 +359,62 @@ class RecorderStartConfig(
         "levelIntervalMs",
       ),
       deviceV2 = null,
+      realtimeAttachPending = false,
+    )
+
+    fun createLocalMeeting(
+      sessionId: String,
+      storageScope: String?,
+      levelIntervalMs: Double?,
+    ): RecorderStartConfig = RecorderStartConfig(
+      sessionId = validateSessionId(sessionId),
+      purpose = AudioPurpose.MEETING,
+      mode = RecorderMode.LOCAL_ONLY,
+      storageScope = normalizeStorageScope(storageScope),
+      websocketUrl = null,
+      credentials = null,
+      allowInsecureDevelopment = false,
+      connectionTimeoutMs = AudioRuntimeContract.DEFAULT_CONNECTION_TIMEOUT_MS,
+      stopTimeoutMs = AudioRuntimeContract.DEFAULT_STOP_TIMEOUT_MS,
+      levelIntervalMs = boundedMilliseconds(
+        levelIntervalMs,
+        AudioRuntimeContract.DEFAULT_LEVEL_INTERVAL_MS,
+        50L,
+        1_000L,
+        "levelIntervalMs",
+      ),
+      deviceV2 = null,
+      realtimeAttachPending = false,
+    )
+
+    /**
+     * Phone-microphone meeting capture must not wait for DNS, device binding,
+     * credentials or a websocket. Frames are journaled immediately and held
+     * in the recorder's bounded prefix queue until attachDeviceV2 arrives.
+     */
+    fun createDeferredRealtimeMeeting(
+      sessionId: String,
+      storageScope: String?,
+      levelIntervalMs: Double?,
+    ): RecorderStartConfig = RecorderStartConfig(
+      sessionId = validateSessionId(sessionId),
+      purpose = AudioPurpose.MEETING,
+      mode = RecorderMode.REALTIME,
+      storageScope = normalizeStorageScope(storageScope),
+      websocketUrl = null,
+      credentials = null,
+      allowInsecureDevelopment = false,
+      connectionTimeoutMs = AudioRuntimeContract.DEFAULT_CONNECTION_TIMEOUT_MS,
+      stopTimeoutMs = AudioRuntimeContract.DEFAULT_STOP_TIMEOUT_MS,
+      levelIntervalMs = boundedMilliseconds(
+        levelIntervalMs,
+        AudioRuntimeContract.DEFAULT_LEVEL_INTERVAL_MS,
+        50L,
+        1_000L,
+        "levelIntervalMs",
+      ),
+      deviceV2 = null,
+      realtimeAttachPending = true,
     )
 
     fun validateSessionId(value: String): String {
@@ -383,8 +444,7 @@ class RecorderStartConfig(
 
     fun normalizeStorageScope(value: String?): String? {
       val scope = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-      val valid = scope == "guest" || (scope.startsWith("user:") && scope.removePrefix("user:").isNotBlank())
-      if (!valid || scope.length > 256 || scope.any { it.isISOControl() }) {
+      if (scope != "guest") {
         throw RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "invalid storageScope")
       }
       return scope

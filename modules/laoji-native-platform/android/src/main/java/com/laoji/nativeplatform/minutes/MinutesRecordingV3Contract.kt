@@ -8,7 +8,7 @@ internal object MinutesRecordingV3Contract {
   const val TAB_HEIGHT_DP = 44
   // mm_layout_record_toolbar_bar_3_new.xml: centered duration, 32dp waveform,
   // then the operation row. The retained two actions are packed in the same
-  // bottom hierarchy after omitting Feishu capabilities LaoJi does not provide.
+  // bottom hierarchy while exposing only capabilities LaoJi provides.
   const val BOTTOM_PANEL_HEIGHT_DP = 144
   const val DURATION_HEIGHT_DP = 32
   const val WAVE_CONTAINER_HEIGHT_DP = 44

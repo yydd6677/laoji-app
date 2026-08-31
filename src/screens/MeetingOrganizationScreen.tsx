@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ManageMeetingOrganizationUseCase } from '../application/meeting';
@@ -15,26 +15,19 @@ import { MeetingTagSheet } from '../components/MeetingTagSheet';
 import { useAppDialog } from '../components/AppDialog';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SettingsTitleBar } from '../components/SettingsGroup';
-import type {
-  MeetingOrganizationMeeting,
-  MeetingOrganizationProjection,
-  MeetingPersonAggregate,
-  MeetingTagRecord,
-  MeetingTopicAggregate,
-} from '../data/repositories';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import type { MeetingOrganizationMeeting, MeetingOrganizationProjection, MeetingPersonAggregate, MeetingTagRecord, MeetingTopicAggregate } from "../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { ScopeKey } from '../domain/meeting';
 import { readableErrorMessage } from '../services/errors';
-import { useAuth } from '../store/AuthStore';
 import {
-  FEISHU_FONT_SIZES,
-  FEISHU_RADII,
-  getFeishuTokens,
-} from '../theme/feishuTokens';
+  UI_FONT_SIZES,
+  UI_RADII,
+  getUiTokens,
+} from '../theme/uiTokens';
 import type { RootStackParamList } from '../types';
 import { displayMeetingTitle } from '../utils/meetingTitle';
 
-const { colors: F } = getFeishuTokens();
+const { colors: F } = getUiTokens();
 const meetingOrganization = new ManageMeetingOrganizationUseCase(sqliteMeetingNoteRepository);
 const EMPTY_PROJECTION: MeetingOrganizationProjection = { people: [], topics: [] };
 
@@ -164,9 +157,8 @@ function OrganizationGroupCard({
 }
 
 export function MeetingOrganizationScreen({ navigation }: Props) {
-  const { isGuest, session } = useAuth();
   const { showDialog } = useAppDialog();
-  const scopeKey = isGuest ? 'guest' as ScopeKey : session ? `user:${session.user.id}` as ScopeKey : null;
+  const scopeKey: ScopeKey = 'guest';
   const [mode, setMode] = useState<OrganizationMode>('people');
   const [projection, setProjection] = useState<MeetingOrganizationProjection>(EMPTY_PROJECTION);
   const [tags, setTags] = useState<readonly MeetingTagRecord[]>([]);
@@ -177,12 +169,6 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current;
-    if (!scopeKey) {
-      setProjection(EMPTY_PROJECTION);
-      setLoading(false);
-      setError('当前无法读取会议分类。');
-      return;
-    }
     setLoading(true);
     setError('');
     try {
@@ -205,14 +191,12 @@ export function MeetingOrganizationScreen({ navigation }: Props) {
   }, [scopeKey]);
 
   const refreshTags = useCallback(async () => {
-    if (!scopeKey) throw new Error('当前无法使用会议标签。');
     const next = await meetingOrganization.listTags(scopeKey);
     setTags(next);
     return next;
   }, [scopeKey]);
 
   const createTag = useCallback(async (name: string) => {
-    if (!scopeKey) throw new Error('当前无法使用会议标签。');
     const tag = await meetingOrganization.createTag(scopeKey, name);
     await refreshTags();
     await load();
@@ -390,7 +374,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   manageActionText: {
-    fontSize: FEISHU_FONT_SIZES.body1,
+    fontSize: UI_FONT_SIZES.body1,
     lineHeight: 22,
     fontWeight: '400',
   },
@@ -406,7 +390,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tabText: {
-    fontSize: FEISHU_FONT_SIZES.body0,
+    fontSize: UI_FONT_SIZES.body0,
     lineHeight: 24,
     fontWeight: '400',
   },
@@ -425,7 +409,7 @@ const styles = StyleSheet.create({
   emptyContent: { flexGrow: 1 },
   group: {
     marginBottom: 12,
-    borderRadius: FEISHU_RADII.l,
+    borderRadius: UI_RADII.l,
     overflow: 'hidden',
   },
   groupHeader: {
@@ -444,7 +428,7 @@ const styles = StyleSheet.create({
   },
   groupInitial: {
     maxWidth: 28,
-    fontSize: FEISHU_FONT_SIZES.title3,
+    fontSize: UI_FONT_SIZES.title3,
     lineHeight: 24,
     fontWeight: '500',
   },
@@ -452,7 +436,7 @@ const styles = StyleSheet.create({
   groupTitleLine: { flexDirection: 'row', alignItems: 'center' },
   groupTitle: {
     flexShrink: 1,
-    fontSize: FEISHU_FONT_SIZES.body0,
+    fontSize: UI_FONT_SIZES.body0,
     lineHeight: 22,
     fontWeight: '500',
   },
@@ -460,11 +444,11 @@ const styles = StyleSheet.create({
     height: 20,
     marginLeft: 8,
     paddingHorizontal: 6,
-    borderRadius: FEISHU_RADII.s,
+    borderRadius: UI_RADII.s,
     justifyContent: 'center',
   },
-  badgeText: { fontSize: FEISHU_FONT_SIZES.caption1, lineHeight: 18 },
-  groupMeta: { marginTop: 2, fontSize: FEISHU_FONT_SIZES.caption1, lineHeight: 18 },
+  badgeText: { fontSize: UI_FONT_SIZES.caption1, lineHeight: 18 },
+  groupMeta: { marginTop: 2, fontSize: UI_FONT_SIZES.caption1, lineHeight: 18 },
   groupDivider: { height: StyleSheet.hairlineWidth, marginLeft: 68 },
   meetingRow: {
     minHeight: 60,
@@ -475,8 +459,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   meetingCopy: { flex: 1, minWidth: 0, marginRight: 8 },
-  meetingTitle: { fontSize: FEISHU_FONT_SIZES.body1, lineHeight: 20, fontWeight: '400' },
-  meetingMeta: { marginTop: 2, fontSize: FEISHU_FONT_SIZES.caption1, lineHeight: 18 },
+  meetingTitle: { fontSize: UI_FONT_SIZES.body1, lineHeight: 20, fontWeight: '400' },
+  meetingMeta: { marginTop: 2, fontSize: UI_FONT_SIZES.caption1, lineHeight: 18 },
   meetingDivider: { height: StyleSheet.hairlineWidth, marginLeft: 68 },
   state: {
     flex: 1,
@@ -485,15 +469,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stateText: { fontSize: FEISHU_FONT_SIZES.body1, lineHeight: 22, textAlign: 'center' },
-  emptyText: { marginTop: 14, fontSize: FEISHU_FONT_SIZES.body1, lineHeight: 22 },
+  stateText: { fontSize: UI_FONT_SIZES.body1, lineHeight: 22, textAlign: 'center' },
+  emptyText: { marginTop: 14, fontSize: UI_FONT_SIZES.body1, lineHeight: 22 },
   retry: {
     minWidth: 76,
     height: 44,
     marginTop: 8,
-    borderRadius: FEISHU_RADII.m,
+    borderRadius: UI_RADII.m,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  retryText: { fontSize: FEISHU_FONT_SIZES.body0, lineHeight: 22 },
+  retryText: { fontSize: UI_FONT_SIZES.body0, lineHeight: 22 },
 });

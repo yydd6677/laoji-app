@@ -11,7 +11,6 @@ import re
 from typing import Any, Iterable
 
 from app.services.llm_provider import LlmProviderError, embed_texts, embed_texts_cached
-from app.services.summary_v3_store import source_fingerprint
 
 
 INPUT_TOKEN_BUDGET = 10_240
@@ -50,6 +49,18 @@ _FORCED_CONNECTOR_SIGNAL = re.compile(
     r"(?:首先|其次|最后|另外|另一方面|关于|接下来|回到|换个话题)",
     re.IGNORECASE,
 )
+
+
+def source_fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
 _NO_NEW_INFORMATION_SIGNAL = re.compile(
     r"(?:没有|无|未|尚未)[^。！？；]{0,18}(?:新增|形成|产生|指定)?[^。！？；]{0,8}"
     r"(?:决策|决定|行动项|负责人|截止(?:日期|时间))",

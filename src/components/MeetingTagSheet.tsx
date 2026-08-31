@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -16,9 +16,9 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { MeetingTagRecord, RenameMeetingTagResult } from '../data/repositories';
+import type { MeetingTagRecord, RenameMeetingTagResult } from "../data/repositories/meetingNoteRepository";
 import { readableErrorMessage } from '../services/errors';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 type Mode = 'assign' | 'manage';
 
@@ -47,7 +47,7 @@ export function MeetingTagSheet({
   onDelete: (tag: MeetingTagRecord) => void;
   onSave?: (tagIds: readonly string[]) => Promise<void>;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;

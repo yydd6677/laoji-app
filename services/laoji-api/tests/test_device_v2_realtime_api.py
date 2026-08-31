@@ -59,20 +59,6 @@ def test_chunk_frame_requires_exact_pcm_hash() -> None:
         raise AssertionError("PCM duration mismatch was accepted")
 
 
-def test_realtime_websocket_is_fail_closed_without_capability(monkeypatch) -> None:
-    monkeypatch.delenv("LAOJI_VNEXT_REALTIME_V2_ENABLED", raising=False)
-    app = FastAPI()
-    app.include_router(device_v2_realtime.router, prefix="/api")
-    client = TestClient(app)
-    with client.websocket_connect("/api/device/v2/realtime/disabled-session") as websocket:
-        assert websocket.receive_json() == {
-            "schema_version": 2,
-            "type": "error",
-            "code": "REALTIME_V2_DISABLED",
-            "message": "实时转写候选链路尚未启用",
-        }
-
-
 @pytest.mark.asyncio
 async def test_realtime_replay_pages_to_fixed_durable_cursor(monkeypatch) -> None:
     context = DeviceV2Context("device-1", "epoch-1", 1, 1)
@@ -113,7 +99,6 @@ async def test_realtime_replay_pages_to_fixed_durable_cursor(monkeypatch) -> Non
 
 
 def test_realtime_websocket_persists_before_ack(monkeypatch) -> None:
-    monkeypatch.setenv("LAOJI_VNEXT_REALTIME_V2_ENABLED", "1")
     context = DeviceV2Context("device-1", "epoch-1", 1, 1)
     calls: list[str] = []
 

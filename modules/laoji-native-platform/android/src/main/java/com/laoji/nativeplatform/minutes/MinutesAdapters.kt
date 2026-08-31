@@ -1,12 +1,13 @@
 package com.laoji.nativeplatform.minutes
 
-// MIN-HOME-LIST-001: Feishu list/grid item hierarchy from MmHomeVHFactory and the
+// MIN-HOME-LIST-001 [SOURCE]: Feishu list/grid item hierarchy from MmHomeVHFactory and the
 // mm_item_list_home_* layouts, with LaoJi meeting data bound into that structure.
 
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -20,6 +21,7 @@ import androidx.core.view.accessibility.AccessibilityViewCommand
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.NativeThemePreference
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 
 internal enum class MinutesHomeViewMode {
   LIST,
@@ -134,13 +136,22 @@ internal class MinutesMeetingAdapter(
       root.isFocusable = true
       root.backgroundShape(
         MinutesPalette.surface,
-        radiusDp = if (MinutesPalette.vivid) 16 else 12,
+        radiusDp = MinutesPalette.cardRadiusDp,
+      )
+      root.foreground = RippleDrawable(
+        ColorStateList.valueOf(MinutesPalette.primaryTransparent),
+        null,
+        GradientDrawable().apply {
+          shape = GradientDrawable.RECTANGLE
+          cornerRadius = parent.context.dp(MinutesPalette.cardRadiusDp).toFloat()
+          setColor(Color.WHITE)
+        },
       )
       root.clipToOutline = true
 
       cover.backgroundShape(
         MinutesPalette.coverDefault,
-        radiusDp = if (MinutesPalette.vivid) 12 else 0,
+        radiusDp = MinutesPalette.coverRadiusDp,
       )
       coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
       coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
@@ -241,7 +252,7 @@ internal class MinutesMeetingAdapter(
         cover.layoutParams = LinearLayout.LayoutParams(0, 0)
         textColumn.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
-        title.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        title.typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
         support.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
         support.layoutParams = LinearLayout.LayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
@@ -295,7 +306,7 @@ internal class MinutesMeetingAdapter(
           topMargin = context.dp(10)
         }
         title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
-        title.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        title.typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
         support.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
         support.layoutParams = LinearLayout.LayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
@@ -334,7 +345,7 @@ internal class MinutesMeetingAdapter(
       ) View.GONE else View.VISIBLE
       bindCover(meeting)
       meta.text = if (mode == MinutesHomeViewMode.GRID) {
-        // Feishu's cover card keeps one compact itemTime lane beside itemStatus.
+        // The cover card keeps one compact item-time lane beside item status.
         // Duration remains available in list/detail where the lane is wide enough.
         meeting.dateTimeLabel
       } else {
@@ -406,7 +417,7 @@ internal class MinutesMeetingAdapter(
           applyDefaultCoverGeometry()
           cover.backgroundShape(
             MinutesPalette.coverDefault,
-            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+            radiusDp = MinutesPalette.coverRadiusDp,
           )
           coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
           coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
@@ -417,15 +428,15 @@ internal class MinutesMeetingAdapter(
           applyDynamicCoverGeometry(topPaddingDp = 24, bottomPaddingDp = 28)
           cover.backgroundShape(
             MinutesPalette.coverSummary,
-            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+            radiusDp = MinutesPalette.coverRadiusDp,
           )
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
           coverHeaderIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_summary_book)
           // The source book glyph is multicolor blue/red. In LaoJi's vivid
           // skin it must follow the active purple semantic accent so the cover
-          // does not become an isolated Feishu-blue island.
-          coverHeaderIcon.imageTintList = if (NativeThemePreference.isVivid(itemView.context)) {
+          // does not become an isolated accent-color island.
+          coverHeaderIcon.imageTintList = if (NativeThemePreference.read(itemView.context) != "neutral") {
             ColorStateList.valueOf(MinutesPalette.primary)
           } else {
             null
@@ -445,7 +456,7 @@ internal class MinutesMeetingAdapter(
           applyDynamicCoverGeometry(topPaddingDp = 26, bottomPaddingDp = 20)
           cover.backgroundShape(
             MinutesPalette.coverContent,
-            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+            radiusDp = MinutesPalette.coverRadiusDp,
           )
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE

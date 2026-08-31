@@ -40,15 +40,34 @@ def test_systemd_units_bind_only_the_compact_internal_ports():
     deploy = PROJECT_ROOT / "deploy" / "linux"
     units = "\n".join(
         (deploy / name).read_text(encoding="utf-8")
-        for name in ("laoji-api-vnext.service.example", "laoji-asr-vnext.service.example")
+        for name in (
+            "laoji-api.service.example",
+            "laoji-asr.service.example",
+            "laoji-ollama.service.example",
+        )
     )
-    assert "--port 18021" in units
-    assert "QWEN_ASR_PORT=8031" in units
-    assert "LAOJI_INTERNAL_ASR_PORT=8031" in units
-    assert "QWEN_ASR_DEVICE=cpu" in units
-    for old_port in ("18035", "8002", "21435", "21436"):
+    assert "--port 18020" in units
+    assert "OLLAMA_HOST=127.0.0.1:21434" in units
+    assert "%h/laoji-service-platform/current" in units
+    assert "%h/.config/laoji/laoji.env" in units
+    for old_port in ("18021", "8031", "18035", "8002", "21435", "21436"):
         assert old_port not in units
     env = (deploy / "api.env.example").read_text(encoding="utf-8")
     asr_env = (deploy / "asr.env.example").read_text(encoding="utf-8")
-    assert "LAOJI_INTERNAL_ASR_PORT=8031" in env
-    assert "QWEN_ASR_MODEL=/opt/laoji-vnext/models/qwen3-asr/Qwen3-ASR-1.7B" in asr_env
+    assert "LAOJI_INTERNAL_ASR_PORT=8030" in env
+    assert "QWEN_ASR_MODEL=/home/LAOJI_USER/laoji-service-platform/models/qwen3-asr/Qwen3-ASR-1.7B" in asr_env
+    assert "R2_ACCESS_KEY_ID=" not in env
+    assert "R2_SECRET_ACCESS_KEY=" not in env
+
+
+def test_api_container_uses_the_same_python_and_port_boundary():
+    dockerfile = (PROJECT_ROOT / "services" / "laoji-api" / "Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    assert "ubuntu24.04" in dockerfile
+    assert "python3 -m venv" in dockerfile
+    assert "requirements-compact.txt" in dockerfile
+    assert "EXPOSE 18020" in dockerfile
+    assert '"--port", "18020"' in dockerfile
+    for retired in ("python3.11", "docker-wheels", "EXPOSE 8000", '"--port", "8000"'):
+        assert retired not in dockerfile

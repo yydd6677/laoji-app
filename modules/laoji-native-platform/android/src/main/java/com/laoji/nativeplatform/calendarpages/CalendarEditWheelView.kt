@@ -24,7 +24,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.DecelerateInterpolator
 import android.widget.OverScroller
-import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.acos
@@ -102,7 +102,6 @@ internal object CalendarEditWheelContract {
   private fun positiveModulo(value: Float, modulus: Float): Float = ((value % modulus) + modulus) % modulus
 }
 
-@FeishuEvidence("CAL-PICKER-WHEEL-TAP-001", "CAL-REPEAT-RRULE-001")
 internal class CalendarEditWheelView(context: Context) : View(context) {
   private val paletteReady = CalendarPagePalette.configure(context)
   private val baseTextSizePx = sp(17f)
@@ -110,14 +109,14 @@ internal class CalendarEditWheelView(context: Context) : View(context) {
     color = CalendarPagePalette.placeholder
     textAlign = Paint.Align.CENTER
     textSize = baseTextSizePx
-    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+    typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
   }
   private val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = CalendarPagePalette.text
     textAlign = Paint.Align.CENTER
     textSize = baseTextSizePx * CalendarEditWheelContract.CENTER_SCALE
     textScaleX = CalendarEditWheelContract.CENTER_SCALE
-    typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+    typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
   }
   private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = CalendarPagePalette.divider

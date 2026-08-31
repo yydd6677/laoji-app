@@ -72,8 +72,6 @@ export interface EventRef {
 
 export interface Meeting {
   id: string;
-  /** Stable server identity. Explicit null means this local meeting is not created remotely yet. */
-  remoteId?: string | null;
   title: string;
   date: string;
   time?: string;
@@ -83,9 +81,10 @@ export interface Meeting {
   participants?: string[];
   hasTranscript?: boolean;
   hasSummary?: boolean;
+  /** Compact summary excerpt projected for the meeting-list cover. */
+  summaryCoverText?: string;
   status?: string;
-  statusSyncPending?: boolean;
-  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen';
+  mode?: 'realtime' | 'offline';
   description?: string | null;
   location?: string | null;
   createdAt?: string;
@@ -181,10 +180,7 @@ export interface MeetingActionFollowupParams {
   clientRequestId: string;
 }
 
-export type EditableProfileField = 'nickname' | 'email' | 'phone';
-
 export type RootStackParamList = {
-  Login: undefined;
   MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
   EventDetail: { eventRef: EventRef };
   MeetingLive: {
@@ -208,17 +204,11 @@ export type RootStackParamList = {
     positionMs?: number;
   };
   MeetingOrganization: undefined;
-  SharedAction: { token: string };
-  SharedMeetingContent: { token: string };
   SpeakerManager: undefined;
   SpeakerEnrollment: { speakerId?: string } | undefined;
-  Profile: undefined;
-  ProfileField: { field: EditableProfileField };
-  Account: { section?: 'deletion' } | undefined;
-  ChangePassword: undefined;
   NotificationSettings: undefined;
-  AccountDeletion: undefined;
   Privacy: undefined;
+  HardwareDevices: undefined;
   Legal: { kind: 'terms' | 'privacy' | 'help' | 'guide' | 'version' | 'contact' };
   AddEvent: {
     date?: string;

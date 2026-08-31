@@ -27,6 +27,7 @@ export async function createProjectionEnvelope(input: {
   entityRevision: number;
   viewRevision: number;
   surfaceInstanceId: string;
+  payloadSha256?: string;
 }, payload: unknown): Promise<NativeProjectionEnvelope> {
   if (!input.deviceEpoch.trim() || !input.entityId.trim() || !input.surfaceInstanceId.trim()) {
     throw new Error('投影身份不能为空');
@@ -37,7 +38,7 @@ export async function createProjectionEnvelope(input: {
   }
   return {
     ...input,
-    payloadSha256: await projectionPayloadSha256(payload),
+    payloadSha256: input.payloadSha256 ?? await projectionPayloadSha256(payload),
   };
 }
 

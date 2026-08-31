@@ -289,7 +289,6 @@ data class MinutesActionItem(
   val sourceStartMs: Long = 0L,
   val updatedAtMs: Long = 0L,
   val updating: Boolean = false,
-  val syncConflict: Boolean = false,
   val canShare: Boolean = false,
 )
 
@@ -367,7 +366,6 @@ data class MinutesRecordingState(
   val manualNoteEnabled: Boolean = false,
   val manualNoteError: String = "",
   val manualNoteRetryable: Boolean = true,
-  val manualNoteConflict: Boolean = false,
   val transcript: List<MinutesTranscriptLine> = emptyList(),
 )
 
@@ -387,10 +385,7 @@ data class MinutesDetailState(
   val canShare: Boolean = false,
   val canManageSpeakers: Boolean = false,
   val canGenerateSummary: Boolean = false,
-  val canSelectSummaryTemplate: Boolean = false,
-  val summaryTemplateLabel: String = "",
   val canCreateAction: Boolean = false,
-  val canCreateClip: Boolean = false,
   val summaryGenerating: Boolean = false,
   val summaryActionLabel: String = "生成整理结果",
   val titleEditRequestId: Int = 0,
@@ -405,7 +400,6 @@ data class MinutesDetailState(
   val manualNoteEnabled: Boolean = false,
   val manualNoteError: String = "",
   val manualNoteRetryable: Boolean = true,
-  val manualNoteConflict: Boolean = false,
   val transcript: List<MinutesTranscriptLine> = emptyList(),
   val markers: List<MinutesMarker> = emptyList(),
   val summary: List<MinutesSummarySection> = emptyList(),
@@ -417,8 +411,6 @@ data class MinutesDetailState(
   val audioErrorMessage: String = "",
   val processingStatusLabel: String = "",
   val processingStatusTone: String = "neutral",
-  val rootSyncConflict: Boolean = false,
-  val summarySyncConflict: Boolean = false,
   val processingRetryStage: MinutesProcessingStage? = null,
   val processingRetrying: Boolean = false,
   val recordingMergeStatusLabel: String = "",
@@ -467,12 +459,23 @@ sealed interface MinutesStateMutation {
 
 object MinutesStateReducer {
   fun reduce(current: MinutesUiState, mutation: MinutesStateMutation): MinutesUiState {
-    val next = when (mutation) {
-      is MinutesStateMutation.Replace -> if (acceptProjection(current, mutation.state)) {
-        mergeReplace(current, mutation.state)
-      } else {
-        current
+    if (mutation is MinutesStateMutation.Replace) {
+      if (!acceptProjection(current, mutation.state)) return current
+      val currentProjection = current.projection
+      val incomingProjection = mutation.state.projection
+      if (
+        currentProjection != null
+        && incomingProjection != null
+        && currentProjection.payloadSha256 == incomingProjection.payloadSha256
+      ) {
+        // The authenticated payload hash is the render-body identity. Updating
+        // only its accepted envelope must not normalize, copy, compare, or
+        // re-render transcript/summary collections on the UI thread.
+        return current.copy(projection = incomingProjection, projectionInvalid = false)
       }
+    }
+    val next = when (mutation) {
+      is MinutesStateMutation.Replace -> mergeReplace(current, mutation.state)
       is MinutesStateMutation.SelectSurface -> current.copy(surface = mutation.surface)
       is MinutesStateMutation.SelectDetailTab -> if (
         mutation.generation < current.detail.tabGeneration ||
@@ -609,11 +612,8 @@ object MinutesStateReducer {
         } else {
           currentDetail.canGenerateSummary
         },
-        canSelectSummaryTemplate = if (summaryFresh) nextDetail.canSelectSummaryTemplate else currentDetail.canSelectSummaryTemplate,
-        summaryTemplateLabel = if (summaryFresh) nextDetail.summaryTemplateLabel else currentDetail.summaryTemplateLabel,
         summaryGenerating = if (summaryFresh) nextDetail.summaryGenerating else currentDetail.summaryGenerating,
         summaryActionLabel = if (summaryFresh) nextDetail.summaryActionLabel else currentDetail.summaryActionLabel,
-        summarySyncConflict = if (summaryFresh) nextDetail.summarySyncConflict else currentDetail.summarySyncConflict,
         processingStatusLabel = if (processingFresh) nextDetail.processingStatusLabel else currentDetail.processingStatusLabel,
         processingStatusTone = if (processingFresh) nextDetail.processingStatusTone else currentDetail.processingStatusTone,
         processingRetryStage = if (processingFresh) nextDetail.processingRetryStage else currentDetail.processingRetryStage,
@@ -624,7 +624,6 @@ object MinutesStateReducer {
         manualNoteEnabled = if (notesFresh) nextDetail.manualNoteEnabled else currentDetail.manualNoteEnabled,
         manualNoteError = if (notesFresh) nextDetail.manualNoteError else currentDetail.manualNoteError,
         manualNoteRetryable = if (notesFresh) nextDetail.manualNoteRetryable else currentDetail.manualNoteRetryable,
-        manualNoteConflict = if (notesFresh) nextDetail.manualNoteConflict else currentDetail.manualNoteConflict,
         transcript = if (transcriptFresh) nextDetail.transcript else currentDetail.transcript,
         markers = if (transcriptFresh) nextDetail.markers else currentDetail.markers,
         summary = if (summaryFresh) nextDetail.summary else currentDetail.summary,

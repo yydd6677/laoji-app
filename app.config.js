@@ -11,7 +11,7 @@ const base = {
   name: '老记',
   slug: 'laoji-app',
   scheme: 'laoji',
-  version: '1.1.66',
+  version: '1.2.10',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'light',
@@ -22,6 +22,7 @@ const base = {
   androidNavigationBar: {
     backgroundColor: '#FFFFFF',
     barStyle: 'dark-content',
+    enforceContrast: false,
   },
   splash: {
     image: './assets/splash-icon.png',
@@ -32,14 +33,14 @@ const base = {
     supportsTablet: false,
     bundleIdentifier: 'com.laoji.app',
     infoPlist: {
-      NSMicrophoneUsageDescription: '老记需要麦克风权限，用于语音输入日程。',
-      NSLocationWhenInUseUsageDescription: '老记需要位置权限，用于把当前位置添加到日程。',
-      NSPhotoLibraryUsageDescription: '老记需要访问照片，用于选择账号头像。',
+      NSMicrophoneUsageDescription: '老记需要麦克风权限，用于语音输入和会议录音。',
+      NSLocationWhenInUseUsageDescription: '老记需要位置权限，用于添加日程或会议地点。',
+      NSPhotoLibraryUsageDescription: '老记需要访问照片，用于添加会议附件。',
     },
   },
   android: {
     package: 'com.laoji.app',
-    versionCode: 174,
+    versionCode: 218,
     allowBackup: false,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
@@ -57,6 +58,14 @@ const base = {
       'FOREGROUND_SERVICE',
       'FOREGROUND_SERVICE_MICROPHONE',
       'FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+      'BLUETOOTH',
+      'BLUETOOTH_ADMIN',
+      'BLUETOOTH_SCAN',
+      'BLUETOOTH_CONNECT',
+      'CHANGE_NETWORK_STATE',
+      'ACCESS_WIFI_STATE',
+      'CHANGE_WIFI_STATE',
+      'NEARBY_WIFI_DEVICES',
     ],
     blockedPermissions: [
       'android.permission.READ_MEDIA_IMAGES',
@@ -72,24 +81,53 @@ const base = {
   plugins: [
     '@react-native-community/datetimepicker',
     ['expo-location', {
-      locationWhenInUsePermission: '老记需要位置权限，用于把当前位置添加到日程。',
+      locationWhenInUsePermission: '老记需要位置权限，用于添加日程或会议地点。',
     }],
     './plugins/withAndroidCleartextTraffic',
     './plugins/withAndroidReleaseSigning',
     './plugins/withAndroidReleaseOptimizations',
     './plugins/withLaojiNativePlatform',
     ['expo-audio', {
-      microphonePermission: '老记需要麦克风权限，用于语音输入日程。',
+      microphonePermission: '老记需要麦克风权限，用于语音输入和会议录音。',
       recordAudioAndroid: true,
     }],
     'expo-asset',
-    'expo-font',
+    ['expo-font', {
+      android: {
+        fonts: [
+          {
+            fontFamily: 'LaojiThemeNeutral',
+            fontDefinitions: [{ path: './assets/fonts/theme/laoji_theme_neutral.ttf', weight: 400 }],
+          },
+          {
+            fontFamily: 'LaojiThemeVivid',
+            fontDefinitions: [{ path: './assets/fonts/theme/laoji_theme_vivid.ttf', weight: 400 }],
+          },
+          {
+            fontFamily: 'LaojiThemePaper',
+            fontDefinitions: [{ path: './assets/fonts/theme/laoji_theme_paper.ttf', weight: 400 }],
+          },
+          {
+            fontFamily: 'LaojiThemeMidnight',
+            fontDefinitions: [{ path: './assets/fonts/theme/laoji_theme_midnight.ttf', weight: 400 }],
+          },
+        ],
+      },
+      ios: {
+        fonts: [
+          './assets/fonts/theme/laoji_theme_neutral.ttf',
+          './assets/fonts/theme/laoji_theme_vivid.ttf',
+          './assets/fonts/theme/laoji_theme_paper.ttf',
+          './assets/fonts/theme/laoji_theme_midnight.ttf',
+        ],
+      },
+    }],
     'expo-localization',
     'expo-secure-store',
     'expo-sqlite',
     './plugins/withAndroidAppVersion',
     ['expo-image-picker', {
-      photosPermission: '老记需要访问照片，用于选择账号头像。',
+      photosPermission: '老记需要访问照片，用于添加会议附件。',
       cameraPermission: false,
     }],
     ['expo-notifications', { color: '#1456F0' }],
@@ -152,14 +190,16 @@ function assertServiceUrl(name, value, deploymentMode) {
 module.exports = () => {
   const appEnv = resolveDeploymentMode(process.env);
   const apiBase = cleanUrl(process.env.EXPO_PUBLIC_API_BASE || DEFAULT_API_BASE);
-  // Device-primary registration is a one-time bootstrap handshake.  Keep the
-  // key outside source control and inject it through the build environment;
-  // the runtime reads the value from Expo extra rather than relying on a
-  // Node-only process.env object that is absent in a release APK.
+  // Legacy device-v1 registration uses a shared admission token.  Because an
+  // EXPO_PUBLIC value is embedded in the release bundle, it is extractable
+  // from the APK and must not be treated as a server secret, device identity,
+  // or authorization boundary. Keep it out of source control for operational
+  // rotation; device-v2 challenge authentication is the durable replacement.
   const deviceBootstrapKey = String(
     process.env.EXPO_PUBLIC_DEVICE_BOOTSTRAP_KEY || '',
   ).trim();
-  // A preview/production APK must be able to register a fresh installation.
+  // A preview/production APK must still admit a fresh v1 installation while
+  // current v1 callers remain.
   // Keep local development flexible, but fail before bundling rather than
   // producing an apparently valid APK that can never complete device setup.
   if (appEnv !== 'development' && deviceBootstrapKey.length < 32) {
@@ -167,122 +207,28 @@ module.exports = () => {
       'EXPO_PUBLIC_DEVICE_BOOTSTRAP_KEY must contain at least 32 characters for non-development builds.',
     );
   }
-  const localMeetingDbV1 = !['0', 'false', 'no', 'off'].includes(
-    String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_V1 ?? 'true').trim().toLowerCase(),
-  );
-  const localMeetingDbCanonicalReadV1 = localMeetingDbV1 && ['1', 'true', 'yes', 'on'].includes(
-    String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_READ_V1 ?? 'true').trim().toLowerCase(),
-  );
-  const localMeetingDbCanonicalWriteV1 = localMeetingDbCanonicalReadV1
-    && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_CANONICAL_WRITE_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const localMeetingDbLegacyProjectionWriteV1 = localMeetingDbCanonicalReadV1
-    ? ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_LEGACY_PROJECTION_WRITE_V1 ?? 'false').trim().toLowerCase(),
-    )
-    : ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_LEGACY_PROJECTION_WRITE_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const localMeetingDbAccountRootWriteV1 = localMeetingDbCanonicalWriteV1
-    && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_ROOT_WRITE_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const localMeetingDbAccountUploadWriteV1 = localMeetingDbCanonicalWriteV1
-    && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_LOCAL_MEETING_DB_ACCOUNT_UPLOAD_WRITE_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingQuestionsV1 = localMeetingDbCanonicalReadV1 && !['0', 'false', 'no', 'off'].includes(
-    String(process.env.EXPO_PUBLIC_MEETING_QUESTIONS_V1 ?? 'true').trim().toLowerCase(),
-  );
-  const meetingAutomaticTopicsV1 = localMeetingDbCanonicalReadV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_AUTOMATIC_TOPICS_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingTagSyncV1 = localMeetingDbCanonicalWriteV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_TAG_SYNC_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingAttachmentSyncV1 = localMeetingDbCanonicalWriteV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_ATTACHMENT_SYNC_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingMarkerSyncV1 = localMeetingDbCanonicalWriteV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_MARKER_SYNC_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingSummarySyncV1 = localMeetingDbCanonicalWriteV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_SUMMARY_SYNC_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingContentShareLinksV1 = localMeetingDbCanonicalWriteV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_CONTENT_SHARE_LINKS_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingCrossMeetingSearchV1 = localMeetingDbCanonicalReadV1
-    && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_CROSS_MEETING_SEARCH_V1 ?? 'false').trim().toLowerCase(),
-    );
-  const meetingMediaImportExistingV1 = localMeetingDbCanonicalReadV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_MEDIA_IMPORT_EXISTING_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingMediaClipsV1 = localMeetingDbCanonicalReadV1 && !['0', 'false', 'no', 'off'].includes(
-    String(process.env.EXPO_PUBLIC_MEETING_MEDIA_CLIPS_V1 ?? 'true').trim().toLowerCase(),
-  );
-  const meetingTranscriptReprocessV1 = localMeetingDbCanonicalReadV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_TRANSCRIPT_REPROCESS_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const meetingActionCollaborationV1 = localMeetingDbCanonicalReadV1
-    && !['0', 'false', 'no', 'off'].includes(
-      String(process.env.EXPO_PUBLIC_MEETING_ACTION_COLLABORATION_V1 ?? 'true').trim().toLowerCase(),
-    );
-  const scheduleGraphV2Candidate = ['1', 'true', 'yes', 'on'].includes(
-    String(process.env.EXPO_PUBLIC_SCHEDULE_GRAPH_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
-  );
-  const mediaUploadV2Candidate = localMeetingDbCanonicalReadV1
-    && ['1', 'true', 'yes', 'on'].includes(
-      String(process.env.EXPO_PUBLIC_MEDIA_UPLOAD_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
-    );
-  const realtimeAsrV2Candidate = ['1', 'true', 'yes', 'on'].includes(
-    String(process.env.EXPO_PUBLIC_REALTIME_ASR_V2_CANDIDATE ?? 'false').trim().toLowerCase(),
-  );
-  const meetingQuestionsQ2Candidate = ['1', 'true', 'yes', 'on'].includes(
-    String(process.env.EXPO_PUBLIC_MEETING_QUESTIONS_Q2_CANDIDATE ?? 'false').trim().toLowerCase(),
-  );
-  const meetingSummarySourceStreamCandidate = ['1', 'true', 'yes', 'on'].includes(
-    String(process.env.EXPO_PUBLIC_MEETING_SUMMARY_SOURCE_STREAM_CANDIDATE ?? 'false').trim().toLowerCase(),
-  );
-  const nativeProjectionEnvelopeCandidate = ['1', 'true', 'yes', 'on'].includes(
-    String(process.env.EXPO_PUBLIC_NATIVE_PROJECTION_ENVELOPE_CANDIDATE ?? 'false').trim().toLowerCase(),
-  );
   const privacyPolicyUrl = cleanUrl(
     process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || (apiBase ? `${apiBase}/privacy` : ''),
   );
   const termsOfServiceUrl = cleanUrl(
     process.env.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || (apiBase ? `${apiBase}/terms` : ''),
   );
-  const accountDeletionUrl = cleanUrl(
-    process.env.EXPO_PUBLIC_ACCOUNT_DELETION_URL || (apiBase ? `${apiBase}/account-deletion` : ''),
-  );
   const reverseGeocoderUrl = apiBase ? `${apiBase}/api/location/reverse` : '';
 
   if (!apiBase
-      || !privacyPolicyUrl || !termsOfServiceUrl || !accountDeletionUrl) {
+      || !privacyPolicyUrl || !termsOfServiceUrl) {
     throw new Error('LaoJi production configuration is incomplete. Set EXPO_PUBLIC_API_BASE and legal document endpoints.');
   }
   assertServiceUrl('EXPO_PUBLIC_API_BASE', apiBase, appEnv);
   assertServiceUrl('reverseGeocoderUrl', reverseGeocoderUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_PRIVACY_POLICY_URL', privacyPolicyUrl, appEnv);
   assertServiceUrl('EXPO_PUBLIC_TERMS_OF_SERVICE_URL', termsOfServiceUrl, appEnv);
-  assertServiceUrl('EXPO_PUBLIC_ACCOUNT_DELETION_URL', accountDeletionUrl, appEnv);
 
   // A development APK may target the isolated loopback/tunnel endpoint over
   // HTTP, but only when the build explicitly opts into Android cleartext
   // traffic.  Without this guard Expo can produce a successful Release APK
   // whose manifest silently blocks every request before the app reaches the
-  // candidate service.
+  // configured service.
   if (!isSecureDeploymentMode(appEnv)) {
     const apiProtocol = new URL(apiBase).protocol;
     if (apiProtocol === 'http:' && process.env.EXPO_ALLOW_CLEARTEXT !== 'true') {
@@ -303,33 +249,6 @@ module.exports = () => {
       reverseGeocoderUrl,
       privacyPolicyUrl,
       termsOfServiceUrl,
-      accountDeletionUrl,
-      featureFlags: {
-        localMeetingDbV1,
-        localMeetingDbCanonicalReadV1,
-        localMeetingDbCanonicalWriteV1,
-        localMeetingDbLegacyProjectionWriteV1,
-        localMeetingDbAccountRootWriteV1,
-        localMeetingDbAccountUploadWriteV1,
-        mediaUploadV2Candidate,
-        scheduleGraphV2Candidate,
-        realtimeAsrV2Candidate,
-        meetingQuestionsQ2Candidate,
-        meetingSummarySourceStreamCandidate,
-        nativeProjectionEnvelopeCandidate,
-        meetingQuestionsV1,
-        meetingAutomaticTopicsV1,
-        meetingTagSyncV1,
-        meetingAttachmentSyncV1,
-        meetingMarkerSyncV1,
-        meetingSummarySyncV1,
-        meetingContentShareLinksV1,
-        meetingCrossMeetingSearchV1,
-        meetingMediaImportExistingV1,
-        meetingMediaClipsV1,
-        meetingTranscriptReprocessV1,
-        meetingActionCollaborationV1,
-      },
     },
   };
 };

@@ -1,8 +1,5 @@
 export * from './clientId';
-export * from './collaboration';
-export * from './contentShare';
 export * from './entities';
-export * from './mediaClips';
 export * from './organization';
 export * from './processing';
 export * from './questions';
@@ -10,4 +7,3 @@ export * from './speakerIdentity';
 export * from './summary';
 export * from './summaryActivationFence';
 export * from './templates';
-export * from './scopeTelemetry';

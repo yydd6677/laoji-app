@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 const MOTION_MS = 300;
 
@@ -57,7 +57,7 @@ export function MeetingSeriesSelectionSheet<Result>({
   onCompleted: (result: Result) => void;
   errorMessage: (error: unknown) => string;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -147,10 +147,6 @@ export function MeetingSeriesSelectionSheet<Result>({
   const canSubmit = !saving && !closing;
   const requestClose = () => {
     if (!saving) finishClose(true);
-  };
-  const requestSkip = () => {
-    const skip = skipRef.current;
-    if (!saving && skip) finishClose(true, skip);
   };
   const toggle = (key: string) => {
     if (saving || closing) return;

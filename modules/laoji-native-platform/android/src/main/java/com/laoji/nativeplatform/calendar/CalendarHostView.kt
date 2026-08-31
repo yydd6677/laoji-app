@@ -5,14 +5,11 @@ package com.laoji.nativeplatform.calendar
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
 import com.laoji.nativeplatform.ui.installStatusBarInsetPadding
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.projection.ProjectionEnvelope
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
@@ -52,7 +49,6 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private val createFab = CalendarCreateFabView(context)
   // CAL-PICKER-HOST-001: QuickChoose is a full-content transparent touch owner, not a fixed panel.
   private val pickerPanel = CalendarQuickChooseHostView(context)
-  @FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
   private val bottomBar = LaojiNativeBottomBarView(context, appContext).apply {
     setBridgeEventsEnabled(false)
     setSelectedTab(NativeBottomTab.SCHEDULE.wireName)
@@ -397,7 +393,12 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   override fun onEmptyCreateRequested(epochDay: Int) {
-    selectDate(epochDay, source = "month-empty-create", emit = true)
+    // The empty action belongs to the page that is already selected. Rebinding
+    // that same day hides and recreates the selected-day surface immediately
+    // before navigation, which appears as a full-page flash.
+    if (selectedEpochDay != epochDay) {
+      selectDate(epochDay, source = "month-empty-create", emit = true)
+    }
     emitSemantic("create-manual", mapOf("epochDay" to epochDay))
   }
 
@@ -455,7 +456,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     }
   }
 
-  // UI-SHELL-RESELECT-001: mirrors Feishu's shared backToday event without remounting this root.
+  // UI-SHELL-RESELECT-001: handle the shared back-today event without remounting this root.
   private fun returnToToday() {
     val now = nowProvider()
     val today = CalendarDateMath.toEpochDay(
@@ -645,19 +646,12 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     )
   }
 
-  // [PRODUCT] The vivid skin changes the calendar silhouette as well as its
-  // palette: both retained views become an inset, rounded surface while the
-  // standard skin remains edge-to-edge and source-shaped.
+  // Theme expression must not change the retained calendar's measured canvas.
+  // Earlier vivid-only insets compressed the grid and survived activity
+  // recreation when switching skins. Keep the root edge-to-edge; themed
+  // character belongs inside cells, controls and semantic surfaces.
   private fun styleVividSurface(view: View) {
-    if (!NativeThemePreference.isVivid(context)) return
-    view.background = CalendarUi.background(
-      palette.surface,
-      16f,
-      context,
-      palette.divider,
-      1f,
-    )
-    view.clipToOutline = true
-    view.outlineProvider = ViewOutlineProvider.BACKGROUND
+    view.setBackgroundColor(palette.surface)
+    view.clipToOutline = false
   }
 }

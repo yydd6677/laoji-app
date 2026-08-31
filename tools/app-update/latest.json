@@ -1,15 +1,12 @@
 {
   "platform": "android",
-  "version_name": "1.1.66",
-  "version_code": 174,
-  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.66-174.apk",
-  "sha256": "sha256:f595c956735428e74c81854f1d4f47698f3a346ad2cb28583d3725d81349447e",
-  "size_bytes": 82670263,
+  "version_name": "1.2.10",
+  "version_code": 218,
+  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.2.10-218.apk",
+  "sha256": "sha256:363710e7bb41fc055f531df616479e487145935efddbf30cb3bd088e80f0782c",
+  "size_bytes": 46067018,
   "release_notes": [
-    "录音导入不再因已有两条正在准备而拒绝新选择；所有选择先可靠保存，再由本机有界并行准备。",
-    "会议总览和详情统一显示等待转写、正在转写及失败状态，第一段文字出现前也不再留白。",
-    "服务器可同时编排三条离线转写，并修复同一任务重复解码及重试时残留旧错误状态的问题。",
-    "修复转写已经完成后会议列表仍长期显示“正在生成文字记录”的终态投影问题。"
+    "修复外接录音导入。"
   ],
   "minimum_supported_version_code": 106
 }

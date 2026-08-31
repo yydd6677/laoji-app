@@ -70,22 +70,11 @@ async def lifespan(app: FastAPI):
     from app.models import Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    from app.services.app_meeting_schema import ensure_app_meeting_schema
-    from app.services import schedule_db_service
     from app.services.device_identity import ensure_device_schema, purge_expired_device_data
-    from app.services import vnext_capability_cutover
     from app.services import vnext_purge_store, vnext_task_store
-    from app.services.laoji_auth_service import init_auth_db
     from app.services.speaker_db_service import get_speaker_db
 
-    await asyncio.to_thread(ensure_app_meeting_schema)
-    await asyncio.to_thread(init_auth_db)
-    await asyncio.to_thread(schedule_db_service.ensure_schedule_database)
     await asyncio.to_thread(ensure_device_schema)
-    # Capability barriers are durable control-plane state.  Initialize the
-    # table at boot so audits can distinguish an empty barrier registry from
-    # an unavailable schema, without activating any capability implicitly.
-    await asyncio.to_thread(vnext_capability_cutover.ensure_schema)
     await asyncio.to_thread(vnext_task_store.ensure_vnext_task_schema)
     recovered_purges = await asyncio.to_thread(vnext_purge_store.recover_interrupted_purges)
     if recovered_purges:
@@ -95,20 +84,6 @@ async def lifespan(app: FastAPI):
         )
     await asyncio.to_thread(purge_expired_device_data)
     await asyncio.to_thread(get_speaker_db)
-    from app.services.summary_v3_store import purge_expired_source_payloads
-    expired_summary_payloads = await asyncio.to_thread(purge_expired_source_payloads)
-    if expired_summary_payloads:
-        print(
-            f"[启动] 已清理 {expired_summary_payloads} 个过期整理临时载荷",
-            flush=True,
-        )
-    from app.services.database_migrations import archive_orphan_final_summaries
-    archived_orphans = await asyncio.to_thread(archive_orphan_final_summaries)
-    if archived_orphans:
-        print(
-            f"[启动] 已保全并移出 {archived_orphans} 条缺少原会议的历史整理记录",
-            flush=True,
-        )
     os.makedirs(settings.audio_storage_abs_path, exist_ok=True)
     print("✓ SQLite 数据库已就绪", flush=True)
 
@@ -188,14 +163,10 @@ async def lifespan(app: FastAPI):
         print(f"[启动] 讲话人 overlay worker 启动失败: {type(error).__name__}", flush=True)
 
     try:
-        from app.services.vnext_import_transcription_pipeline import (
-            import_transcription_enabled,
-            start_import_transcription_worker,
-        )
+        from app.services.vnext_import_transcription_pipeline import start_import_transcription_worker
 
         start_import_transcription_worker()
-        if import_transcription_enabled():
-            print("[启动] vNext 导入转写恢复 worker 已启动", flush=True)
+        print("[启动] 导入转写恢复 worker 已启动", flush=True)
     except Exception as error:
         print(f"[启动] vNext 导入转写 worker 启动失败: {type(error).__name__}", flush=True)
 
@@ -203,25 +174,9 @@ async def lifespan(app: FastAPI):
         from app.services.vnext_summary_worker import start_summary_source_stream_worker
 
         start_summary_source_stream_worker()
-        print("[启动] vNext 来源整理 worker 已按能力开关启动", flush=True)
+        print("[启动] 来源整理 worker 已启动", flush=True)
     except Exception as error:
         print(f"[启动] vNext 来源整理 worker 启动失败: {type(error).__name__}", flush=True)
-
-
-    try:
-        from app.workers.summary_tasks import recover_persistent_summary_jobs
-
-        recovered_summaries = recover_persistent_summary_jobs()
-        if recovered_summaries:
-            print(
-                f"[启动] 已恢复 {recovered_summaries} 个中断的整理任务",
-                flush=True,
-            )
-    except Exception as error:
-        print(
-            f"[启动] 恢复整理任务失败: {type(error).__name__}",
-            flush=True,
-        )
 
     from app.services.meeting_retention_service import start_meeting_retention_cleanup
     start_meeting_retention_cleanup()

@@ -64,12 +64,6 @@ def configured_worker_concurrency(value: str | None = None) -> int:
 WORKER_CONCURRENCY = configured_worker_concurrency()
 
 
-def import_transcription_enabled() -> bool:
-    return os.getenv("LAOJI_VNEXT_IMPORT_TRANSCRIPTION_ENABLED", "0").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
-
-
 @dataclass(frozen=True)
 class ImportContext:
     device_id: str
@@ -629,8 +623,7 @@ def get_import_transcription_worker() -> VNextImportTranscriptionWorker:
 
 
 def start_import_transcription_worker() -> None:
-    if import_transcription_enabled():
-        get_import_transcription_worker().start()
+    get_import_transcription_worker().start()
 
 
 async def stop_import_transcription_worker() -> None:

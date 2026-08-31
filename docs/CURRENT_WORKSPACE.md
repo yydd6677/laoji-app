@@ -1,53 +1,76 @@
 # 老记当前仓库状态
 
-本文是面向协作者的公共状态入口，不记录任何开发机、服务器或个人目录。运行服务、发布地址和设备状态会变化；需要部署时，应以部署环境的实际检查结果为准。
+这是协作者进入仓库后的第一份文档。本文只描述当前产品边界；历史阶段、候选回放和旧版界面证据不再留在活跃文档树中。
 
-## 分支和标签
+## 唯一活跃基线
 
-| 引用 | 用途 | 采用边界 |
-| --- | --- | --- |
-| `master` | 稳定发布线 | 当前 `1.1.10`，可作为协作者默认基线 |
-| `v1.1.10` | 稳定版本快照 | 固定引用，不随分支移动 |
-| `vnext/implementation` | 下一阶段开发线 | 候选能力默认关闭，未自动等同于生产 |
-| `rebuild/feishu-7.71.8-source-driven` | 历史源码重建线 | 仅用于追溯和差异研究 |
+| 项目 | 当前值 |
+| --- | --- |
+| 活跃分支 | `vnext/implementation` |
+| 当前移动版 | `1.1.97`（Android `versionCode=205`） |
+| 版本权威 | `app.config.js`；生成的 Gradle metadata 必须由构建门禁核对一致 |
+| 产品形态 | 去账号、单设备、本地数据权威 |
+| 公网入口 | `https://laoji.cloud` / `wss://laoji.cloud` |
 
-开发新功能从 `vnext/implementation` 分支开始；修复稳定版时从 `master` 建立短期修复分支，并通过合并请求回到 `master`。
+`master`、旧标签、`rebuild/*` 和旧 Stage 文档只用于 Git 追溯，不是开发、构建或发布入口。新工作直接在
+`vnext/implementation` 上建立短期分支；不得从 `master` 或旧工作树复制实现回当前链路。
 
-## 文件结构
+## 当前所有权
+
+- `laoji-schedule.db`：日程、重复规则和日历投影。
+- `laoji-meeting-memory.db`：会议、媒体引用、转写、整理、问答、待办、标签和任务投影。
+- 应用私有媒体目录：录音、导入后音频和外接设备 pending media。
+- 手机是上述业务数据的唯一长期权威；日程与会议数据库物理隔离，不建立跨库外键或双写。
+- 服务端只拥有设备鉴权、上传会话、可恢复计算任务、明确允许保留的生成结果和清理义务，不是第二份用户数据仓库。
+
+## 生产拓扑合同
 
 ```text
-App.tsx                         应用入口和顶层导航
-src/
-  application/                  用例编排和跨领域流程
-  components/                   可复用界面、弹窗和状态组件
-  data/                         SQLite、迁移和本地仓储
-  domain/                       日程、会议、整理、问答等领域模型
-  hooks/                        React 领域 hooks
-  native/                       JS 与原生投影适配
-  screens/                      页面级界面
-  services/                     远端 API、任务和本地服务
-  store/                        页面订阅状态，不作为业务数据权威
-modules/laoji-native-platform/  Android 原生录音、日历、媒体和投影能力
-contracts/vnext/                共享 JSON Schema、生成代码和兼容性合同
-services/laoji-api/             FastAPI 业务 API、任务 owner 和编排
-services/laoji-asr/             ASR 适配和批处理服务
-plugins/                        Expo 配置插件
-config/                         部署和构建配置解析
-tools/                          更新、迁移、审计和开发工具
-docs/                           产品蓝图、阶段记录、架构证据和协作说明
+Android app
+  -> laoji.cloud (HTTPS/WSS)
+  -> laoji-api :18020       设备能力、任务、上传编排、日程复杂解析、整理、问答、地址
+  -> laoji-asr :8030        Qwen3-ASR 实时与批量识别
+  -> Ollama :21434          生成模型与本地 embedding；provider 可显式切换，禁止静默回退
+  -> Cloudflare R2          有 TTL 的上传暂存对象，不是业务权威
 ```
 
-## 当前实现边界
+内部端口只监听 loopback。Cloudflare Tunnel/Nginx 属于入口层；GPU1、PCB、Smart Meeting 和其他用户服务不属于老记。本表描述源码和部署模板的合同，不证明服务器已切换到当前工作树；本轮清理没有部署，现场状态仍须按进程、cwd、unit 和 readiness 单独核对。
 
-- 手机本地 SQLite 和应用私有媒体是日程、会议索引和用户编辑数据的业务权威。
-- 服务端负责设备鉴权、语音识别、复杂解析、整理、问答、分享和临时任务；服务端不应把客户端本地数据模型复制成第二个长期权威。
-- `master` 是已发布稳定链路；vNext 文档和候选实现必须通过各自阶段合同后才能跨能力开关进入生产。
-- `docs/design-blueprint/CURRENT.md` 是蓝图入口；历史 `research/`、`evidence/`、`revisions/` 和 `proposals/` 用于决策血缘，不是默认开发入口。
+## 当前产品边界
 
-## 生成文件和本地配置
+- 日程：本机创建、编辑、删除、搜索和视图投影；复杂文字或语音只把解析意图交给服务端，最终校验与保存仍在手机。
+- 会议：手机录音、音视频导入、后台上传、实时/批量转写、讲话人异步覆盖、笔记、标签、回收站和 Markdown 分享。
+- 整理：一份统一自适应整理；模型产出结构化事实与引用，本机决定板块、图表准入和展示。旧四模板只存在于历史 schema/迁移记录，当前运行时不读取、不展示也不生成。
+- 问答：以当前会议的转写、笔记和获准附件为来源；答案引用必须绑定当前来源版本。
+- 外接录音：`LJHW/1` 为唯一协议；测试板已支持 USB/BLE 实时采集，正式硬件可按能力增加本地对象和 Wi-Fi 传输，但不建立第二套会议链。
+- 音频片段：独立创建/管理入口已退役；播放、搜索、引用和时间跳转直接使用原录音与转写。
 
-以下内容不应提交：`node_modules/`、根目录 `android/` 生成树、Gradle/CMake 缓存、`.env.local`、签名材料、APK/AAB 和用户媒体。依赖由 `package-lock.json` 锁定，使用 `npm ci` 重建；原生目录由 Expo/Gradle 按当前配置生成。
+## 目录职责
 
-## 开发状态如何更新
+| 目录 | 当前责任 |
+| --- | --- |
+| `src/domain`、`src/application` | 领域合同与跨领域用例 |
+| `src/data` | 两个本地 SQLite 的 schema、迁移和 repository |
+| `src/services` | 设备任务、上传、解析、整理、问答和平台适配 |
+| `src/screens`、`src/components` | 页面与复用界面；不得成为第二状态 owner |
+| `modules/laoji-native-platform` | Android 录音、媒体、日历 surface、硬件 transport、WorkManager |
+| `services/laoji-api` | API、持久任务 owner、R2/ASR/LLM 编排 |
+| `services/laoji-asr` | 统一 ASR 协议与模型服务 |
+| `contracts/hardware`、`docs/hardware` | `LJHW/1` 机器合同与当前集成说明 |
+| `config`、`plugins` | 构建和原生配置 |
+| `tools` | 当前构建、发布和可执行审计；阶段性探针不得重新成为生产依赖 |
 
-提交功能时应同时更新受影响的合同、README 或阶段文档，并在提交信息中说明变更边界。不要把某台机器的绝对路径、临时端口、设备序列号或现场日志写入公共文档；需要描述外部资源时使用环境变量名或仓库相对路径。
+## 文档和历史资料
+
+- 当前架构入口是 [design-blueprint/CURRENT.md](design-blueprint/CURRENT.md)。
+- 实现约束是 [design-blueprint/VNEXT-IMPLEMENTATION.md](design-blueprint/VNEXT-IMPLEMENTATION.md)。
+- 仍有效的架构决定是 [design-blueprint/VNEXT-DECISIONS.md](design-blueprint/VNEXT-DECISIONS.md)。
+- 历史 Stage、候选、回放、截图和旧版研究由 Git 历史及服务器校验归档恢复；它们不应被活跃源码或文档链接引用。
+
+## 工作规则
+
+1. 先核对分支、版本、真实运行进程和数据 owner，再修改。
+2. 新写只能进入当前 owner；兼容 reader 不能重新获得写权，也不能因错误自动回退。
+3. 每次发布同时递增并核对 `versionName` 与 `versionCode`，再验证 APK、更新清单和公开文件一致。
+4. 不提交凭据、用户媒体、APK、构建缓存、虚拟环境或开发机绝对路径。
+5. 文档中的“实现、构建、运行、安装、发布、验证”必须分别有对应证据，不能互相替代。

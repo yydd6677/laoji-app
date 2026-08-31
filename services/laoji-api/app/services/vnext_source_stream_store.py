@@ -1,8 +1,7 @@
-"""Bounded encrypted source streams and rolling Task checkpoints for Stage 3.
+"""Bounded encrypted source streams and rolling Task checkpoints.
 
-The store is an isolated candidate owner.  It never exposes source plaintext on
-the device task status surface and it does not route existing Summary V3 or Q0
-traffic.  A source stream and its generic Task are created in one transaction;
+The store never exposes source plaintext on the device task status surface.
+A source stream and its generic Task are created in one transaction;
 chapters are consumed in order and only two encrypted aggregate slots exist per
 Task, independent of meeting length.
 """

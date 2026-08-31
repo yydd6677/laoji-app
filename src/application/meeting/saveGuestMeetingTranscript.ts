@@ -1,10 +1,5 @@
 import * as Crypto from 'expo-crypto';
-import type {
-  MeetingNoteRepository,
-  TranscriptRevisionProjection,
-  TranscriptRevisionRecord,
-  TranscriptSegmentRecord,
-} from '../../data/repositories';
+import type { MeetingNoteRepository, TranscriptRevisionProjection, TranscriptRevisionRecord, TranscriptSegmentRecord } from "../../data/repositories/meetingNoteRepository";
 import { projectLegacyTranscriptSegmentRevisions } from '../../services/transcriptSegmentRevision';
 import {
   transitionProcessingStage,
@@ -479,7 +474,7 @@ export class SaveGuestMeetingTranscriptUseCase {
         kind: candidateKind,
         status: matchingRemoteRevision?.revision.status ?? (realtimeDraft ? 'realtime_draft' : 'ready'),
         sourceProvider: matchingRemoteRevision?.revision.sourceProvider
-          ?? (scopeKey === 'guest' ? 'canonical-guest' : 'canonical-account'),
+          ?? 'canonical-device',
         sourceModel: matchingRemoteRevision?.revision.sourceModel ?? null,
         sourceManifestSha256: matchingRemoteRevision?.revision.sourceManifestSha256 ?? null,
         isActive: activate,
@@ -510,12 +505,11 @@ export class SaveGuestMeetingTranscriptUseCase {
       };
       const initialNextStage = transitionProcessingStage(stage, stageTransition, updatedAtMs);
       const stageChanged = !sameProcessingStageState(stage, initialNextStage);
-      const meetingSyncStateChanged = scopeKey === 'guest' && meeting.syncState !== 'local';
 
       // Detail loading may replay the already-active transcript. Keep that a
       // true no-op: no revision upsert, stage timestamp, meeting timestamp, or
       // canonical revision is allowed to change.
-      if (!revisionNeedsWrite && !stageChanged && !meetingSyncStateChanged) return;
+      if (!revisionNeedsWrite && !stageChanged) return;
 
       if (revisionNeedsWrite && revision) {
         await transaction.saveTranscriptRevision(revision, versionedSegments, scopeKey, {
@@ -547,7 +541,6 @@ export class SaveGuestMeetingTranscriptUseCase {
         );
       }
       await transaction.updateMeeting(meetingId, scopeKey, {
-        syncState: scopeKey === 'guest' ? 'local' : meeting.syncState,
         updatedAtMs,
       });
       if (input.canonicalWrite) {

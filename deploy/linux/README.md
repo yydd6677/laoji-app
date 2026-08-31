@@ -1,26 +1,36 @@
-# LaoJi vNext 隔离候选部署包
+# 老记生产部署模板
 
-这些文件只描述候选运行方式，不会修改当前生产 systemd、GPU、Nginx 或公网流量。
+这里保留一套用户级生产拓扑的无密钥模板。`LAOJI_USER` 只是必须在落盘前替换的示例用户名；仓库不记录真实部署账号。运行边界固定为：
 
-默认端口为：
+- API：`127.0.0.1:18020`
+- ASR：`127.0.0.1:8030`
+- Ollama：`127.0.0.1:21434`
+- 代码根：`/home/LAOJI_USER/laoji-service-platform/current`
+- 持久数据：`/home/LAOJI_USER/laoji-service-platform/compact-production/backend`
+- ASR 运行入口：`/home/LAOJI_USER/laoji-service-platform/runtime/asr/qwen_asr_service`
+- Python：`/home/LAOJI_USER/laoji-service-platform/.venvs/laoji-compact-py312`
+- 私有配置：`/home/LAOJI_USER/.config/laoji/laoji.env`
 
-- ASR：`127.0.0.1:8031`
-- API：`127.0.0.1:18021`
+`current` 必须是由部署流程原子更新的只读发布链接；systemd 文件不再钉死某个 APK
+版本目录，也不包含候选端口、密钥或关闭功能的历史开关。源码、模型和数据库仍是不同
+生命周期的资产，切换 `current` 不得替换数据目录。
 
-ASR 默认使用 CPU，避免与线上 GPU0 的 8030/Qwen 模型争抢显存；这适合合同、恢复和 R2
-链路验收，不代表生产延迟。只有在明确安排资源窗口后，才可以把候选 ASR 迁移到 GPU。
-`asr.env` 中的 `QWEN_ASR_MODEL_REVISION` 必须替换为实际固定 revision；缺少该值时 ASR
-会拒绝启动/报告 not-ready，防止重启后用未版本化结果污染幂等任务。
+安装时把三个 `*.service.example` 复制到 `~/.config/systemd/user/` 并移除 `.example`
+后缀；先在两个环境示例中替换 `LAOJI_USER`，再把需要的非密钥项合并到权限为 `0600` 的
+`~/.config/laoji/laoji.env`。R2、高德、LLM 和来源载荷密钥只写入该私有文件。
+兼容 device-v1 的注册 admission token 也从私有部署配置读取，但其客户端副本会进入 APK、
+可以被提取，不能当作秘密或与其他用途的 secret 复用。本目录不提供占位凭据。ASR 模型
+revision 必须替换为实际固定 revision。
 
-安装前必须把候选源码、Python 环境、模型和数据库副本放入 `/opt/laoji-vnext`，并把真实
-凭据写入 root 可读的 `/etc/laoji-vnext/*.env`，不能把生产密钥填入本目录。`api.env.example`
-默认关闭 R2 和 capability barrier，避免误切生产。
+安装或切换后依次执行 `systemctl --user daemon-reload`、重启三个服务，并分别检查
+`/api/ready`、`/ready` 和 Ollama 模型列表。公网仍只由现有 Cloudflare/Nginx 入口连接 API，
+不得直接暴露三个内部端口。
 
 静态检查：
 
 ```text
-python3 tools/vnext/verify_deployment_templates.py
+python3 tools/verify_deployment_templates.py
 ```
 
-验证通过后仍需单独完成进程启动、真实 R2、重启恢复和双上传+实时回放；不得把模板检查
-当作部署或 Stage 2 退出证明。
+验证通过后仍需单独完成进程启动、真实 R2、重启恢复和双上传加实时回放；模板检查不等于
+生产验证。本目录只是模板，不表示当前服务器已部署这份工作树。

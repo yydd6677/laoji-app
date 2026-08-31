@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSummaryActionCandidate } from '../domain/meeting';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 const MOTION_MS = 300;
 const ROW_HEIGHT = 92;
@@ -40,12 +40,9 @@ function timeLabel(milliseconds: number): string {
     : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function actionMetadata(
-  action: MeetingSummaryActionCandidate,
-  conflicted: boolean,
-): string {
+function actionMetadata(action: MeetingSummaryActionCandidate): string {
   const parts = [
-    conflicted ? '同步冲突' : action.status === 'completed' ? '已完成' : '待完成',
+    action.status === 'completed' ? '已完成' : '待完成',
     action.assignee?.trim() ? `负责人：${action.assignee.trim()}` : '',
     action.dueAtMs === null ? '' : `截止：${dateLabel(action.dueAtMs)}`,
   ].filter(Boolean);
@@ -70,7 +67,6 @@ function actionSource(action: MeetingSummaryActionCandidate): { label: string; a
 export function MeetingActionsSheet({
   visible,
   actions,
-  conflictedActionIds,
   loading,
   busyActionId,
   error,
@@ -85,7 +81,6 @@ export function MeetingActionsSheet({
 }: {
   visible: boolean;
   actions: readonly MeetingSummaryActionCandidate[];
-  conflictedActionIds: ReadonlySet<string>;
   loading: boolean;
   busyActionId: string | null;
   error: string;
@@ -98,7 +93,7 @@ export function MeetingActionsSheet({
   onOpenSource: (actionId: string) => void;
   onOpenFollowup: (actionId: string) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -111,8 +106,8 @@ export function MeetingActionsSheet({
   closeRef.current = onClose;
 
   const visibleActions = useMemo(
-    () => actions.filter(action => action.status !== 'dismissed' || conflictedActionIds.has(actionId(action))),
-    [actions, conflictedActionIds],
+    () => actions.filter(action => action.status !== 'dismissed'),
+    [actions],
   );
 
   const finishClose = useCallback((notify: boolean) => {
@@ -241,7 +236,6 @@ export function MeetingActionsSheet({
             )}
             renderItem={({ item }) => {
               const id = actionId(item);
-              const conflicted = conflictedActionIds.has(id);
               const completed = item.status === 'completed';
               const busy = Boolean(busyActionId);
               const updating = busyActionId === id;
@@ -260,10 +254,10 @@ export function MeetingActionsSheet({
                   <Pressable
                     style={styles.checkTarget}
                     onPress={() => onToggle(id, !completed)}
-                    disabled={busy || conflicted}
+                    disabled={busy}
                     accessibilityRole="checkbox"
                     accessibilityLabel={completed ? `恢复待办事项：${item.content}` : `完成待办事项：${item.content}`}
-                    accessibilityState={{ checked: completed, disabled: busy || conflicted, busy: updating }}
+                    accessibilityState={{ checked: completed, disabled: busy, busy: updating }}
                   >
                     {updating ? (
                       <ActivityIndicator size="small" color={colors.primary} />
@@ -272,9 +266,7 @@ export function MeetingActionsSheet({
                         style={[
                           styles.check,
                           {
-                            borderColor: conflicted
-                              ? colors.danger
-                              : completed ? colors.primary : colors.iconTertiary,
+                            borderColor: completed ? colors.primary : colors.iconTertiary,
                             backgroundColor: completed ? colors.primary : colors.backgroundFloat,
                           },
                         ]}
@@ -306,10 +298,10 @@ export function MeetingActionsSheet({
                     </Text>
                     <View style={styles.metadataRow}>
                       <Text
-                        style={[styles.rowMeta, { color: conflicted ? colors.danger : colors.textCaption }]}
+                        style={[styles.rowMeta, { color: colors.textCaption }]}
                         numberOfLines={1}
                       >
-                        {actionMetadata(item, conflicted)}
+                        {actionMetadata(item)}
                       </Text>
                       {source.available ? (
                         <Pressable
@@ -331,15 +323,15 @@ export function MeetingActionsSheet({
                   <Pressable
                     style={({ pressed }) => [styles.iconAction, pressed && !busy && { backgroundColor: colors.primarySoft }]}
                     onPress={() => onOpenFollowup(id)}
-                    disabled={busy || conflicted || item.status !== 'pending'}
+                    disabled={busy || item.status !== 'pending'}
                     accessibilityRole="button"
                     accessibilityLabel={item.followupEventSourceId ? '查看后续日程' : '创建后续日程'}
-                    accessibilityState={{ disabled: busy || conflicted || item.status !== 'pending' }}
+                    accessibilityState={{ disabled: busy || item.status !== 'pending' }}
                   >
                     <Ionicons
                       name={item.followupEventSourceId ? 'calendar' : 'calendar-outline'}
                       size={20}
-                      color={busy || conflicted || item.status !== 'pending' ? colors.iconDisabled : colors.primary}
+                      color={busy || item.status !== 'pending' ? colors.iconDisabled : colors.primary}
                     />
                   </Pressable>
                   <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />

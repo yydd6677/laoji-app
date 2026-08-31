@@ -36,14 +36,7 @@ from app.models.meeting_recording_asset import (
 from app.models.meeting_recording_r2_upload import MeetingRecordingR2UploadV1
 from app.models.meeting_recording_transcript_draft import MeetingRecordingTranscriptDraftV1
 from app.models.transcript import TranscriptLine
-from app.api.app_meetings import (
-    MeetingQuestionContextTurn,
-    MeetingQuestionManualNoteSource,
-    MeetingQuestionRequest,
-    MeetingQuestionSummarySource,
-    MeetingQuestionTranscriptSource,
-)
-from app.services import device_identity, vnext_capability_cutover
+from app.services import device_identity
 from app.services.device_identity import DeviceContext, DeviceIdentityError
 from app.services.meeting_recording_asset_service import (
     RecordingAssetConflict,
@@ -64,29 +57,6 @@ from app.services.schedule_parser_service import (
     apply_schedule_clarification,
     parse_schedule_audio,
     parse_schedule_text,
-)
-from app.services.app_meeting_question import (
-    INSUFFICIENT_ANSWER,
-    generate_meeting_question_answer,
-    meeting_question_input_fingerprint,
-    meeting_question_request_hash,
-)
-from app.workers.summary_tasks import (
-    get_summary_template,
-    submit_device_final_summary,
-    submit_device_summary_v3,
-    wait_for_submitted_summary_status,
-)
-from app.services.summary_task_store import latest_device_summary_result
-from app.schemas.meeting_facts_v3 import PROMPT_REVISION
-from app.services.summary_v3_evidence import normalize_sources, source_hash_matches
-from app.services.summary_v3_generator import model_revision as summary_v3_model_revision
-from app.services.summary_v3_store import (
-    SummaryV3StoreError,
-    delete_source_payload,
-    find_document_by_identity,
-    latest_document as latest_summary_v3_document,
-    save_source_payload,
 )
 from app.services import vnext_task_store
 from app.config import settings
@@ -246,187 +216,6 @@ class DeviceR2UploadCompleteRequest(BaseModel):
     checksum_sha256: str | None = Field(default=None, max_length=71)
 
 
-class DeviceSummaryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[1] = 1
-    template_id: str = Field(default="general", min_length=1, max_length=40)
-    template_revision: int | None = Field(default=None, ge=1, le=2_147_483_647)
-    force: bool = False
-    retain_generated_result: bool = False
-
-
-class DeviceSummaryV3ManualNote(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    revision: int = Field(ge=0, le=9_007_199_254_740_991)
-    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    content: str = Field(default="", max_length=200_000)
-
-
-class DeviceSummaryV3Attachment(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    attachment_id: str = Field(min_length=1, max_length=512)
-    revision: int = Field(ge=0, le=9_007_199_254_740_991)
-    position_ms: int | None = Field(default=None, ge=0, le=604_800_000)
-    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    content: str = Field(min_length=1, max_length=200_000)
-
-
-class DeviceSummaryV3Request(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[3] = 3
-    transcript_revision: str = Field(min_length=1, max_length=512)
-    manual_note: DeviceSummaryV3ManualNote
-    attachments: list[DeviceSummaryV3Attachment] = Field(default_factory=list, max_length=20)
-    idempotency_key: str | None = Field(default=None, min_length=8, max_length=512)
-    force: bool = False
-
-
-class DeviceQuestionRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[1] = 1
-    client_thread_id: str = Field(min_length=1, max_length=512)
-    client_request_id: str = Field(min_length=1, max_length=512)
-    expected_ordinal: int = Field(ge=0, le=10_000)
-    question: str = Field(min_length=1, max_length=2_000)
-    summary_version_id: str | None = Field(default=None, max_length=512)
-    summary_sections: list[MeetingQuestionSummarySource] = Field(default_factory=list, max_length=200)
-    include_manual_note: bool = False
-    manual_note: DeviceSummaryV3ManualNote | None = None
-    context: list[MeetingQuestionContextTurn] = Field(default_factory=list, max_length=12)
-    retain_generated_result: bool = False
-
-
-class DeviceVNextBindingRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[1] = 1
-    binding_generation: str = Field(min_length=1, max_length=256)
-
-
-class DeviceVNextTaskRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[1] = 1
-    task_id: str = Field(min_length=1, max_length=512)
-    binding_id: str = Field(min_length=1, max_length=512)
-    binding_generation: str = Field(min_length=1, max_length=256)
-    capability: str = Field(min_length=1, max_length=120)
-    entity_id: str = Field(min_length=1, max_length=512)
-    entity_revision: int = Field(ge=1, le=9_007_199_254_740_991)
-    input_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    generation_id: str = Field(min_length=1, max_length=512)
-    predecessor_task_id: str | None = Field(default=None, max_length=512)
-    creation_reason: Literal["original", "retry", "regenerate"] = "original"
-
-
-class DeviceVNextTaskResultRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[1] = 1
-    attempt_id: str = Field(min_length=1, max_length=512)
-    lease_owner: str = Field(min_length=1, max_length=200)
-    result_kind: Literal["artifact", "content_outcome"] = "artifact"
-    result: Any
-
-
-class DeviceVNextTaskFailureRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[1] = 1
-    attempt_id: str = Field(min_length=1, max_length=512)
-    lease_owner: str = Field(min_length=1, max_length=200)
-    error_code: str = Field(min_length=1, max_length=160)
-    retryable: bool = False
-
-
-def _device_question_candidate_is_current(
-    value: object,
-    *,
-    meeting_id: str,
-    client_thread_id: str,
-    client_request_id: str,
-    expected_ordinal: int,
-    input_fingerprint: str,
-    transcript_revision_id: str,
-    allowed_source_ids: set[str],
-    summary_version_id: str | None,
-    allowed_summary_source_ids: set[str],
-    manual_note_revision: int | None,
-) -> bool:
-    """Validate a retained device answer before idempotent replay.
-
-    Retained quality candidates predate the current fail-closed citation
-    checks, and the control store intentionally keeps them for a short review
-    window.  A cache hit is therefore not evidence that its source snapshot is
-    still the one in this request.  Treat every field that binds an answer to
-    a meeting revision as part of the replay contract, and reject the whole
-    candidate if one citation is foreign, duplicated, or malformed.
-    """
-    if not isinstance(value, dict):
-        return False
-    if value.get("schema_version") != 1:
-        return False
-    if value.get("client_meeting_id") != meeting_id:
-        return False
-    if value.get("client_thread_id") != client_thread_id:
-        return False
-    if value.get("client_request_id") != client_request_id:
-        return False
-    if value.get("ordinal") != expected_ordinal:
-        return False
-    if value.get("input_fingerprint") != input_fingerprint:
-        return False
-    if value.get("transcript_revision_id") != transcript_revision_id:
-        return False
-    if value.get("summary_version_id") != summary_version_id:
-        return False
-    if value.get("manual_note_revision") != manual_note_revision:
-        return False
-    answer = value.get("answer")
-    if not isinstance(answer, str) or not answer.strip() or len(answer) > 20_000:
-        return False
-    answer_scope = value.get("answer_scope")
-    answer_kind = value.get("answer_kind")
-    if answer_scope not in {"meeting", "general"}:
-        return False
-    if answer_kind not in {"answer", "insufficient"}:
-        return False
-    citations = value.get("citations")
-    if not isinstance(citations, list) or len(citations) > 20:
-        return False
-    seen: set[tuple[str, str]] = set()
-    for citation in citations:
-        if not isinstance(citation, dict):
-            return False
-        kind = citation.get("kind")
-        source_id = citation.get("source_id")
-        if not isinstance(source_id, str) or not source_id.strip():
-            return False
-        identity = (str(kind), source_id)
-        allowed = (
-            kind == "transcript" and source_id in allowed_source_ids
-        ) or (
-            kind == "summary" and source_id in allowed_summary_source_ids
-        ) or (
-            kind == "manual_note"
-            and manual_note_revision is not None
-            and source_id == f"manual-note:{manual_note_revision}"
-        )
-        if not allowed or identity in seen:
-            return False
-        seen.add(identity)
-    if answer_scope == "general":
-        return answer_kind == "answer" and not citations
-    if answer_kind == "answer":
-        return bool(citations)
-    return answer == INSUFFICIENT_ANSWER and not citations
-
-
 class DeviceSpeakerRegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -451,27 +240,6 @@ def _error(error: DeviceIdentityError) -> HTTPException:
         status_code=error.status_code,
         detail={"code": error.code, "message": error.message},
     )
-
-
-def _guard_legacy_media_submit() -> None:
-    try:
-        vnext_capability_cutover.guard_legacy_media_upload_submit()
-    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
-        raise HTTPException(
-            status_code=error.status_code,
-            detail={"code": error.code, "message": error.message},
-        ) from error
-
-
-def _guard_legacy_generation(capability: str, contract_revision: str) -> None:
-    """Fence device-v1 summary/question/schedule producers after cutover."""
-    try:
-        vnext_capability_cutover.guard_legacy_submit(capability, contract_revision)
-    except vnext_capability_cutover.VNextCapabilityCutoverError as error:
-        raise HTTPException(
-            status_code=error.status_code,
-            detail={"code": error.code, "message": error.message},
-        ) from error
 
 
 async def require_device(
@@ -530,147 +298,8 @@ async def device_capabilities(context: DeviceContext = Depends(require_device)) 
         "retained_results": ["transcript", "summary", "question_answer"],
         "public_links": False,
         "cross_device": False,
-        "summary_contract_v3": True,
         "summary_attachments_text": True,
     }
-
-
-def _vnext_error(error: vnext_task_store.VNextTaskError) -> HTTPException:
-    return HTTPException(
-        status_code=error.status_code,
-        detail={"code": error.code, "message": error.message},
-    )
-
-
-@router.put("/vnext/bindings/{binding_id}", status_code=201)
-async def register_vnext_binding(
-    binding_id: str,
-    payload: DeviceVNextBindingRequest,
-    context: DeviceContext = Depends(require_device),
-) -> dict[str, Any]:
-    try:
-        binding = await asyncio.to_thread(
-            vnext_task_store.register_binding,
-            context,
-            binding_id=binding_id,
-            binding_generation=payload.binding_generation,
-        )
-        return {"schema_version": 1, "binding": binding}
-    except vnext_task_store.VNextTaskError as error:
-        raise _vnext_error(error) from error
-
-
-@router.post("/vnext/tasks", status_code=201)
-async def create_vnext_task(
-    payload: DeviceVNextTaskRequest,
-    context: DeviceContext = Depends(require_device),
-) -> dict[str, Any]:
-    try:
-        task, reused = await asyncio.to_thread(
-            vnext_task_store.create_task,
-            context,
-            task_id=payload.task_id,
-            binding_id=payload.binding_id,
-            binding_generation=payload.binding_generation,
-            capability=payload.capability,
-            entity_id=payload.entity_id,
-            entity_revision=payload.entity_revision,
-            input_sha256=payload.input_sha256,
-            generation_id=payload.generation_id,
-            predecessor_task_id=payload.predecessor_task_id,
-            creation_reason=payload.creation_reason,
-        )
-        return {"schema_version": 1, "reused": reused, "task": task}
-    except vnext_task_store.VNextTaskError as error:
-        raise _vnext_error(error) from error
-
-
-@router.get("/vnext/tasks/{task_id}")
-async def get_vnext_task(
-    task_id: str,
-    context: DeviceContext = Depends(require_device),
-) -> dict[str, Any]:
-    try:
-        task = await asyncio.to_thread(vnext_task_store.get_task, context, task_id)
-    except vnext_task_store.VNextTaskError as error:
-        raise _vnext_error(error) from error
-    if task is None:
-        raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
-    return {"schema_version": 1, "task": task}
-
-
-@router.post("/vnext/tasks/{task_id}/attempts/claim")
-async def claim_vnext_task_attempt(
-    task_id: str,
-    context: DeviceContext = Depends(require_device),
-) -> dict[str, Any]:
-    try:
-        attempt = await asyncio.to_thread(vnext_task_store.claim_attempt, context, task_id)
-    except vnext_task_store.VNextTaskError as error:
-        raise _vnext_error(error) from error
-    if attempt is None:
-        raise HTTPException(status_code=409, detail={"code": "TASK_NOT_ADMITTED", "message": "任务当前不可执行"})
-    return {"schema_version": 1, "attempt": attempt}
-
-
-@router.post("/vnext/tasks/{task_id}/attempts/success")
-async def finish_vnext_task_success(
-    task_id: str,
-    payload: DeviceVNextTaskResultRequest,
-    context: DeviceContext = Depends(require_device),
-) -> dict[str, Any]:
-    try:
-        committed = await asyncio.to_thread(
-            vnext_task_store.mark_success,
-            context,
-            task_id,
-            payload.attempt_id,
-            payload.result,
-            result_kind=payload.result_kind,
-            lease_owner=payload.lease_owner,
-        )
-    except vnext_task_store.VNextTaskError as error:
-        raise _vnext_error(error) from error
-    if not committed:
-        raise HTTPException(status_code=409, detail={"code": "TASK_COMMIT_REJECTED", "message": "任务结果已过期"})
-    return {"schema_version": 1, "committed": True}
-
-
-@router.post("/vnext/tasks/{task_id}/attempts/failure")
-async def finish_vnext_task_failure(
-    task_id: str,
-    payload: DeviceVNextTaskFailureRequest,
-    context: DeviceContext = Depends(require_device),
-) -> dict[str, Any]:
-    try:
-        committed = await asyncio.to_thread(
-            vnext_task_store.mark_failure,
-            context,
-            task_id,
-            payload.attempt_id,
-            payload.error_code,
-            retryable=payload.retryable,
-            lease_owner=payload.lease_owner,
-        )
-    except vnext_task_store.VNextTaskError as error:
-        raise _vnext_error(error) from error
-    if not committed:
-        raise HTTPException(status_code=409, detail={"code": "TASK_COMMIT_REJECTED", "message": "任务结果已过期"})
-    return {"schema_version": 1, "committed": True}
-
-
-@router.post("/vnext/tasks/{task_id}/cancel")
-async def cancel_vnext_task(
-    task_id: str,
-    context: DeviceContext = Depends(require_device),
-) -> dict[str, Any]:
-    try:
-        cancelled = await asyncio.to_thread(vnext_task_store.cancel_task, context, task_id)
-    except vnext_task_store.VNextTaskError as error:
-        raise _vnext_error(error) from error
-    if not cancelled:
-        raise HTTPException(status_code=409, detail={"code": "TASK_NOT_ACTIVE", "message": "任务已结束或不存在"})
-    return {"schema_version": 1, "cancelled": True}
 
 
 @router.put("/epochs/{epoch_id}")
@@ -807,14 +436,10 @@ async def delete_meeting_binding(
                     status_code=503,
                     detail={"code": "DEVICE_SOURCE_CLEANUP_FAILED", "message": "设备录音文件暂时无法清理"},
                 ) from error
-        # Legacy compact tables use NO ACTION for a few meeting children.
-        # Delete those rows explicitly so local-first device deletion cannot
-        # surface a foreign-key 500 after an otherwise successful transcript.
-        for table in ("transcript_lines", "meeting_segments", "period_summaries", "final_summaries"):
-            await db.execute(
-                text(f"DELETE FROM {table} WHERE meeting_id = :meeting_id"),
-                {"meeting_id": binding_id},
-            )
+        await db.execute(
+            text("DELETE FROM transcript_lines WHERE meeting_id = :meeting_id"),
+            {"meeting_id": binding_id},
+        )
         await db.delete(meeting)
         await db.flush()
         # ``record_meeting_tombstone`` uses the control SQLite connection.  A
@@ -834,10 +459,6 @@ async def parse_device_schedule(
     context: DeviceContext = Depends(require_device),
 ) -> dict[str, Any]:
     del context
-    _guard_legacy_generation(
-        vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
-        vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
-    )
     result = await parse_schedule_text(
         payload.text,
         payload.reference_datetime,
@@ -866,10 +487,6 @@ async def parse_device_schedule_audio(
     context: DeviceContext = Depends(require_device),
 ) -> dict[str, Any]:
     del context
-    _guard_legacy_generation(
-        vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
-        vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
-    )
     try:
         raw = base64.b64decode(payload.audio_base64, validate=True)
     except Exception as error:
@@ -887,10 +504,6 @@ async def clarify_device_schedule(
     context: DeviceContext = Depends(require_device),
 ) -> dict[str, Any]:
     del context
-    _guard_legacy_generation(
-        vnext_capability_cutover.SCHEDULE_GRAPH_CAPABILITY,
-        vnext_capability_cutover.SCHEDULE_GRAPH_CONTRACT_REVISION,
-    )
     result = await asyncio.to_thread(
         apply_schedule_clarification,
         payload.current,
@@ -954,7 +567,6 @@ def _meeting_payload(meeting: Meeting, transcript_count: int = 0) -> dict[str, A
         "created_at": meeting.created_at.isoformat() if meeting.created_at else None,
         "updated_at": meeting.updated_at.isoformat() if meeting.updated_at else None,
         "transcript_count": transcript_count,
-        "summary_available": False,
         # Device-primary privacy: title/location/participants/audio filename
         # stay on the phone and are never projected through this contract.
     }
@@ -962,9 +574,7 @@ def _meeting_payload(meeting: Meeting, transcript_count: int = 0) -> dict[str, A
 
 def _device_asset_payload(asset: MeetingRecordingAssetV2) -> dict[str, Any]:
     payload = asset_payload(asset)
-    payload.pop("content_url", None)
     payload.pop("file_name", None)
-    payload["content_url"] = None
     payload["file_name"] = None
     payload["device_owned"] = bool(asset.data_epoch_id)
     return payload
@@ -1069,10 +679,6 @@ async def get_device_meeting(
         or 0
     )
     payload = _meeting_payload(meeting, count)
-    payload["summary_available"] = latest_device_summary_result(
-        task_scope=f"device:{context.principal_id}:{context.epoch_id}",
-        meeting_id=meeting.id,
-    ) is not None
     return payload
 
 
@@ -1099,7 +705,6 @@ async def register_device_asset(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _guard_legacy_media_submit()
     meeting = await _device_meeting(db, context, binding_id)
     key = _idempotency_key(idempotency_key, "录音资产请求标识")
     client_asset_id = _device_identifier(payload.client_asset_id, "本机录音资产标识")
@@ -1265,7 +870,6 @@ async def initialize_device_r2_upload(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Create or resume a private R2 multipart upload for one device asset."""
-    _guard_legacy_media_submit()
     if not r2_storage_service.r2_enabled():
         raise HTTPException(status_code=503, detail={"code": "R2_UPLOAD_UNAVAILABLE", "message": "直传服务暂时不可用"})
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
@@ -1494,7 +1098,6 @@ async def complete_device_r2_upload(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _guard_legacy_media_submit()
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     upload = await _find_device_r2_upload(db, context, normalized_asset_id, payload.upload_id)
     if upload is None:
@@ -1749,7 +1352,6 @@ async def upload_device_asset_chunk(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _guard_legacy_media_submit()
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     if chunk_index < 0 or chunk_index > 4095:
         raise HTTPException(status_code=422, detail={"code": "CHUNK_INDEX_INVALID", "message": "录音分片序号无效"})
@@ -1795,7 +1397,6 @@ async def complete_device_asset_chunk_upload(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _guard_legacy_media_submit()
     key = _idempotency_key(idempotency_key, "录音上传完成请求标识")
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     upload_key = _device_identifier(payload.upload_id, "录音上传标识", 512)
@@ -1881,7 +1482,6 @@ async def upload_device_asset(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _guard_legacy_media_submit()
     key = _idempotency_key(idempotency_key, "录音上传请求标识")
     asset = await find_asset(db, user_id=context.principal_id, asset_id=_device_identifier(asset_id, "录音资产标识", 160))
     if asset is None or asset.data_epoch_id != context.epoch_id:
@@ -1950,7 +1550,6 @@ async def create_device_transcription(
     context: DeviceContext = Depends(require_device),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    _guard_legacy_media_submit()
     key = _idempotency_key(idempotency_key, "转写请求标识")
     normalized_asset_id = _device_identifier(asset_id, "录音资产标识", 160)
     asset = await find_asset(db, user_id=context.principal_id, asset_id=normalized_asset_id)
@@ -1997,14 +1596,7 @@ async def get_device_task(
             await asyncio.sleep(0.15)
             await db.refresh(job)
         return _device_job_payload(job)
-    status_payload = await wait_for_submitted_summary_status(
-        normalized,
-        timeout_seconds=wait_ms / 1000,
-        expected_scope=f"device:{context.principal_id}:{context.epoch_id}",
-    )
-    if status_payload is None:
-        raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
-    return {"schema_version": 1, **status_payload}
+    raise HTTPException(status_code=404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
 
 
 @router.get("/meetings/{binding_id}/transcript")
@@ -2164,501 +1756,6 @@ async def get_device_transcript(
     }
 
 
-@router.post("/meetings/{binding_id}/summary", status_code=202)
-async def create_device_summary(
-    binding_id: str,
-    payload: DeviceSummaryRequest,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    context: DeviceContext = Depends(require_device),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    meeting = await _device_meeting(db, context, binding_id)
-    key = _idempotency_key(idempotency_key, "整理请求标识")
-    try:
-        template = get_summary_template(payload.template_id, payload.template_revision)
-    except ValueError as error:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "SUMMARY_TEMPLATE_INVALID", "message": str(error)},
-        ) from error
-    lines = list(
-        (
-            await db.execute(
-                select(TranscriptLine).where(TranscriptLine.meeting_id == meeting.id).order_by(TranscriptLine.start_time)
-            )
-        ).scalars().all()
-    )
-    if not lines:
-        raise HTTPException(status_code=400, detail={"code": "TRANSCRIPT_EMPTY", "message": "会议暂无文字记录"})
-    _guard_legacy_generation(
-        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
-        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
-    )
-    transcript = [
-        {
-            "id": line.id,
-            "speaker": line.speaker_label,
-            "speaker_id": line.speaker_id,
-            "text": line.text,
-            "start": line.start_time,
-            "end": line.end_time,
-            "confidence": line.confidence,
-        }
-        for line in lines
-    ]
-    fingerprint = hashlib.sha256(json.dumps(transcript, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
-    task = submit_device_final_summary(
-        meeting.id,
-        task_scope=f"device:{context.principal_id}:{context.epoch_id}",
-        dedupe_key=f"device:{context.epoch_id}:{meeting.id}:{template['id']}:{template['revision']}:{fingerprint}:retain-{int(payload.retain_generated_result)}",
-        force=payload.force,
-        template_id=template["id"],
-        template_revision=template["revision"],
-        retain_generated_result=payload.retain_generated_result,
-    )
-    return {
-        "schema_version": 1,
-        "task_id": task.id,
-        "meeting_id": meeting.id,
-        "template_id": template["id"],
-        "template_revision": template["revision"],
-        "retain_generated_result": payload.retain_generated_result,
-        "request_id": key,
-        "reused": task.reused,
-    }
-
-
-@router.get("/meetings/{binding_id}/summary")
-async def get_device_summary(
-    binding_id: str,
-    context: DeviceContext = Depends(require_device),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    meeting = await _device_meeting(db, context, binding_id)
-    result = latest_device_summary_result(
-        task_scope=f"device:{context.principal_id}:{context.epoch_id}",
-        meeting_id=meeting.id,
-    )
-    if result is None:
-        raise HTTPException(status_code=404, detail={"code": "SUMMARY_NOT_FOUND", "message": "整理结果尚未生成"})
-    raw_summary = result.get("structured_document") if isinstance(result, dict) else None
-    structured_document = (
-        raw_summary
-        if isinstance(raw_summary, dict)
-        else None
-    )
-    return {
-        "schema_version": 1,
-        "meeting_id": meeting.id,
-        "summary_id": result.get("summary_id"),
-        "overview": result.get("overview") or "",
-        "key_decisions": result.get("key_decisions") or [],
-        "action_items": result.get("action_items") or [],
-        "markdown": result.get("markdown") or result.get("full_text") or "",
-        "generated_at": result.get("generated_at"),
-        "template_id": structured_document.get("template_id") if structured_document else result.get("template_id"),
-        "template_revision": structured_document.get("template_revision") if structured_document else result.get("template_revision"),
-        "structured_document": structured_document,
-    }
-
-
-def _summary_v3_response(record: dict[str, Any]) -> dict[str, Any]:
-    document = record.get("document") if isinstance(record.get("document"), dict) else {}
-    return {
-        "schema_version": 3,
-        "document_id": record.get("id"),
-        "meeting_id": record.get("meeting_id"),
-        "facts_document": document,
-        "action_candidates": document.get("action_candidates") or [],
-        "source_fingerprint": record.get("source_fingerprint"),
-        "transcript_revision": record.get("transcript_revision"),
-        "model_revision": record.get("model_revision"),
-        "prompt_revision": record.get("prompt_revision"),
-        "generated_at": record.get("generated_at"),
-        "coverage": record.get("coverage") or {},
-    }
-
-
-@router.post("/meetings/{binding_id}/summary-v3", status_code=202)
-async def create_device_summary_v3(
-    binding_id: str,
-    payload: DeviceSummaryV3Request,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    context: DeviceContext = Depends(require_device),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    meeting = await _device_meeting(db, context, binding_id)
-    header_key = idempotency_key.strip() if idempotency_key else ""
-    body_key = payload.idempotency_key.strip() if payload.idempotency_key else ""
-    if header_key and body_key and header_key != body_key:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "IDEMPOTENCY_KEY_MISMATCH", "message": "整理请求标识不一致"},
-        )
-    request_key = _idempotency_key(header_key or body_key or None, "整理请求标识")
-    if not source_hash_matches(payload.manual_note.content, payload.manual_note.content_sha256):
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "MANUAL_NOTE_HASH_MISMATCH", "message": "我的笔记内容已变化，请重试"},
-        )
-    attachments = [item.model_dump(mode="json") for item in payload.attachments]
-    for item in attachments:
-        if not source_hash_matches(str(item["content"]), str(item["content_sha256"])):
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "ATTACHMENT_HASH_MISMATCH", "message": "所选附件内容已变化，请重新选择"},
-            )
-    source_bytes = len(payload.manual_note.content.encode("utf-8")) + sum(
-        len(str(item["content"]).encode("utf-8")) for item in attachments
-    )
-    if source_bytes > 1024 * 1024:
-        raise HTTPException(
-            status_code=413,
-            detail={"code": "SUMMARY_SOURCES_TOO_LARGE", "message": "所选笔记和附件内容过长"},
-        )
-
-    lines = list(
-        (
-            await db.execute(
-                select(TranscriptLine)
-                .where(TranscriptLine.meeting_id == meeting.id)
-                .order_by(TranscriptLine.start_time, TranscriptLine.id)
-            )
-        ).scalars().all()
-    )
-    if not lines:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "TRANSCRIPT_EMPTY", "message": "会议暂无文字记录"},
-        )
-    _guard_legacy_generation(
-        vnext_capability_cutover.SOURCE_STREAM_CAPABILITY,
-        vnext_capability_cutover.SOURCE_STREAM_CONTRACT_REVISION,
-    )
-    transcript = [
-        {
-            "id": line.id,
-            "speaker": line.speaker_label,
-            "speaker_id": line.speaker_id,
-            "text": line.text,
-            "start": line.start_time,
-            "end": line.end_time,
-            "confidence": line.confidence,
-        }
-        for line in lines
-    ]
-    manual_note = payload.manual_note.model_dump(mode="json")
-    _sources, fingerprint, _transcript_revision = normalize_sources(
-        transcript,
-        manual_note,
-        attachments,
-    )
-    task_scope = f"device:{context.principal_id}:{context.epoch_id}"
-    active_model_revision = summary_v3_model_revision()
-    existing = find_document_by_identity(
-        task_scope=task_scope,
-        meeting_id=meeting.id,
-        source_fingerprint=fingerprint,
-        model_revision=active_model_revision,
-        prompt_revision=PROMPT_REVISION,
-    )
-    if existing is not None:
-        return {
-            "schema_version": 3,
-            "task_id": existing["task_id"],
-            "meeting_id": meeting.id,
-            "request_id": request_key,
-            "source_fingerprint": fingerprint,
-            "prompt_revision": PROMPT_REVISION,
-            "model_revision": active_model_revision,
-            "reused": True,
-            "already_current": True,
-        }
-
-    private_payload = {
-        "schema_version": 3,
-        "declared_transcript_revision": payload.transcript_revision,
-        "manual_note": manual_note,
-        "attachments": attachments,
-    }
-    try:
-        payload_id = save_source_payload(
-            task_scope=task_scope,
-            meeting_id=meeting.id,
-            payload=private_payload,
-        )
-    except SummaryV3StoreError as error:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "SUMMARY_PRIVATE_PAYLOAD_UNAVAILABLE", "message": "整理服务暂时不可用"},
-        ) from error
-    try:
-        task = submit_device_summary_v3(
-            meeting.id,
-            task_scope=task_scope,
-            payload_id=payload_id,
-            dedupe_key=f"summary-v3:{fingerprint}:{active_model_revision}:{PROMPT_REVISION}",
-            expected_source_fingerprint=fingerprint,
-            model_revision=active_model_revision,
-            # A completed identity is immutable and was returned above. For a
-            # queued/running or failed task, preserve the caller's explicit
-            # retry intent at the persistent task layer without creating a
-            # second document for an unchanged source fingerprint.
-            force=payload.force,
-        )
-    except Exception:
-        delete_source_payload(payload_id)
-        raise
-    if task.reused:
-        delete_source_payload(payload_id)
-    return {
-        "schema_version": 3,
-        "task_id": task.id,
-        "meeting_id": meeting.id,
-        "request_id": request_key,
-        "source_fingerprint": fingerprint,
-        "prompt_revision": PROMPT_REVISION,
-        "model_revision": active_model_revision,
-        "reused": task.reused,
-        "already_current": False,
-    }
-
-
-@router.get("/meetings/{binding_id}/summary-v3")
-async def get_device_summary_v3(
-    binding_id: str,
-    context: DeviceContext = Depends(require_device),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    meeting = await _device_meeting(db, context, binding_id)
-    record = latest_summary_v3_document(
-        task_scope=f"device:{context.principal_id}:{context.epoch_id}",
-        meeting_id=meeting.id,
-    )
-    if record is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "SUMMARY_V3_NOT_FOUND", "message": "新版整理结果尚未生成"},
-        )
-    return _summary_v3_response(record)
-
-
-@router.post("/meetings/{binding_id}/questions")
-async def ask_device_question(
-    binding_id: str,
-    request: DeviceQuestionRequest,
-    context: DeviceContext = Depends(require_device),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    meeting = await _device_meeting(db, context, binding_id)
-    lines = list(
-        (
-            await db.execute(
-                select(TranscriptLine).where(TranscriptLine.meeting_id == meeting.id).order_by(TranscriptLine.start_time)
-            )
-        ).scalars().all()
-    )
-    if not lines:
-        raise HTTPException(status_code=400, detail={"code": "TRANSCRIPT_EMPTY", "message": "会议暂无文字记录"})
-    _guard_legacy_generation(
-        vnext_capability_cutover.QUESTION_READER_CAPABILITY,
-        vnext_capability_cutover.QUESTION_READER_CONTRACT_REVISION,
-    )
-    client_thread_id = _device_identifier(request.client_thread_id, "问答记录标识")
-    client_request_id = _device_identifier(request.client_request_id, "问答请求标识")
-    manual_note: MeetingQuestionManualNoteSource | None = None
-    if request.include_manual_note:
-        if (
-            request.manual_note is None
-            or not request.manual_note.content.strip()
-            or not source_hash_matches(
-                request.manual_note.content,
-                request.manual_note.content_sha256,
-            )
-        ):
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "MANUAL_NOTE_INVALID", "message": "我的笔记内容校验失败"},
-            )
-        manual_note = MeetingQuestionManualNoteSource(
-            revision=request.manual_note.revision,
-            content=request.manual_note.content,
-        )
-    elif request.manual_note is not None:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "MANUAL_NOTE_NOT_SELECTED", "message": "我的笔记来源状态不一致"},
-        )
-    manual_note_revision = manual_note.revision if manual_note is not None else None
-    transcript_revision_id = f"device-transcript:{meeting.updated_at.isoformat() if meeting.updated_at else '0'}:{len(lines)}"
-    source_segments = [
-        MeetingQuestionTranscriptSource(
-            segment_id=line.id,
-            source_segment_id=None,
-            start_ms=max(0, round(line.start_time * 1000)),
-            end_ms=max(0, round(line.end_time * 1000)),
-            speaker=line.speaker_label,
-            text=line.text,
-        )
-        for line in lines
-    ]
-    model_payload = MeetingQuestionRequest(
-        schema_version=1,
-        client_meeting_id=meeting.id,
-        client_thread_id=client_thread_id,
-        client_request_id=client_request_id,
-        expected_ordinal=request.expected_ordinal,
-        input_fingerprint="sha256:" + "0" * 64,
-        transcript_revision_id=transcript_revision_id,
-        summary_version_id=request.summary_version_id,
-        manual_note_revision=manual_note_revision,
-        include_manual_note=manual_note is not None,
-        question=request.question.strip(),
-        transcript_segments=source_segments,
-        summary_sections=request.summary_sections,
-        manual_note=manual_note,
-        context=request.context,
-    )
-    payload = model_payload.model_dump(mode="json")
-    payload["input_fingerprint"] = meeting_question_input_fingerprint(payload)
-    model_payload = MeetingQuestionRequest(**payload)
-    payload = model_payload.model_dump(mode="json")
-    request_hash = meeting_question_request_hash(payload)
-    allowed_source_ids = {
-        str(source["segment_id"]).strip()
-        for source in payload["transcript_segments"]
-    }
-    allowed_summary_source_ids = {
-        str(source["section_id"]).strip()
-        for source in payload["summary_sections"]
-    }
-    # A device question is transient by default.  Only the explicit quality
-    # switch creates an anonymous retained candidate; the main meeting
-    # question tables are account/sync compatibility tables and must not be
-    # used for device-primary data.
-    request_hash_key = "sha256:" + hashlib.sha256(request_hash.encode("utf-8")).hexdigest()
-    if request.retain_generated_result:
-        existing = device_identity.find_quality_candidate(
-            context,
-            kind="question",
-            meeting_id=meeting.id,
-            request_hash=request_hash_key,
-        )
-        if existing is not None and _device_question_candidate_is_current(
-            existing,
-            meeting_id=meeting.id,
-            client_thread_id=client_thread_id,
-            client_request_id=client_request_id,
-            expected_ordinal=request.expected_ordinal,
-            input_fingerprint=payload["input_fingerprint"],
-            transcript_revision_id=transcript_revision_id,
-            allowed_source_ids=allowed_source_ids,
-            summary_version_id=request.summary_version_id,
-            allowed_summary_source_ids=allowed_summary_source_ids,
-            manual_note_revision=manual_note_revision,
-        ):
-            return {**existing, "reused": True}
-        # A retained result can be malformed or belong to an older transcript
-        # projection.  Do not replay it and do not turn it into a visible
-        # failure; regenerate against the current server-side lines below.
-    answer = await asyncio.to_thread(generate_meeting_question_answer, payload)
-    # The generator contract is a mapping, but a provider/parser failure must
-    # still become a source-free insufficient result rather than an uncaught
-    # AttributeError that leaves the request ambiguous.
-    if not isinstance(answer, dict):
-        answer = {}
-    now_ms = round(datetime.now(timezone.utc).timestamp() * 1000)
-
-    # The device endpoint owns a server-side transcript projection.  Validate
-    # every returned citation against that exact projection before it leaves
-    # the service; a stale model/cache result must never be handed to the
-    # mobile client for it to interpret as a current source. Device Q&A can
-    # additionally use only the exact manual-note revision supplied here.
-    citations: list[dict[str, str]] = []
-    citation_invalid = False
-    seen_citations: set[tuple[str, str]] = set()
-    for item in (answer.get("citations") or []):
-        if not isinstance(item, dict):
-            citation_invalid = True
-            continue
-        kind = str(item.get("kind") or "").strip()
-        source_id = str(item.get("source_id") or "").strip()
-        identity = (kind, source_id)
-        allowed = (
-            kind == "transcript" and source_id in allowed_source_ids
-        ) or (
-            kind == "summary" and source_id in allowed_summary_source_ids
-        ) or (
-            kind == "manual_note"
-            and manual_note_revision is not None
-            and source_id == f"manual-note:{manual_note_revision}"
-        )
-        if not allowed or identity in seen_citations:
-            citation_invalid = True
-            continue
-        seen_citations.add(identity)
-        citations.append({"kind": kind, "source_id": source_id})
-
-    answer_scope = str(answer.get("answer_scope") or "meeting")
-    answer_kind = str(answer.get("answer_kind") or "insufficient")
-    if answer_scope not in {"meeting", "general"} or answer_kind not in {"answer", "insufficient"}:
-        answer_scope = "meeting"
-        answer_kind = "insufficient"
-        answer = {
-            **answer,
-            "answer_scope": answer_scope,
-            "answer_kind": answer_kind,
-            "answer": "当前会议记录中没有足够信息",
-        }
-    if answer_scope == "general":
-        # General answers are deliberately source-free.
-        citations = []
-    elif answer_kind == "insufficient":
-        citations = []
-    elif citation_invalid or not citations:
-        # Fail closed instead of returning an answer whose visible claims no
-        # longer have a source in this meeting's transcript.
-        answer_scope = "meeting"
-        answer_kind = "insufficient"
-        answer = {
-            **answer,
-            "answer_scope": answer_scope,
-            "answer_kind": answer_kind,
-            "answer": "当前会议记录中没有足够信息",
-        }
-    result = {
-        "schema_version": 1,
-        "client_meeting_id": meeting.id,
-        "client_thread_id": client_thread_id,
-        "client_request_id": client_request_id,
-        "remote_thread_id": f"device-thread:{context.epoch_id}:{client_thread_id}",
-        "remote_turn_id": f"device-turn:{request_hash_key[7:23]}",
-        "ordinal": request.expected_ordinal,
-        "input_fingerprint": payload["input_fingerprint"],
-        "transcript_revision_id": transcript_revision_id,
-        "summary_version_id": request.summary_version_id,
-        "manual_note_revision": manual_note_revision,
-        "answer_scope": answer_scope,
-        "answer_kind": answer_kind,
-        "answer": str(answer.get("answer") or "当前会议记录中没有足够信息"),
-        "citations": citations,
-        "created_at_ms": now_ms,
-        "completed_at_ms": now_ms,
-        "transient": not request.retain_generated_result,
-        "reused": False,
-    }
-    if request.retain_generated_result:
-        device_identity.store_quality_candidate(
-            context,
-            kind="question",
-            meeting_id=meeting.id,
-            request_hash=request_hash_key,
-            payload=result,
-            ttl_seconds=30 * 24 * 60 * 60,
-        )
-    return result
-
-
 @router.get("/speakers")
 async def list_device_speakers(
     context: DeviceContext = Depends(require_device),
@@ -2701,11 +1798,16 @@ def _device_speaker_payload(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _read_device_speaker_audio(audio: UploadFile) -> tuple[Any, Any, float, str, str, list, list]:
-    """Use the existing CAM++ quality/extraction path without account auth."""
-    from app.api.app_speakers import _read_audio, _voiceprint_features
+    """Validate one sample and extract its CAM++ identity features."""
+    from app.services.device_speaker_audio import (
+        extract_device_voiceprint_features,
+        read_device_speaker_audio,
+    )
 
-    samples = await _read_audio(audio)
-    embedding, quality, level, description, issues, suggestions = await _voiceprint_features(samples)
+    samples = await read_device_speaker_audio(audio)
+    embedding, quality, level, description, issues, suggestions = (
+        await extract_device_voiceprint_features(samples)
+    )
     return samples, embedding, quality, level, description, issues, suggestions
 
 
@@ -2783,7 +1885,7 @@ async def supplement_device_speaker_audio(
             "message": "需要明确同意声纹用途后才能上传录音",
         })
     from app.services.speaker_db_service import get_speaker_db
-    from app.api.app_speakers import _embedding_cosine
+    from app.services.device_speaker_audio import voiceprint_cosine
 
     db = get_speaker_db()
     existing = db.load_speaker_for_owner_epoch(context.principal_id, context.epoch_id, speaker_id)
@@ -2793,7 +1895,7 @@ async def supplement_device_speaker_audio(
         raise HTTPException(status_code=422, detail={"code": "CAPTURE_PROFILE_INVALID", "message": "录音采集版本不受支持"})
     samples, embedding, quality, level, description, issues, suggestions = await _read_device_speaker_audio(audio)
     existing_embedding = existing.get("embedding")
-    if existing_embedding is not None and _embedding_cosine(existing_embedding, embedding) < 0.45:
+    if existing_embedding is not None and voiceprint_cosine(existing_embedding, embedding) < 0.45:
         raise HTTPException(status_code=422, detail={"code": "SPEAKER_MISMATCH", "message": "这段录音与已有讲话人音色差异较大，请确认由同一人录制"})
     if not db.supplement_audio_for_owner(context.principal_id, speaker_id, embedding, quality=quality):
         raise HTTPException(status_code=409, detail={"code": "SPEAKER_CONFLICT", "message": "讲话人资料已变化，请刷新后重试"})

@@ -1,41 +1,29 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Avatar, BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { readableErrorMessage } from '../services/errors';
-import { fetchDeviceSpeakerProfiles, fetchSpeakers, SpeakerProfile } from '../services/speakers';
-import { useAuth } from '../store/AuthStore';
+import { fetchDeviceSpeakerProfiles, SpeakerProfile } from '../services/speakers';
 import { Colors as C, withAlpha } from '../theme/colors';
 import { RootStackParamList } from '../types';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'SpeakerManager'> };
 
 export function SpeakerManagerScreen({ navigation }: Props) {
-  const { accessToken, isGuest } = useAuth();
   const [speakers, setSpeakers] = useState<SpeakerProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const loadGenerationRef = useRef(0);
-  const deviceMode = isGuest || !accessToken;
-
-  useLayoutEffect(() => {
-    loadGenerationRef.current += 1;
-    setSpeakers([]);
-    setLoading(false);
-    setError('');
-  }, [accessToken, isGuest]);
 
   const load = useCallback(async () => {
     const requestGeneration = ++loadGenerationRef.current;
     setLoading(true);
     setError('');
     try {
-      const result = deviceMode
-        ? await fetchDeviceSpeakerProfiles()
-        : await fetchSpeakers(accessToken!);
+      const result = await fetchDeviceSpeakerProfiles();
       if (loadGenerationRef.current === requestGeneration) setSpeakers(result);
     } catch (reason) {
       if (loadGenerationRef.current === requestGeneration) {
@@ -44,7 +32,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
     } finally {
       if (loadGenerationRef.current === requestGeneration) setLoading(false);
     }
-  }, [accessToken, deviceMode]);
+  }, []);
 
   useFocusEffect(useCallback(() => {
     void load();

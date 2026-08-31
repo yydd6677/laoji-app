@@ -1,7 +1,8 @@
 import React from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { Animated, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Appearance, Colors as C } from '../theme/colors';
+import { MotionPressable } from './MotionPressable';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -44,15 +45,16 @@ export function CommonTextTitleBar({
 }) {
   return (
     <View style={s.commonTextBar} testID={testID}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.commonLeftAction}
         onPress={onLeft}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={leftText}
       >
         <Text style={s.commonActionText}>{leftText}</Text>
-      </TouchableOpacity>
+      </MotionPressable>
       <Text
         style={s.commonTextTitle}
         numberOfLines={1}
@@ -60,12 +62,13 @@ export function CommonTextTitleBar({
       >
         {title}
       </Text>
-      <TouchableOpacity
+      <MotionPressable
         testID={rightTestID}
         style={s.commonRightAction}
         onPress={onRight}
         disabled={!onRight || !rightEnabled}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={rightText}
         accessibilityState={{ disabled: !onRight || !rightEnabled }}
@@ -78,7 +81,7 @@ export function CommonTextTitleBar({
             {rightText}
           </Text>
         ) : null}
-      </TouchableOpacity>
+      </MotionPressable>
     </View>
   );
 }
@@ -104,16 +107,17 @@ export function CalendarDetailTitleBar({
     : { left: titleSide, right: titleSide };
   return (
     <View style={[s.bar, s.detailBar]}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.iconAction}
         onPress={onBack}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.iconPressed}
         hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         accessibilityRole="button"
         accessibilityLabel="返回"
       >
         <Ionicons name="chevron-back" size={22} color={C.text} />
-      </TouchableOpacity>
+      </MotionPressable>
       <Animated.Text
         testID="calendar-detail-collapsed-title"
         numberOfLines={1}
@@ -129,16 +133,17 @@ export function CalendarDetailTitleBar({
       </Animated.Text>
       <View style={s.detailActions}>
         {actions.map(action => (
-          <TouchableOpacity
+          <MotionPressable
             key={action.key}
             style={s.detailIconAction}
             onPress={action.onPress}
-            activeOpacity={0.65}
+            feedback="quiet"
+            pressedStyle={s.iconPressed}
             accessibilityRole="button"
             accessibilityLabel={action.label}
           >
             <Ionicons name={action.icon} size={20} color={C.text} />
-          </TouchableOpacity>
+          </MotionPressable>
         ))}
       </View>
     </View>
@@ -160,22 +165,24 @@ export function CalendarEditTitleBar({
 }) {
   return (
     <View style={s.bar}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.textAction}
         onPress={onCancel}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel="取消编辑"
       >
         <Text style={s.cancelText}>取消</Text>
-      </TouchableOpacity>
+      </MotionPressable>
       <View style={s.editorTitleSpacer} />
-      <TouchableOpacity
+      <MotionPressable
         testID="event-save"
         style={[s.textAction, s.saveAction]}
         onPress={onSave}
         disabled={!saveEnabled || saving}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={saveAccessibilityLabel}
         accessibilityState={{ disabled: !saveEnabled || saving }}
@@ -186,7 +193,7 @@ export function CalendarEditTitleBar({
         ]}>
           {saving ? '保存中' : '保存'}
         </Text>
-      </TouchableOpacity>
+      </MotionPressable>
     </View>
   );
 }
@@ -212,22 +219,24 @@ export function CalendarTextTitleBar({
 }) {
   return (
     <View style={[s.bar, transparent && s.transparentBar]}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.textAction}
         onPress={onLeft}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={leftText}
       >
         <Text style={s.cancelText}>{leftText}</Text>
-      </TouchableOpacity>
+      </MotionPressable>
       <Text style={s.textBarTitle} numberOfLines={1}>{title}</Text>
-      <TouchableOpacity
+      <MotionPressable
         testID={rightTestID}
         style={[s.textAction, s.saveAction]}
         onPress={onRight}
         disabled={!onRight || !rightEnabled}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={rightText}
         accessibilityState={{ disabled: !onRight || !rightEnabled }}
@@ -235,7 +244,7 @@ export function CalendarTextTitleBar({
         {rightText ? (
           <Text style={[s.saveText, !rightEnabled && s.saveTextDisabled]}>{rightText}</Text>
         ) : null}
-      </TouchableOpacity>
+      </MotionPressable>
     </View>
   );
 }
@@ -279,6 +288,8 @@ const s = StyleSheet.create({
     fontSize: COMMON_TEXT_TITLE_BAR_GEOMETRY.titleSize,
     lineHeight: 25,
     fontWeight: '400',
+    fontFamily: Appearance.titleFontFamily,
+    letterSpacing: Appearance.titleLetterSpacing,
     color: C.text,
   },
   bar: {
@@ -291,12 +302,16 @@ const s = StyleSheet.create({
   transparentBar: { backgroundColor: 'transparent' },
   iconAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   detailIconAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  iconPressed: { backgroundColor: C.pressed, borderRadius: Appearance.iconRadius },
+  textPressed: { backgroundColor: C.pressed },
   detailTitle: {
     position: 'absolute',
     textAlign: 'center',
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '600',
+    fontFamily: Appearance.titleFontFamily,
+    letterSpacing: Appearance.titleLetterSpacing,
     color: C.text,
   },
   detailTitleLeading: { textAlign: 'left', fontWeight: '400' },
@@ -312,6 +327,8 @@ const s = StyleSheet.create({
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '600',
+    fontFamily: Appearance.titleFontFamily,
+    letterSpacing: Appearance.titleLetterSpacing,
     color: C.text,
   },
   saveAction: { alignItems: 'flex-end' },

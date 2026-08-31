@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 import { getNativeBottomBarHeight } from '../navigation/nativeBottomBarGeometry';
 
-const tokens = getFeishuTokens('light');
+const tokens = getUiTokens('light');
 
 export function EventUndoBanner() {
   const { lastDeleted, undoDelete } = useEvents();

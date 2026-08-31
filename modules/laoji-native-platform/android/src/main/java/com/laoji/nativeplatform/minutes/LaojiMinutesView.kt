@@ -9,7 +9,6 @@ import android.widget.FrameLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.media.MinutesPlaybackRegistry
 import com.laoji.nativeplatform.media.MinutesPlaybackState
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import com.laoji.nativeplatform.projection.ProjectionEnvelope
 import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
@@ -30,7 +29,6 @@ class LaojiMinutesView(
   private val onTabPress by EventDispatcher<Map<String, Any?>>()
   private val store = MinutesStateStore()
   private val content = FrameLayout(context)
-  @FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
   private val bottomBar = LaojiNativeBottomBarView(context, appContext).apply {
     visibility = View.GONE
     setBridgeEventsEnabled(false)
@@ -79,7 +77,29 @@ class LaojiMinutesView(
 
   fun commitProps() {
     val parsed = MinutesSnapshotParser.parse(snapshot, surfaceName)
-    render(store.dispatch(MinutesStateMutation.Replace(parsed)))
+    val previous = store.state
+    val next = store.dispatch(MinutesStateMutation.Replace(parsed))
+    // Projection-only commits and rejected stale snapshots do not change the
+    // visible surface. Rendering them used to make a tab selection traverse
+    // all five mounted detail pages twice: once for the native selection and
+    // again when React returned the same body with a projection envelope.
+    // Keep the new envelope in the store for action fencing, but do no view
+    // work unless the selected surface's actual render state changed.
+    if (
+      surfaceView != null
+      && renderedSurface == next.surface
+      && sameVisibleSurface(previous, next)
+    ) return
+    render(next)
+  }
+
+  private fun sameVisibleSurface(previous: MinutesUiState, next: MinutesUiState): Boolean {
+    if (previous.surface != next.surface) return false
+    return when (next.surface) {
+      MinutesSurface.LIST -> previous.list == next.list
+      MinutesSurface.RECORDING -> previous.recording == next.recording
+      MinutesSurface.DETAIL -> previous.detail == next.detail
+    }
   }
 
   private fun render(state: MinutesUiState) {

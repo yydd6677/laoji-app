@@ -1,12 +1,12 @@
 package com.laoji.nativeplatform.ui
 
-// UI-TOKENS-001: Keep the Android presentation layer on Feishu's semantic UD colors.
+// UI-TOKENS-001: Android surfaces consume LaoJi semantic theme roles. Stable
+// hit targets and layout dimensions stay independent from skin expression.
 
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import com.laoji.nativeplatform.NativeThemePreference
@@ -58,27 +58,65 @@ object NativeUiTokens {
   fun palette(context: Context): NativeUiPalette {
     val isDark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
       Configuration.UI_MODE_NIGHT_YES
-    val isVivid = NativeThemePreference.isVivid(context)
-    if (isVivid && !isDark) {
+    val theme = NativeThemePreference.read(context)
+    if (theme == "paper") {
       return NativeUiPalette(
-        body = Color.rgb(255, 240, 246),
-        surface = Color.rgb(253, 234, 245),
-        surfaceOverlay = Color.rgb(240, 232, 255),
-        textPrimary = Color.rgb(28, 27, 51),
-        textSecondary = Color.rgb(148, 144, 181),
-        textTertiary = Color.rgb(184, 180, 212),
-        textDisabled = Color.rgb(210, 206, 227),
-        divider = Color.argb(46, 150, 100, 200),
-        primary = Color.rgb(123, 92, 184),
-        primaryPressed = Color.rgb(46, 24, 128),
-        primarySoft = Color.rgb(237, 232, 255),
+        body = Color.rgb(243, 240, 231),
+        surface = Color.rgb(252, 251, 246),
+        surfaceOverlay = Color.rgb(239, 238, 230),
+        textPrimary = Color.rgb(37, 38, 33),
+        textSecondary = Color.rgb(98, 99, 93),
+        textTertiary = Color.rgb(133, 134, 126),
+        textDisabled = Color.rgb(180, 181, 173),
+        divider = Color.argb(33, 37, 38, 33),
+        primary = Color.rgb(99, 120, 36),
+        primaryPressed = Color.rgb(77, 96, 24),
+        primarySoft = Color.rgb(233, 237, 217),
+        danger = Color.rgb(201, 80, 69),
+        mask = Color.argb(97, 34, 35, 30),
+        backgroundTips = Color.rgb(37, 38, 33),
+        onTips = Color.rgb(252, 251, 246),
+      )
+    }
+    if (theme == "midnight") {
+      return NativeUiPalette(
+        body = Color.rgb(16, 20, 27),
+        surface = Color.rgb(27, 34, 45),
+        surfaceOverlay = Color.rgb(32, 40, 52),
+        textPrimary = Color.rgb(238, 243, 250),
+        textSecondary = Color.rgb(176, 186, 200),
+        textTertiary = Color.rgb(127, 138, 154),
+        textDisabled = Color.rgb(86, 97, 112),
+        divider = Color.argb(36, 222, 231, 242),
+        primary = Color.rgb(116, 167, 255),
+        primaryPressed = Color.rgb(90, 141, 231),
+        primarySoft = Color.rgb(30, 50, 80),
+        danger = Color.rgb(255, 119, 112),
+        mask = Color.argb(153, 0, 0, 0),
+        backgroundTips = Color.rgb(238, 243, 250),
+        onTips = Color.rgb(16, 20, 27),
+      )
+    }
+    if (theme == "vivid" && !isDark) {
+      return NativeUiPalette(
+        body = Color.rgb(248, 246, 252),
+        surface = Color.WHITE,
+        surfaceOverlay = Color.rgb(242, 238, 252),
+        textPrimary = Color.rgb(33, 29, 45),
+        textSecondary = Color.rgb(110, 104, 123),
+        textTertiary = Color.rgb(153, 146, 167),
+        textDisabled = Color.rgb(201, 196, 209),
+        divider = Color.argb(33, 71, 55, 92),
+        primary = Color.rgb(114, 85, 201),
+        primaryPressed = Color.rgb(91, 64, 174),
+        primarySoft = Color.rgb(238, 233, 252),
         danger = Color.rgb(255, 77, 79),
-        mask = Color.argb(87, 46, 24, 128),
-        backgroundTips = Color.rgb(46, 24, 128),
+        mask = Color.argb(92, 36, 25, 54),
+        backgroundTips = Color.rgb(33, 29, 45),
         onTips = Color.WHITE,
       )
     }
-    if (isVivid && isDark) {
+    if (theme == "vivid" && isDark) {
       return NativeUiPalette(
         body = Color.rgb(23, 19, 30),
         surface = Color.rgb(33, 28, 43),
@@ -99,42 +137,42 @@ object NativeUiTokens {
     }
     return if (isDark) {
       NativeUiPalette(
-        body = Color.rgb(16, 16, 16),
-        surface = Color.rgb(31, 31, 31),
-        surfaceOverlay = Color.rgb(55, 55, 55),
-        textPrimary = Color.rgb(240, 240, 240),
-        textSecondary = Color.rgb(193, 193, 193),
-        textTertiary = Color.rgb(143, 149, 158),
-        textDisabled = Color.rgb(95, 95, 95),
-        divider = Color.argb(38, 240, 240, 240),
-        // Feishu night resources: primary_fill_default -> B400,
+        body = Color.rgb(16, 20, 27),
+        surface = Color.rgb(27, 34, 45),
+        surfaceOverlay = Color.rgb(32, 40, 52),
+        textPrimary = Color.rgb(238, 243, 250),
+        textSecondary = Color.rgb(176, 186, 200),
+        textTertiary = Color.rgb(127, 138, 154),
+        textDisabled = Color.rgb(86, 97, 112),
+        divider = Color.argb(36, 222, 231, 242),
+        // [SOURCE] Feishu night resources: primary_fill_default -> B400,
         // primary_fill_pressed -> B500, and B50 for a quiet selected fill.
-        primary = Color.rgb(51, 112, 235),
-        primaryPressed = Color.rgb(76, 136, 255),
-        primarySoft = Color.rgb(21, 35, 64),
-        danger = Color.rgb(240, 91, 86),
+        primary = Color.rgb(116, 167, 255),
+        primaryPressed = Color.rgb(90, 141, 231),
+        primarySoft = Color.rgb(30, 50, 80),
+        danger = Color.rgb(255, 119, 112),
         mask = Color.argb(150, 0, 0, 0),
-        backgroundTips = Color.rgb(80, 80, 80),
-        onTips = Color.WHITE,
+        backgroundTips = Color.rgb(238, 243, 250),
+        onTips = Color.rgb(16, 20, 27),
       )
     } else {
       NativeUiPalette(
-        body = Color.rgb(248, 249, 250),
+        body = Color.rgb(243, 246, 250),
         surface = Color.WHITE,
-        surfaceOverlay = Color.rgb(242, 243, 245),
-        textPrimary = Color.rgb(31, 35, 41),
-        textSecondary = Color.rgb(100, 106, 115),
-        textTertiary = Color.rgb(143, 149, 158),
-        textDisabled = Color.rgb(187, 191, 196),
-        divider = Color.argb(38, 31, 35, 41),
-        // Feishu light resources: primary_fill_default -> B600 and
+        surfaceOverlay = Color.rgb(238, 243, 250),
+        textPrimary = Color.rgb(23, 32, 51),
+        textSecondary = Color.rgb(91, 101, 119),
+        textTertiary = Color.rgb(135, 146, 165),
+        textDisabled = Color.rgb(180, 188, 200),
+        divider = Color.argb(33, 23, 32, 51),
+        // [SOURCE] Feishu light resources: primary_fill_default -> B600 and
         // primary_fill_pressed -> B700. B500 is the hover token, not default.
-        primary = Color.rgb(20, 86, 240),
-        primaryPressed = Color.rgb(4, 66, 210),
-        primarySoft = Color.rgb(240, 244, 255),
+        primary = Color.rgb(39, 104, 232),
+        primaryPressed = Color.rgb(27, 85, 200),
+        primarySoft = Color.rgb(234, 241, 255),
         danger = Color.rgb(226, 46, 40),
         mask = Color.argb(128, 0, 0, 0),
-        backgroundTips = Color.rgb(31, 35, 41),
+        backgroundTips = Color.rgb(23, 32, 51),
         onTips = Color.WHITE,
       )
     }
@@ -144,7 +182,10 @@ object NativeUiTokens {
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       this.color = color
       textSize = sp(context, sizeSp)
-      typeface = if (bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
+      typeface = LaojiThemeTypography.typeface(
+        context,
+        if (bold) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+      )
     }
 
   fun roundedBackground(context: Context, color: Int, radiusDp: Float, stroke: Int? = null): GradientDrawable =

@@ -19,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -322,7 +323,7 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       gravity = Gravity.CENTER
       includeFontPadding = false
       textSize = CalendarProductVisualContract.dateNumberSizeSp(16f)
-      setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+      typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     var epochDay: Int = 0

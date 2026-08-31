@@ -7,19 +7,12 @@ import {
   assertScopeKey,
   transitionProcessingStage,
 } from '../../domain/meeting';
-import type { MeetingNoteAggregate, MeetingNoteRepository } from '../../data/repositories';
-
-export interface ProcessingStageSyncOperation {
-  operationId: string;
-  operationType: string;
-  payload: unknown;
-}
+import type { MeetingNoteAggregate, MeetingNoteRepository } from "../../data/repositories/meetingNoteRepository";
 
 export interface UpdateProcessingStageInput {
   meetingId: string;
   scopeKey: ScopeKey;
   transition: ProcessingStageTransition;
-  syncOperation?: ProcessingStageSyncOperation | null;
 }
 
 export interface UpdateProcessingStageDependencies {
@@ -52,22 +45,6 @@ export class UpdateProcessingStageUseCase {
       if (!Number.isSafeInteger(clockMs) || clockMs < 0) throw new Error('meeting clock is invalid');
       const updatedAtMs = Math.max(clockMs, meeting.updatedAtMs, current.updatedAtMs);
       updatedStage = transitionProcessingStage(current, input.transition, updatedAtMs);
-      if (input.scopeKey !== 'guest' && input.syncOperation) {
-        const operationId = input.syncOperation.operationId.trim();
-        const operationType = input.syncOperation.operationType.trim();
-        if (!operationId || !operationType) throw new Error('processing sync operation is invalid');
-        const inserted = await transaction.insertOutbox({
-          operationId,
-          scopeKey: input.scopeKey,
-          aggregateType: 'meeting_note',
-          aggregateId: meetingId,
-          operationType,
-          baseRevision: meeting.remoteRevision,
-          payloadJson: JSON.stringify(input.syncOperation.payload),
-          createdAtMs: updatedAtMs,
-        });
-        if (!inserted) return;
-      }
       await transaction.upsertStage(updatedStage, input.scopeKey);
 
       const patch: Parameters<typeof transaction.updateMeeting>[2] = { updatedAtMs };

@@ -1,8 +1,10 @@
 import React from 'react';
-import { Animated, Easing, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appearance, Colors as C } from '../theme/colors';
+import { Appearance, Colors as C, Motion } from '../theme/colors';
+import { MotionPressable } from './MotionPressable';
 
 const BAR_H = 65;
 const ACTION_D = 48;
@@ -17,8 +19,8 @@ const TAB_ICON_TOP = 9;
 const TAB_LABEL_GAP = 5;
 const TAB_LABEL_SIZE = 12;
 const TAB_LABEL_LINE_HEIGHT = 17;
-const TAB_PRESS_SCALE = 0.8;
-const TAB_PRESS_HALF_DURATION = 125;
+const TAB_PRESS_SCALE = Appearance.pressScale;
+const TAB_PRESS_HALF_DURATION = Motion.pressIn;
 
 export const BOTTOM_TAB_BAR_GEOMETRY = Object.freeze({
   barHeight: BAR_H,
@@ -80,7 +82,6 @@ export function BottomTabBar({
       style={[
         s.outer,
         Appearance.bottomBarRadius > 0 && {
-          marginHorizontal: Appearance.bottomBarInset,
           borderTopLeftRadius: Appearance.bottomBarRadius,
           borderTopRightRadius: Appearance.bottomBarRadius,
           borderLeftWidth: Appearance.borderWidth,
@@ -109,16 +110,32 @@ export function BottomTabBar({
       </View>
 
       {onMic ? (
-        <TouchableOpacity
-          style={[s.action, { backgroundColor: action.color }]}
+        <MotionPressable
+          style={[
+            s.action,
+            {
+              backgroundColor: action.color,
+              borderRadius: Appearance.primaryActionRadius,
+              borderColor: C.border,
+              borderWidth: Appearance.surfaceMode === 'layered' ? 1 : 0,
+            },
+          ]}
+          pressedStyle={{ backgroundColor: tone === 'recording' ? C.red : C.primaryPressed }}
           onPress={onMic}
-          activeOpacity={0.78}
           testID={`bottom-microphone-${tone}`}
           accessibilityRole="button"
           accessibilityLabel={micLabel ?? action.label}
         >
+          {tone !== 'recording' && (Appearance.surfaceMode === 'soft' || Appearance.surfaceMode === 'layered') ? (
+            <LinearGradient
+              colors={[C.gradFrom, C.gradTo]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[StyleSheet.absoluteFill, { borderRadius: Appearance.primaryActionRadius }]}
+            />
+          ) : null}
           <Ionicons name={micIcon ?? action.icon} size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+        </MotionPressable>
       ) : null}
     </View>
   );
@@ -137,38 +154,22 @@ function TabButton({
   onPress: () => void;
   testID: string;
 }) {
-  const iconScale = React.useRef(new Animated.Value(1)).current;
-
-  const playSelectionFeedback = React.useCallback(() => {
-    iconScale.stopAnimation(() => {
-      iconScale.setValue(1);
-      Animated.timing(iconScale, {
-        toValue: TAB_PRESS_SCALE,
-        duration: TAB_PRESS_HALF_DURATION,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (!finished) return;
-        Animated.timing(iconScale, {
-          toValue: 1,
-          duration: TAB_PRESS_HALF_DURATION,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }).start();
-      });
-    });
-  }, [iconScale]);
-
-  const handlePress = React.useCallback(() => {
-    playSelectionFeedback();
-    onPress();
-  }, [onPress, playSelectionFeedback]);
+  const selection = React.useRef(new Animated.Value(selected ? 1 : 0)).current;
+  React.useEffect(() => {
+    selection.stopAnimation();
+    Animated.timing(selection, {
+      toValue: selected ? 1 : 0,
+      duration: Math.round(Motion.select * Appearance.motionScale),
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [selected, selection]);
 
   return (
-    <TouchableOpacity
+    <MotionPressable
       style={s.tab}
-      onPress={handlePress}
-      activeOpacity={1}
+      onPress={onPress}
+      feedback="quiet"
       testID={testID}
       accessibilityRole="tab"
       accessibilityLabel={label}
@@ -176,12 +177,24 @@ function TabButton({
     >
       <Animated.View
         testID={`${testID}-icon-box`}
-        style={[s.iconBox, { transform: [{ scale: iconScale }] }]}
+        style={[
+          s.iconBox,
+          {
+            borderRadius: Appearance.iconRadius,
+            backgroundColor: C.primaryLight,
+            opacity: selection.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }),
+            transform: [{
+              scaleX: selection.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] }),
+            }],
+          },
+        ]}
       >
-        <Ionicons name={icon} size={TAB_ICON_SIZE} color={selected ? C.primary : C.faint} />
       </Animated.View>
+      <View style={s.iconGlyph} pointerEvents="none">
+        <Ionicons name={icon} size={TAB_ICON_SIZE} color={selected ? C.primary : C.faint} />
+      </View>
       <Text testID={`${testID}-label`} style={[s.label, selected && s.labelSelected]}>{label}</Text>
-    </TouchableOpacity>
+    </MotionPressable>
   );
 }
 
@@ -204,6 +217,14 @@ const s = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   iconBox: {
+    position: 'absolute',
+    width: 44,
+    height: 30,
+    marginTop: TAB_ICON_TOP,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  iconGlyph: {
     width: TAB_ICON_CONTAINER_W,
     height: TAB_ICON_CONTAINER_H,
     marginTop: TAB_ICON_TOP,
@@ -219,6 +240,7 @@ const s = StyleSheet.create({
   },
   labelSelected: {
     color: C.primary,
+    fontWeight: '600',
   },
   action: {
     position: 'absolute',
@@ -226,7 +248,6 @@ const s = StyleSheet.create({
     top: -(ACTION_D + ACTION_BOTTOM_GAP),
     width: ACTION_D,
     height: ACTION_D,
-    borderRadius: ACTION_R,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000000',
@@ -234,5 +255,6 @@ const s = StyleSheet.create({
     shadowOpacity: Appearance.shadowOpacity,
     shadowRadius: 8,
     elevation: 6,
+    overflow: 'hidden',
   },
 });

@@ -1,5 +1,0 @@
-command: PYTHONPATH=. ../../.venv-vnext/bin/pytest -q tests/test_device_v1_contract_static.py tests/test_vnext_task_store.py tests/test_device_v2_identity.py tests/test_vnext_purge_store.py tests/test_device_v2_api.py
-scope: isolated worktree /home/yydd/LaoJi-worktrees/vnext-implementation/services/laoji-api
-result: 19 passed in 0.92s
-verified: challenge replay, P-256 bearer/revocation fence, single-active-epoch fence, canonical device owner migration, task replay/cancel, binding sequence, purge-only wire auth, exact binding/epoch task deletion, token revoke, redacted status, no public worker-attempt route
-not_verified: production deployment, public traffic, emulator, physical device, process restart during native HTTP purge

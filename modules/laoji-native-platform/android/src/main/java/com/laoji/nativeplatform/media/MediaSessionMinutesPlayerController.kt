@@ -283,7 +283,7 @@ internal class MediaSessionMinutesPlayerController(context: Context) :
           publish(force = true)
         } else {
           failureCode = "media_scope_rejected"
-          failureMessage = "播放器账号状态无法确认，请重新登录"
+          failureMessage = "播放器无法确认当前设备状态，请重新打开老记"
           publish(force = true)
         }
       },

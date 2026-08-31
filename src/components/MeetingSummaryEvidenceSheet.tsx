@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSummaryCitation } from '../domain/meeting';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 const MOTION_MS = 240;
 
@@ -46,7 +46,7 @@ export function MeetingSummaryEvidenceSheet({
   onClose: () => void;
   onOpenCitation: (citation: MeetingSummaryCitation) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;

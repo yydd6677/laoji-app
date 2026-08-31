@@ -13,18 +13,15 @@ import {
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect, type RouteProp } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList, TranscriptLine } from '../types';
 import { MeetingDeletionCleanupError, useMeetings } from '../store/MeetingsStore';
-import { fetchMeetingTranscriptSnapshot, fetchMeetingSummaryDetail, uploadMeetingAudio } from '../services/api';
 import {
-  canAutomaticallyRetryPendingMeetingAudioUpload,
   getPendingMeetingAudioUpload,
   PendingMeetingAudioUpload,
-  retryPendingMeetingAudioUpload,
   subscribePendingMeetingAudioUploadChanged,
 } from '../services/meetingRecording';
 import {
@@ -32,8 +29,6 @@ import {
   meetingDateForSummary,
   meetingSummaryProgressLabel,
   meetingSummaryToText,
-  normalizeRemoteMeetingSummaryResult,
-  normalizeMeetingSummaryResult,
   shouldDiscardPendingMeetingSummaryTask,
 } from '../services/meetingSummary';
 import {
@@ -50,7 +45,6 @@ import {
   type MeetingShareSelection,
 } from '../services/meetingShare';
 import { useAppDialog } from '../components/AppDialog';
-import { useAuth } from '../store/AuthStore';
 import { readableErrorMessage } from '../services/errors';
 import { resolveMeetingDeletionPresentation } from '../services/meetingDeletionPresentation';
 import { MinutesDetailTitleBar } from '../components/MinutesDetailTitleBar';
@@ -58,7 +52,6 @@ import { AppActionSheet } from '../components/AppActionSheet';
 import { MeetingAudioPlayerDock } from '../components/MeetingAudioPlayerDock';
 import { MeetingSummaryContent } from '../components/MeetingSummaryContent';
 import { MeetingShareSheet } from '../components/MeetingShareSheet';
-import { MeetingTemplateSheet } from '../components/MeetingTemplateSheet';
 import { MeetingSummaryAttachmentSheet } from '../components/MeetingSummaryAttachmentSheet';
 import { MeetingSummaryCarryForwardSheet } from '../components/MeetingSummaryCarryForwardSheet';
 import {
@@ -67,21 +60,16 @@ import {
 } from '../components/MeetingQuestionSheet';
 import { openMeetingsTab } from '../navigation/tabTargets';
 import {
-  meetingRemoteIdentity,
-  requireMeetingRemoteIdentity,
   transcriptDurationSec,
 } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
-import { simplifyTranscriptLines } from '../utils/simplifiedChinese';
-import { evaluateTranscriptLineCandidate } from '../services/transcriptCompleteness';
-import { meetingSummaryDocumentForLegacy } from '../services/meetingSummaryDocument';
+import { normalizeMeetingSummaryDocument } from '../services/meetingSummaryDocument';
 import {
   DEFAULT_MEETING_TEMPLATE,
   meetingTemplateById,
   type MeetingSummaryAttachmentAuthorization,
   type MeetingSummaryCarryForwardAuthorization,
-  type MeetingTemplate,
   type ScopeKey,
 } from '../domain/meeting';
 import {
@@ -100,8 +88,7 @@ import {
 } from '../services/meetingSummaryAttachments';
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
 import { loadMeetingAttachments } from '../services/meetingAttachments';
-import type { MeetingAttachmentRecord } from '../data/repositories';
-import { getFeatureFlags } from '../config/featureFlags';
+import type { MeetingAttachmentRecord } from "../data/repositories/meetingNoteRepository";
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Transcription'>;
@@ -151,29 +138,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     deleteMeeting,
     updateMeetingTitle,
     getCachedTranscript,
-    saveCachedTranscript,
     getCachedSummary,
     saveCachedSummary,
-    refreshMeetings,
     reconcileAudioUploads,
   } = useMeetings();
-  const { accessToken, isGuest, session } = useAuth();
   const { refresh: refreshRecycleCapability } = useMeetingRecycleCapability();
   const { showDialog } = useAppDialog();
   const m = meetings.find(x => x.id === route.params.meetingId);
-  const remoteMeetingId = m ? meetingRemoteIdentity(m) : null;
   const [titleEdit, setTitleEdit] = useState(m?.title ?? '');
   const [transcriptItems, setTranscriptItems] = useState<TranscriptLine[]>([]);
   const [summary, setSummary] = useState('');
-  const [summaryTemplate, setSummaryTemplate] = useState<MeetingTemplate>(() => {
-    const cached = m ? meetingSummaryDocumentForLegacy(m.id, getCachedSummary(m.id) ?? {}) : null;
-    return meetingTemplateById(cached?.templateId, cached?.templateRevision) ?? DEFAULT_MEETING_TEMPLATE;
-  });
-  const [templateSheetVisible, setTemplateSheetVisible] = useState(false);
+  const summaryTemplate = DEFAULT_MEETING_TEMPLATE;
   const [summaryAttachmentRequest, setSummaryAttachmentRequest] = useState<{
     meetingId: string;
     scopeKey: ScopeKey;
-    template: MeetingTemplate;
     forceRegenerate: boolean;
     attachments: readonly MeetingAttachmentRecord[];
     imageSelectionEnabled: boolean;
@@ -181,7 +159,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [summaryCarryForwardRequest, setSummaryCarryForwardRequest] = useState<{
     meetingId: string;
     scopeKey: ScopeKey;
-    template: MeetingTemplate;
     forceRegenerate: boolean;
     memory: MeetingSeriesMemoryProjection;
     attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null;
@@ -196,7 +173,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const [transcriptError, setTranscriptError] = useState('');
   const [summaryError, setSummaryError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [summaryProgress, setSummaryProgress] = useState('正在提交总结任务');
+  const [summaryProgress, setSummaryProgress] = useState('正在整理会议记录');
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleSaving, setTitleSaving] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -212,7 +189,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const summaryStorageScopeRef = useRef<string | null>(null);
   const summaryInFlightRef = useRef<Promise<void> | null>(null);
   const audioUploadUiPromiseRef = useRef<Promise<void> | null>(null);
-  const automaticAudioUploadKeyRef = useRef('');
   const autoResumeTaskRef = useRef('');
   const summaryCarryLookupGenerationRef = useRef(0);
   const activeMeetingIdRef = useRef(m?.id ?? null);
@@ -224,14 +200,9 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const tabDirectionRef = useRef<1 | -1>(1);
   const tabPageProgress = useRef(new Animated.Value(1)).current;
   const tabIndicatorPosition = useRef(new Animated.Value(activeTab === 'summary' ? 1 : 0)).current;
-  const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
-  const meetingScopeKey: ScopeKey | null = isGuest
-    ? 'guest'
-    : session
-      ? `user:${session.user.id}`
-      : null;
-  const meetingQuestionsEnabled = getFeatureFlags().meetingQuestionsV1
-    || getFeatureFlags().meetingQuestionsQ2Candidate;
+  const recordingStorageScope = 'guest';
+  const meetingScopeKey: ScopeKey = 'guest';
+  const meetingQuestionsEnabled = true;
   activeMeetingIdRef.current = m?.id ?? null;
   activeMeetingScopeRef.current = meetingScopeKey;
   const focusTitleInput = useCallback(() => {
@@ -277,76 +248,40 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     pending: PendingMeetingAudioUpload,
     notifyUser: boolean,
   ): Promise<void> => {
-    if (!accessToken) return Promise.resolve();
     if (audioUploadUiPromiseRef.current) return audioUploadUiPromiseRef.current;
     setRetryingAudioUpload(true);
     setPendingAudioError('');
     let operation: Promise<void> | null = null;
     operation = (async () => {
       try {
-        if (getFeatureFlags().localMeetingDbAccountUploadWriteV1) {
-          await reconcileAudioUploads();
-          const latest = await getPendingMeetingAudioUpload(
-            recordingStorageScope,
-            pending.meetingId,
-            pending.recordingAssetId,
-          );
-          if (mountedRef.current) {
-            setPendingAudioUpload(latest);
-            setPendingAudioError(latest?.failureMessage
-              ? readableErrorMessage(latest.failureMessage, '自动同步未完成，录音仍保存在本机')
-              : '');
-          }
-          if (notifyUser && mountedRef.current) {
-            showDialog(latest
-              ? { title: '正在后台同步', message: '录音将在后台继续上传。', tone: 'info' }
-              : { title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
-          }
-          return;
-        }
-        const uploaded = await retryPendingMeetingAudioUpload(
+        await reconcileAudioUploads();
+        const latest = await getPendingMeetingAudioUpload(
           recordingStorageScope,
+          pending.meetingId,
           pending.recordingAssetId,
-          accessToken,
-          (item, token) => uploadMeetingAudio(
-            item.remoteMeetingId ?? item.meetingId,
-            item.audioUri,
-            token,
-            { fileName: item.fileName, mimeType: item.mimeType },
-          ),
-          { automatic: !notifyUser },
         );
-        const stillPending = uploaded
-          ? null
-          : await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId);
-        if (mountedRef.current) {
-          setPendingAudioUpload(stillPending);
-          setPendingAudioError(stillPending?.failureMessage
-            ? readableErrorMessage(stillPending.failureMessage, '自动同步未完成，录音仍保存在本机')
-            : '');
-        }
-        if (uploaded) await reconcileAudioUploads(uploaded);
-        if (uploaded && notifyUser && mountedRef.current) {
-          showDialog({ title: '上传完成', message: '本机录音已同步到会议服务。', tone: 'success' });
+        if (!mountedRef.current) return;
+        setPendingAudioUpload(latest);
+        setPendingAudioError(latest?.failureMessage
+          ? readableErrorMessage(latest.failureMessage, '自动同步未完成，录音仍保存在本机')
+          : '');
+        if (notifyUser) {
+          showDialog(latest
+            ? { title: '录音将在后台上传', tone: 'info' }
+            : { title: '上传完成', tone: 'success' });
         }
       } catch {
-        try {
-          const stillPending = await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId);
-          if (mountedRef.current) {
-            setPendingAudioUpload(stillPending);
-            setPendingAudioError(readableErrorMessage(
-              stillPending?.failureMessage,
-              '自动同步未完成，录音仍保存在本机',
-            ));
-          }
-        } catch {
-          if (mountedRef.current) {
-            setPendingAudioUpload(null);
-            setPendingAudioError('无法读取录音待上传状态，请重试。');
-          }
-        }
-        if (notifyUser && mountedRef.current) {
-          const latest = await getPendingMeetingAudioUpload(recordingStorageScope, pending.meetingId).catch(() => null);
+        const latest = await getPendingMeetingAudioUpload(
+          recordingStorageScope,
+          pending.meetingId,
+        ).catch(() => null);
+        if (!mountedRef.current) return;
+        setPendingAudioUpload(latest);
+        setPendingAudioError(readableErrorMessage(
+          latest?.failureMessage,
+          '自动同步未完成，录音仍保存在本机',
+        ));
+        if (notifyUser) {
           showDialog({
             title: latest?.uploadState === 'blocked' ? '录音上传受阻' : '上传失败',
             message: readableErrorMessage(
@@ -363,7 +298,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     })();
     audioUploadUiPromiseRef.current = operation;
     return operation;
-  }, [accessToken, reconcileAudioUploads, recordingStorageScope, showDialog]);
+  }, [reconcileAudioUploads, recordingStorageScope, showDialog]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -393,116 +328,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       setSummaryVisualPhase('idle');
       return;
     }
-    let alive = true;
     const cachedTranscript = getCachedTranscript(m.id);
-    const cachedSummaryValue = getCachedSummary(m.id);
-    const cachedSummary = meetingSummaryToText(cachedSummaryValue);
-    const cachedDocument = cachedSummaryValue
-      ? meetingSummaryDocumentForLegacy(m.id, cachedSummaryValue)
-      : null;
+    const cachedSummary = meetingSummaryToText(getCachedSummary(m.id));
     setTranscriptItems(cachedTranscript);
     setSummary(cachedSummary);
-    setSummaryTemplate(
-      meetingTemplateById(cachedDocument?.templateId, cachedDocument?.templateRevision)
-        ?? DEFAULT_MEETING_TEMPLATE,
-    );
-    setTemplateSheetVisible(false);
     setTranscriptError('');
     setSummaryError('');
-    setTranscriptVisualPhase('running');
-    setSummaryVisualPhase('idle');
-
-    setLoadingTranscript(true);
-    if (isGuest || !accessToken) {
-      setTranscriptVisualPhase('ready');
-      setLoadingTranscript(false);
-    } else if (remoteMeetingId) {
-      fetchMeetingTranscriptSnapshot(remoteMeetingId, accessToken)
-        .then(async remote => {
-          if (!alive) return;
-          // New server responses are already canonical OpenCC zh-Hans. Only
-          // legacy endpoints without the script marker use the client cache
-          // fallback; this keeps visible text byte-for-byte equal to cloud.
-          const remoteItems = remote.script === 'zh-Hans'
-            ? remote.items
-            : simplifyTranscriptLines(remote.items);
-          const candidateKind = remote.completeness === 'incomplete' ? 'realtime_draft' : 'final';
-          const decision = evaluateTranscriptLineCandidate(cachedTranscript, remoteItems, {
-            candidateKind,
-            serverCompleteness: remote.completeness,
-          });
-          setTranscriptItems(decision.useCandidate ? remoteItems : cachedTranscript);
-          setTranscriptVisualPhase('ready');
-          await saveCachedTranscript(m.id, remoteItems, {
-            candidateKind,
-            serverCompleteness: remote.completeness,
-          });
-        })
-        .catch(() => {
-          if (alive) {
-            setTranscriptVisualPhase('error');
-            setTranscriptError('转写同步失败，当前显示本机缓存。');
-          }
-        })
-        .finally(() => { if (alive) setLoadingTranscript(false); });
-    } else {
-      setTranscriptVisualPhase(cachedTranscript.length > 0 ? 'ready' : 'idle');
-      setLoadingTranscript(false);
-      setTranscriptError('会议正在同步，当前显示本机缓存。');
-    }
-
-    if (m.hasSummary && !isGuest && accessToken && remoteMeetingId) {
-      setSummaryVisualPhase('running');
-      setLoadingSummary(true);
-      setSummaryProgress('正在同步总结');
-      fetchMeetingSummaryDetail(remoteMeetingId, accessToken)
-        .then(value => {
-          if (!alive) return;
-          const normalized = normalizeRemoteMeetingSummaryResult(
-            m.id,
-            remoteMeetingId,
-            value,
-          );
-          const text = meetingSummaryToText(normalized);
-          setSummaryVisualPhase(text ? 'ready' : 'idle');
-          setSummary(text || cachedSummary);
-          const document = normalized?.structured_document;
-          const template = meetingTemplateById(document?.templateId, document?.templateRevision);
-          if (template) setSummaryTemplate(template);
-          if (normalized && text) {
-            void saveCachedSummary(m.id, normalized).catch(() => {
-              if (alive) setSummaryError('总结已同步，但本机缓存写入失败。');
-            });
-          }
-        })
-        .catch(() => {
-          if (alive) {
-            setSummaryVisualPhase('error');
-            setSummaryError('总结同步失败，可重试或重新生成。');
-          }
-        })
-        .finally(() => { if (alive) setLoadingSummary(false); });
-    } else if (m.hasSummary && !isGuest && accessToken) {
-      setSummaryVisualPhase('error');
-      setSummaryError('会议正在同步，当前显示本机缓存。');
-    }
-    return () => { alive = false; };
-  }, [
-    accessToken,
-    getCachedSummary,
-    getCachedTranscript,
-    isGuest,
-    m?.id,
-    remoteMeetingId,
-    reloadKey,
-    saveCachedSummary,
-    saveCachedTranscript,
-  ]);
-
+    setTranscriptVisualPhase(cachedTranscript.length > 0 ? 'ready' : 'idle');
+    setSummaryVisualPhase(cachedSummary ? 'ready' : 'idle');
+    setLoadingTranscript(false);
+    setLoadingSummary(false);
+  }, [getCachedSummary, getCachedTranscript, m?.id, reloadKey]);
   useEffect(() => {
     let alive = true;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    if (!m || isGuest) {
+    if (!m) {
       setPendingAudioUpload(null);
       setPendingAudioError('');
       return () => { alive = false; };
@@ -514,23 +353,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       setPendingAudioError(pending?.failureMessage
         ? readableErrorMessage(pending.failureMessage, '自动同步未完成，录音仍保存在本机')
         : '');
-      if (pending && accessToken) {
-        const automaticKey = `${recordingStorageScope}:${pending.meetingId}:${pending.attemptCount}:${pending.nextAttemptAt ?? ''}`;
-        if (automaticAudioUploadKeyRef.current !== automaticKey) {
-          automaticAudioUploadKeyRef.current = automaticKey;
-          if (canAutomaticallyRetryPendingMeetingAudioUpload(pending)) {
-            void performPendingAudioUpload(pending, false);
-          } else if (pending.uploadState !== 'blocked' && pending.nextAttemptAt) {
-            const retryAt = Date.parse(pending.nextAttemptAt);
-            if (!Number.isNaN(retryAt)) {
-              retryTimer = setTimeout(
-                () => setReloadKey(value => value + 1),
-                Math.max(0, retryAt - Date.now()),
-              );
-            }
-          }
-        }
-      }
     }).catch(() => {
       if (alive) {
         setPendingAudioUpload(null);
@@ -539,9 +361,8 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     });
     return () => {
       alive = false;
-      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [accessToken, isGuest, m?.id, m?.updatedAt, performPendingAudioUpload, recordingStorageScope, reloadKey]);
+  }, [m?.id, m?.updatedAt, recordingStorageScope, reloadKey]);
 
   useEffect(() => {
     const meetingId = m?.id;
@@ -569,7 +390,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     forceRegenerate?: boolean;
     resumeTask?: PendingMeetingSummaryTask | null;
     transcriptLines?: TranscriptLine[];
-    template?: MeetingTemplate;
     carryForward?: MeetingSummaryCarryForwardAuthorization | null;
     attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null;
   } = {}): Promise<void> {
@@ -588,7 +408,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     const resumedTemplate = options.resumeTask
       ? meetingTemplateById(options.resumeTask.templateId, options.resumeTask.templateRevision)
       : null;
-    const requestedTemplate = options.template ?? resumedTemplate ?? summaryTemplate;
+    const requestedTemplate = resumedTemplate ?? summaryTemplate;
     const hasExplicitCarryForward = Object.prototype.hasOwnProperty.call(options, 'carryForward');
     const requestedCarryForward = options.resumeTask
       ? options.resumeTask.carryForward
@@ -604,13 +424,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       : hasExplicitAttachmentAuthorization
         ? options.attachmentAuthorization ?? null
         : null;
-    const expectedMode = isGuest ? 'guest' : 'authenticated';
+    const expectedMode = 'guest';
     let operation: Promise<void> | null = null;
     operation = (async () => {
       setSummaryVisualPhase('running');
       setLoadingSummary(true);
       setSummaryError('');
-      setSummaryProgress('正在检查上次总结任务');
+      setSummaryProgress('正在整理会议记录');
       const controller = new AbortController();
       summaryAbortRef.current?.abort();
       summaryAbortRef.current = controller;
@@ -642,7 +462,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               scopeKey: meetingScopeKey,
               meetingId: currentMeeting.id,
               authorization: attachmentAuthorization,
-              accessToken,
             }),
           );
           if (!authorizationIsCurrent) {
@@ -681,20 +500,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             attachmentAuthorization,
           );
         }
-        setSummaryProgress(pending ? '正在恢复上次总结任务' : '正在提交总结任务');
+        setSummaryProgress('正在整理会议记录');
         const generated = await generateSummaryForMeeting({
-          meetingId: isGuest
-            ? currentMeeting.id
-            : requireMeetingRemoteIdentity(currentMeeting),
-          localMeetingId: currentMeeting.id,
+          meetingId: currentMeeting.id,
           title: currentMeeting.title,
           meetingDate,
           transcriptLines: lines,
           template: requestedTemplate,
           carryForward,
           attachmentAuthorization,
-          isGuest,
-          accessToken,
           resumeTaskId: pending?.taskId,
           forceRegenerate: Boolean(options.forceRegenerate),
           signal: controller.signal,
@@ -753,7 +567,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         // Publish the terminal visual state after the local mirror settles so
         // the loading slot and final action label change together.
         if (mountedRef.current) setSummaryVisualPhase('ready');
-        if (cacheSaved || !isGuest) {
+        if (cacheSaved) {
           await clearPendingMeetingSummaryTask(recordingStorageScope, currentMeeting.id).catch(() => {});
         }
       } catch (error) {
@@ -763,17 +577,10 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         if (!mountedRef.current) return;
         if ((error as Error)?.name === 'AbortError') {
           setSummaryVisualPhase('background');
-          if (!options.automatic && !silentSummaryAbortRef.current.has(controller)) {
-            showDialog({
-              title: '已停止等待',
-              message: '页面已停止刷新进度；任务会继续在后台生成，再次打开会议即可恢复。',
-              tone: 'info',
-            });
-          }
         } else {
           setSummaryVisualPhase('error');
           const fallback = options.automatic
-            ? '上次会议总结暂时无法恢复，点击重试可继续获取。'
+            ? '上次会议总结暂时无法恢复。'
             : '会议总结暂时无法生成，请稍后重试。';
           const message = readableErrorMessage(error, fallback);
           setSummaryError(message);
@@ -805,7 +612,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   async function continueSummaryAfterAttachmentSelection(input: {
     meetingId: string;
     scopeKey: ScopeKey;
-    template: MeetingTemplate;
     forceRegenerate: boolean;
   }, attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null): Promise<void> {
     const generation = summaryCarryLookupGenerationRef.current + 1;
@@ -816,7 +622,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       if (!memory || (memory.decisions.length === 0 && memory.pendingActions.length === 0)) {
         await runSummaryTask({
           forceRegenerate: input.forceRegenerate,
-          template: input.template,
           carryForward: null,
           attachmentAuthorization,
         });
@@ -847,7 +652,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
               ) {
                 void runSummaryTask({
                   forceRegenerate: input.forceRegenerate,
-                  template: input.template,
                   carryForward: null,
                   attachmentAuthorization,
                 });
@@ -869,7 +673,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }).catch(() => undefined);
   }
 
-  async function prepareSummaryGeneration(template: MeetingTemplate): Promise<void> {
+  async function prepareSummaryGeneration(): Promise<void> {
     if (!m || summaryInFlightRef.current || summaryVisualPhase === 'running') return;
     const currentMeetingId = m.id;
     const currentScopeKey = meetingScopeKey;
@@ -880,15 +684,13 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     setSummaryVisualPhase('running');
     setLoadingSummary(true);
     setSummaryError('');
-    setSummaryProgress('正在准备整理');
-    setSummaryTemplate(template);
+    setSummaryProgress('正在整理会议记录');
     setSummaryAttachmentRequest(null);
     setSummaryCarryForwardRequest(null);
 
     if (!currentScopeKey) {
       await runSummaryTask({
         forceRegenerate,
-        template,
         carryForward: null,
         attachmentAuthorization: null,
       });
@@ -898,7 +700,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     const input = {
       meetingId: currentMeetingId,
       scopeKey: currentScopeKey,
-      template,
       forceRegenerate,
     };
     const generation = summaryCarryLookupGenerationRef.current + 1;
@@ -912,17 +713,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           transcriptItems,
           m.title,
           meetingDateForSummary(m.date, m.createdAt),
-          template,
+          DEFAULT_MEETING_TEMPLATE,
         ),
       },
     }).catch(() => undefined);
     try {
       const [attachments, imageSelectionEnabled] = await Promise.all([
         loadMeetingAttachments(currentScopeKey, currentMeetingId),
-        canUseMeetingSummaryImageAttachments({
-          scopeKey: currentScopeKey,
-          accessToken,
-        }).catch(() => false),
+        canUseMeetingSummaryImageAttachments().catch(() => false),
       ]);
       if (!isActiveSummaryCarryLookup(generation, currentMeetingId, currentScopeKey)) return;
       if (attachments.length > 0) {
@@ -962,7 +760,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     if (lines.length === 0) return;
     let alive = true;
     const meetingDate = meetingDateForSummary(m.date, m.createdAt);
-    const expectedMode = isGuest ? 'guest' : 'authenticated';
+    const expectedMode = 'guest';
     void getPendingMeetingSummaryTask(recordingStorageScope, m.id).then(pending => {
       if (!alive || !pending || autoResumeTaskRef.current === pending.taskId) return;
       const pendingTemplate = meetingTemplateById(pending.templateId, pending.templateRevision);
@@ -984,23 +782,20 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         void clearPendingMeetingSummaryTask(recordingStorageScope, m.id).catch(() => {});
         return;
       }
-      setSummaryTemplate(pendingTemplate);
       autoResumeTaskRef.current = pending.taskId;
       void runSummaryTask({
         automatic: true,
         resumeTask: pending,
         transcriptLines: lines,
-        template: pendingTemplate,
       });
     }).catch(() => {
       if (alive) {
         setSummaryVisualPhase('error');
-        setSummaryError('无法读取上次总结任务，点击重试可重新生成。');
+        setSummaryError('无法读取上次总结任务。');
       }
     });
     return () => { alive = false; };
   }, [
-    isGuest,
     loadingSummary,
     loadingTranscript,
     m?.createdAt,
@@ -1049,7 +844,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
   const shareSummaryDocument = useMemo(() => {
     if (!m) return null;
     const cached = getCachedSummary(m.id);
-    return cached ? meetingSummaryDocumentForLegacy(m.id, cached) : null;
+    return cached ? normalizeMeetingSummaryDocument(m.id, cached) : null;
   }, [getCachedSummary, m?.id, summary]);
   const shareSummaryText = m
     ? summary || meetingSummaryToText(getCachedSummary(m.id))
@@ -1064,7 +859,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
       ? shareSummaryDocument.sections.some(section => (
         section.kind !== 'action_items'
         && section.stableKey !== 'action_items'
-        && section.kind !== 'decisions'
         && !['decisions', 'commitments'].includes(section.stableKey)
         && Boolean(section.title?.trim() || section.content.trim())
       ))
@@ -1124,7 +918,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   const handleGenerateSummary = () => {
     if (summaryInFlightRef.current || loadingSummary || summaryVisualPhase === 'running') return;
-    setTemplateSheetVisible(true);
+    void prepareSummaryGeneration();
   };
 
   const runMeetingShare = async (selection: MeetingShareSelection) => {
@@ -1139,8 +933,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         actionItems: shareActions,
         attachments: meetingAttachments,
         summaryVersionId: shareSummaryDocument?.remoteVersionId,
-        isGuest,
-        accessToken,
       });
     } catch (error) {
       showDialog({ title: '分享失败', message: meetingShareErrorMessage(error), tone: 'error' });
@@ -1488,7 +1280,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 ) : null}
               </View>
             ) : summary ? (
-              <MeetingSummaryContent markdown={summary} />
+              <MeetingSummaryContent content={summary} document={shareSummaryDocument} />
             ) : (
               <View style={s.emptyState}>
                 <Text style={s.emptyStateText}>{m.hasSummary ? '暂无总结内容' : '该会议暂未生成总结'}</Text>
@@ -1513,34 +1305,14 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
       <MeetingAudioPlayerDock
         meeting={m}
-        accessToken={accessToken}
-        isGuest={isGuest}
         fallbackDurationSec={transcriptDurationSec(transcriptItems)}
       />
 
       <MeetingShareSheet
         visible={shareVisible}
         availability={shareAvailability}
-        linkEnabled={false}
         onClose={() => setShareVisible(false)}
         onShare={selection => { void runMeetingShare(selection); }}
-        onCreateLink={() => undefined}
-        onManageLinks={() => undefined}
-      />
-
-      <MeetingTemplateSheet
-        visible={templateSheetVisible}
-        selectedTemplate={summaryTemplate}
-        // The template sheet is the start of a new operation. A stale page
-        // loading bit must not disable every row; the actual in-flight guard
-        // remains in runSummaryTask and the detail action is disabled while it
-        // is active.
-        busy={false}
-        onClose={() => setTemplateSheetVisible(false)}
-        onSelect={template => {
-          setTemplateSheetVisible(false);
-          void prepareSummaryGeneration(template);
-        }}
       />
 
       <MeetingSummaryAttachmentSheet
@@ -1576,7 +1348,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             scopeKey: request.scopeKey,
             meetingId: request.meetingId,
             attachmentIds,
-            accessToken,
           });
         }}
         onCompleted={authorization => {
@@ -1613,7 +1384,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           ) {
             void runSummaryTask({
               forceRegenerate: request.forceRegenerate,
-              template: request.template,
               carryForward: null,
               attachmentAuthorization: request.attachmentAuthorization,
             });
@@ -1644,7 +1414,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
           ) {
             void runSummaryTask({
               forceRegenerate: request.forceRegenerate,
-              template: request.template,
               carryForward,
               attachmentAuthorization: request.attachmentAuthorization,
             });
@@ -1657,7 +1426,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         meetingTitle={displayMeetingTitle(m.title)}
         meetingId={m.id}
         scopeKey={meetingScopeKey}
-        accessToken={accessToken}
         onClose={() => setQuestionVisible(false)}
         onOpenCitation={openQuestionCitation}
       />

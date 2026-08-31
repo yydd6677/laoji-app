@@ -11,7 +11,6 @@ import {
   type NativeMeetingUploadRegistration,
 } from '../native/nativeTransferCoordinator';
 import type { NativeUploadState } from 'laoji-native-platform';
-import { getFeatureFlags } from '../config/featureFlags';
 import {
   listPendingDeviceUploadOperations,
   listTerminalDeviceUploadAssetIds,
@@ -19,8 +18,6 @@ import {
 import { diagnosticAudit } from './diagnostics';
 
 const PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v3';
-const PREVIOUS_PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v2';
-const LEGACY_PENDING_AUDIO_UPLOADS_KEY = '@laoji:pendingMeetingAudioUploads:v1';
 
 export function normalizeRecordingUri(uri: string | undefined): string | undefined {
   if (!uri) return undefined;
@@ -29,11 +26,8 @@ export function normalizeRecordingUri(uri: string | undefined): string | undefin
 
 export interface FinalizeMeetingRecordingInput {
   meetingId: string;
-  remoteMeetingId?: string | null;
   storageScope: string;
   transcriptLines: TranscriptLine[];
-  isGuest: boolean;
-  accessToken?: string | null;
   audioDurationSec?: number;
   audioBars?: number[];
   getAudioDurationSec?: () => number | undefined;
@@ -45,16 +39,10 @@ export interface FinalizeMeetingRecordingInput {
 export interface FinalizeMeetingRecordingDependencies {
   saveTranscript: (meetingId: string, lines: TranscriptLine[]) => Promise<void>;
   onTranscriptSaveFailure?: (meetingId: string, reason: unknown) => Promise<void>;
-  uploadAudio: (meetingId: string, uri: string, accessToken: string) => Promise<unknown>;
-  enqueuePersistentUpload?: (
-    pending: PendingMeetingAudioUpload,
-    accessToken: string,
-  ) => Promise<NativeMeetingUploadRegistration | null>;
   updateStatus: (
     meetingId: string,
     status: string,
     patch: Partial<Meeting>,
-    options?: { remoteSync?: 'wait' | 'background' },
   ) => Promise<boolean>;
   refreshMeetings: () => Promise<void>;
   reconcileUploads?: (uploaded?: PendingMeetingAudioUpload) => Promise<void>;
@@ -67,8 +55,6 @@ export interface FinalizeMeetingRecordingResult {
   uploadFailed: boolean;
   retryQueued: boolean;
   uploadInBackground: boolean;
-  statusSyncPending: boolean;
-  statusSyncInBackground: boolean;
 }
 
 export interface PendingMeetingAudioUpload {
@@ -103,7 +89,7 @@ export interface PendingMeetingAudioUpload {
   nativeWorkId?: string;
   nativeOperationId?: string;
   nativeGeneration?: number;
-  nativeProtocol?: 'legacy' | 'recording-assets-v2' | 'device-v2-r2';
+  nativeProtocol?: 'device-v2-r2';
 }
 
 export type PendingMeetingAudioUploadPhase =
@@ -141,7 +127,7 @@ export interface PendingMeetingAudioUploadBatchResult {
 
 export interface PendingMeetingAudioRetryOptions {
   automatic?: boolean;
-  /** A v2 capability decision is request-scoped: never duplicate it through the legacy uploader. */
+  /** A v2 capability decision is request-scoped: never duplicate it through another uploader. */
   requireNativeTransport?: boolean;
 }
 
@@ -200,7 +186,7 @@ export async function getPendingMeetingAudioUpload(
   recordingAssetId?: string,
 ): Promise<PendingMeetingAudioUpload | null> {
   // Detail pages and the background coordinator must project the same owner.
-  // Reading the legacy AsyncStorage map directly here resurrected an upload
+  // Reading a second registry directly here resurrected an upload
   // after its canonical Operation had already reached success, leaving an
   // open meeting on "等待上传录音" while transcript events were arriving.
   const records = await listPendingMeetingAudioUploads(storageScope);
@@ -220,10 +206,10 @@ export async function listPendingMeetingAudioUploads(
   storageScope: string,
 ): Promise<PendingMeetingAudioUpload[]> {
   await pendingStorageMutation.catch(() => {});
-  const legacy = Object.values(await readPendingUploads(storageScope));
+  const localRegistry = Object.values(await readPendingUploads(storageScope));
   let canonical: PendingMeetingAudioUpload[] = [];
   let terminalCanonicalAssetIds: ReadonlySet<string> = new Set();
-  if (storageScope === 'guest' && getFeatureFlags().localMeetingDbCanonicalReadV1) {
+  if (storageScope === 'guest') {
     try {
       canonical = (await listPendingDeviceUploadOperations('guest')).map(snapshot => ({
         meetingId: snapshot.asset.meetingId,
@@ -259,8 +245,8 @@ export async function listPendingMeetingAudioUploads(
         nativeProtocol: 'device-v2-r2',
       } satisfies PendingMeetingAudioUpload));
     } catch {
-      // A migration/cold-open failure must not discard the one-time
-      // compatibility registry; the next foreground pass retries SQLite.
+      // A cold-open failure must not discard the local recovery registry; the
+      // next foreground pass retries SQLite.
       canonical = [];
     }
     try {
@@ -274,7 +260,7 @@ export async function listPendingMeetingAudioUploads(
   const canonicalIds = new Set(canonical.map(item => item.recordingAssetId));
   const combined = [
     ...canonical,
-    ...legacy.filter(item => (
+    ...localRegistry.filter(item => (
       !canonicalIds.has(item.recordingAssetId)
       && !terminalCanonicalAssetIds.has(item.recordingAssetId)
     )),
@@ -473,25 +459,7 @@ export async function retryPendingMeetingAudioUpload(
     if (!pending) return null;
     const deletedKey = deletedMeetingAudioKey(storageScope, pending.meetingId);
     if (deletedMeetingAudio.has(deletedKey)) return null;
-    if (
-      pending.nativeWorkId
-      && accessToken === 'device'
-      && pending.nativeProtocol !== 'device-v2-r2'
-    ) {
-      // Guest/device uploads do not use the account WorkManager protocol.
-      // An old handle may point at a removed native worker and can block while
-      // crossing the Expo module boundary, so discard it in memory and go
-      // straight to the device API. The eventual idempotent success clears
-      // the durable registry below.
-      pending = { ...pending };
-      delete pending.nativeWorkId;
-      delete pending.nativeOperationId;
-      delete pending.nativeGeneration;
-      delete pending.nativeProtocol;
-      if (options.requireNativeTransport) {
-        await clearNativeUploadRegistration(storageScope, recordingAssetId);
-      }
-    } else if (pending.nativeWorkId) {
+    if (pending.nativeWorkId) {
       const nativeState = await readNativeUploadStateBounded(pending.nativeWorkId);
       if (nativeState?.state === 'succeeded' && nativeState.result === 'uploaded') {
         const uploaded = derivePendingMeetingAudioUploadInspection(pending, nativeState).pending;
@@ -581,7 +549,7 @@ export async function retryPendingMeetingAudioUploads(
       cursor += 1;
       // Account uploads require a server meeting identity. Device-primary
       // uploads intentionally use the local meeting UUID as their binding and
-      // must not wait for the legacy remote-identity repair path.
+      // must not wait for a separate remote-identity repair path.
       if (!pending[index].remoteMeetingId && accessToken !== 'device') {
         outcomes[index] = 'skipped';
         continue;
@@ -690,19 +658,19 @@ export async function finalizeMeetingRecording(
   }
   const transcriptSaveFailed = transcriptResult.status === 'rejected';
 
-  let uploadFailed = false;
+  const uploadFailed = false;
   let retryQueued = false;
   let uploadInBackground = false;
   let pendingAudio: PendingMeetingAudioUpload | null = null;
   // Guest meetings are local-first, but their generated transcript still
   // needs the device-scoped service.  Keep the source URI on the phone and
-  // queue the same durable upload record used by account meetings; the guest
-  // uploader assigns the local UUID as its temporary service binding.
+  // queue the durable device upload record. The local UUID is its temporary
+  // service binding until the device-scoped binding is registered.
   if (audioUri) {
     pendingAudio = {
       meetingId: input.meetingId,
-      remoteMeetingId: input.isGuest ? undefined : input.remoteMeetingId?.trim() || undefined,
-      recordingAssetId: `legacy-primary:${input.meetingId}`,
+      remoteMeetingId: undefined,
+      recordingAssetId: `captured-primary:${input.meetingId}`,
       role: 'primary',
       origin: 'captured',
       nativeSessionId: input.meetingId,
@@ -720,7 +688,6 @@ export async function finalizeMeetingRecording(
     } catch {
       retryQueued = false;
     }
-    if (!input.isGuest && !input.accessToken) uploadFailed = true;
   }
 
   const meetingPatch: Partial<Meeting> = {
@@ -737,87 +704,16 @@ export async function finalizeMeetingRecording(
     meetingPatch.duration = formatDuration(audioDurationSec);
   }
   if (audioBars?.length) meetingPatch.audioBars = audioBars;
-  const statusSyncInBackground = !input.isGuest;
-  const statusSynced = await dependencies.updateStatus(
+  await dependencies.updateStatus(
     input.meetingId,
     'ended',
     meetingPatch,
-    { remoteSync: statusSyncInBackground ? 'background' : 'wait' },
   );
   if (transcriptResult.status === 'rejected') {
     await dependencies.onTranscriptSaveFailure?.(input.meetingId, transcriptResult.reason).catch(() => {});
   }
 
-  let persistentUploadQueued = false;
-  const canonicalAssetUpload = getFeatureFlags().localMeetingDbAccountUploadWriteV1;
-  if (canonicalAssetUpload && pendingAudio && input.accessToken) uploadInBackground = true;
-  if (
-    pendingAudio
-    && input.accessToken
-    && retryQueued
-    && dependencies.enqueuePersistentUpload
-    && !canonicalAssetUpload
-  ) {
-    try {
-      const registration = await dependencies.enqueuePersistentUpload(pendingAudio, input.accessToken);
-      if (registration) {
-        const attached = await attachNativeUploadRegistration(
-          input.storageScope,
-          pendingAudio.recordingAssetId,
-          registration,
-        )
-          .catch(() => false);
-        if (attached) {
-          persistentUploadQueued = true;
-          uploadInBackground = true;
-        } else {
-          await cancelNativeMeetingUpload(registration.workId).catch(() => {});
-        }
-      }
-    } catch {
-      // Keep the existing JS retry path as a compatibility fallback.
-    }
-  }
-
-  if (pendingAudio && input.accessToken && retryQueued && !persistentUploadQueued && !canonicalAssetUpload) {
-    uploadInBackground = true;
-    void retryPendingMeetingAudioUpload(
-      input.storageScope,
-      pendingAudio.recordingAssetId,
-      input.accessToken,
-      (pending, token) => dependencies.uploadAudio(
-        pending.remoteMeetingId ?? pending.meetingId,
-        pending.audioUri,
-        token,
-      ),
-      { automatic: true },
-    ).then(uploaded => {
-      if (uploaded && dependencies.reconcileUploads) {
-        return dependencies.reconcileUploads(uploaded);
-      }
-      if (uploaded) return dependencies.refreshMeetings();
-      return undefined;
-    }).catch(() => {});
-  } else if (pendingAudio && input.accessToken && !retryQueued && !canonicalAssetUpload) {
-    // The local capture is already committed, but the durable JS registry is
-    // unavailable. Make one best-effort upload without holding the recorder
-    // controller open; a failure remains visible as an untracked local asset.
-    uploadFailed = true;
-    uploadInBackground = true;
-    const accessToken = input.accessToken;
-    void Promise.resolve().then(() => dependencies.uploadAudio(
-        input.remoteMeetingId?.trim() || input.meetingId,
-        audioUri!,
-        accessToken,
-      ))
-      .then(() => {
-        if (dependencies.reconcileUploads) {
-          return dependencies.reconcileUploads(pendingAudio);
-        }
-        return dependencies.refreshMeetings();
-      })
-      .catch(() => {});
-  }
+  uploadInBackground = Boolean(pendingAudio && retryQueued);
 
   if (pendingAudio && retryQueued && dependencies.reconcileUploads) {
     void dependencies.reconcileUploads().catch(() => {});
@@ -829,8 +725,6 @@ export async function finalizeMeetingRecording(
     uploadFailed,
     retryQueued,
     uploadInBackground,
-    statusSyncPending: !input.isGuest && !statusSynced,
-    statusSyncInBackground,
   };
 }
 
@@ -1046,8 +940,6 @@ function mutatePendingUploads(storageScope: string, mutator: (records: PendingUp
       } else {
         await setAppStorageItem(storageKey, JSON.stringify(records));
       }
-      await removeAppStorageItem(previousPendingUploadsKey(storageScope)).catch(() => {});
-      await removeAppStorageItem(LEGACY_PENDING_AUDIO_UPLOADS_KEY).catch(() => {});
       const changedMeetingIds = new Set<string>();
       const assetIds = new Set([...previousByAssetId.keys(), ...Object.keys(records)]);
       assetIds.forEach(assetId => {
@@ -1064,8 +956,7 @@ function mutatePendingUploads(storageScope: string, mutator: (records: PendingUp
 }
 
 async function readPendingUploads(storageScope: string): Promise<PendingUploadMap> {
-  const current = await getAppStorageItem(pendingUploadsKey(storageScope));
-  const raw = current ?? await getAppStorageItem(previousPendingUploadsKey(storageScope));
+  const raw = await getAppStorageItem(pendingUploadsKey(storageScope));
   if (!raw) return {};
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -1082,7 +973,7 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
       : storedIdentity;
     const recordingAssetId = typeof item.recordingAssetId === 'string' && item.recordingAssetId.trim()
       ? item.recordingAssetId.trim()
-      : `legacy-primary:${meetingId}`;
+      : `captured-primary:${meetingId}`;
     const role = item.role === 'secondary' ? 'secondary' : 'primary';
     const origin = item.origin === 'imported' || item.origin === 'recovered'
       ? item.origin
@@ -1144,14 +1035,16 @@ async function readPendingUploads(storageScope: string): Promise<PendingUploadMa
         : undefined,
       failureMessage: typeof item.failureMessage === 'string' ? item.failureMessage : undefined,
       nextAttemptAt: typeof item.nextAttemptAt === 'string' ? item.nextAttemptAt : undefined,
-      nativeWorkId: typeof item.nativeWorkId === 'string' ? item.nativeWorkId : undefined,
-      nativeOperationId: typeof item.nativeOperationId === 'string' ? item.nativeOperationId : undefined,
-      nativeGeneration: typeof item.nativeGeneration === 'number' ? item.nativeGeneration : undefined,
-      nativeProtocol: item.nativeProtocol === 'legacy'
-        || item.nativeProtocol === 'recording-assets-v2'
-        || item.nativeProtocol === 'device-v2-r2'
-        ? item.nativeProtocol
+      nativeWorkId: item.nativeProtocol === 'device-v2-r2' && typeof item.nativeWorkId === 'string'
+        ? item.nativeWorkId
         : undefined,
+      nativeOperationId: item.nativeProtocol === 'device-v2-r2' && typeof item.nativeOperationId === 'string'
+        ? item.nativeOperationId
+        : undefined,
+      nativeGeneration: item.nativeProtocol === 'device-v2-r2' && typeof item.nativeGeneration === 'number'
+        ? item.nativeGeneration
+        : undefined,
+      nativeProtocol: item.nativeProtocol === 'device-v2-r2' ? 'device-v2-r2' : undefined,
     };
   });
   return records;
@@ -1161,12 +1054,6 @@ function pendingUploadsKey(storageScope: string): string {
   const normalized = storageScope.trim();
   if (!normalized) throw new Error('meeting recording storage scope is required');
   return `${PENDING_AUDIO_UPLOADS_KEY}:${normalized}`;
-}
-
-function previousPendingUploadsKey(storageScope: string): string {
-  const normalized = storageScope.trim();
-  if (!normalized) throw new Error('meeting recording storage scope is required');
-  return `${PREVIOUS_PENDING_AUDIO_UPLOADS_KEY}:${normalized}`;
 }
 
 export function resetMeetingRecordingStateForTests(): void {

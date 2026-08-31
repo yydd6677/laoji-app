@@ -13,8 +13,8 @@ object NativeBottomBarContract {
   const val LABEL_TEXT_SP = 12f
   const val LABEL_HORIZONTAL_PADDING_DP = 1f
   const val PRESS_SCALE_FROM = 1f
-  const val PRESS_SCALE_TO = 0.8f
-  const val PRESS_LEG_DURATION_MS = 125L
+  const val PRESS_SCALE_TO = 0.985f
+  const val PRESS_LEG_DURATION_MS = 90L
 
   fun dpToPx(value: Float, density: Float): Int = (value * density + 0.5f).toInt()
 

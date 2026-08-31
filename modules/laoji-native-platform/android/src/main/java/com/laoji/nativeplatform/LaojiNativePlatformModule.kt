@@ -13,19 +13,18 @@ import androidx.core.content.FileProvider
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import com.laoji.nativeplatform.ui.LaojiSystemBars
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.UUID
 
 private const val THEME_TAG = "LaojiTheme"
+private const val THEME_RECREATE_EXTRA = "com.laoji.app.extra.THEME_RECREATE"
 
 class LaojiNativePlatformModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LaojiNativePlatform")
-
-    Constant("evidenceSchemaVersion") { 1 }
-    Constant("implementation") { "android-classic-view" }
 
     // THEME-001: keep the selected skin available synchronously to module-level
     // React Native styles and to the Android calendar/minutes surfaces.
@@ -35,6 +34,9 @@ class LaojiNativePlatformModule : Module() {
 
     Function("setThemePreference") { themeId: String ->
       NativeThemePreference.write(appContext.reactContext?.applicationContext, themeId)
+      appContext.currentActivity?.let { activity ->
+        activity.runOnUiThread { LaojiSystemBars.apply(activity) }
+      }
     }
 
     Function("restartActivity") {
@@ -50,6 +52,7 @@ class LaojiNativePlatformModule : Module() {
           // Keep a lifecycle-safe fallback for builds where the ReactHost
           // boundary is unavailable after shrinking. This preserves the
           // process and lets Expo recreate the surface normally.
+          activity.intent?.putExtra(THEME_RECREATE_EXTRA, true)
           activity.recreate()
         }
       }
@@ -83,13 +86,6 @@ class LaojiNativePlatformModule : Module() {
     // Android keeps the final installation confirmation in the system
     // installer. LaoJi only exposes the verified cache file through a
     // FileProvider; it never performs a silent install.
-    Function("canInstallApk") {
-      val context = appContext.reactContext?.applicationContext
-        ?: throw IllegalStateException("应用环境不可用")
-      Build.VERSION.SDK_INT < Build.VERSION_CODES.O
-        || context.packageManager.canRequestPackageInstalls()
-    }
-
     Function("openApkInstallSettings") {
       val context = appContext.reactContext?.applicationContext
         ?: throw IllegalStateException("应用环境不可用")
@@ -143,14 +139,6 @@ class LaojiNativePlatformModule : Module() {
       true
     }
 
-    AsyncFunction("getCapabilities") {
-      mapOf(
-        "calendarSurface" to true,
-        "minutesSurface" to true,
-        "nativeAudioRuntime" to true,
-        "mediaPlayer" to true
-      )
-    }
   }
 
   private fun reloadReactRuntime(activity: android.app.Activity): Boolean {
@@ -198,11 +186,11 @@ internal object NativeThemePreference {
   fun read(context: Context?): String {
     val prefs = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val value = prefs?.getString(KEY_THEME, DEFAULT_THEME)
-    return if (value == "vivid") "vivid" else DEFAULT_THEME
+    return value?.takeIf { it in supportedThemes } ?: DEFAULT_THEME
   }
 
   fun write(context: Context?, themeId: String) {
-    val normalized = if (themeId == "vivid") "vivid" else DEFAULT_THEME
+    val normalized = themeId.takeIf { it in supportedThemes } ?: DEFAULT_THEME
     context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       ?.edit()
       ?.putString(KEY_THEME, normalized)
@@ -210,4 +198,8 @@ internal object NativeThemePreference {
   }
 
   fun isVivid(context: Context?): Boolean = read(context) == "vivid"
+  fun isPaper(context: Context?): Boolean = read(context) == "paper"
+  fun isMidnight(context: Context?): Boolean = read(context) == "midnight"
+
+  private val supportedThemes = setOf("neutral", "vivid", "paper", "midnight")
 }

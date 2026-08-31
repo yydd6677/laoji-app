@@ -2,14 +2,13 @@ package com.laoji.nativeplatform.calendar
 
 import kotlin.math.floor
 
-// CAL-DAY-COMPOSE-001: values below are transcribed from the Feishu day
+// CAL-DAY-COMPOSE-001 [SOURCE]: values below are transcribed from the Feishu day
 // instance drawable path. The event rectangle itself remains a separate
 // layout contract because Feishu receives InstanceLayout from its Rust side.
 
 object DayEventVisualContract {
   const val EVENT_RADIUS_DP = 4f
-  // [PRODUCT] LaoJi uses a continuous event outline instead of Feishu's
-  // one-sided calendar-color strip.
+  // [PRODUCT] LaoJi uses a continuous event outline around each entry.
   const val EVENT_BORDER_WIDTH_DP = CalendarProductVisualContract.EVENT_BORDER_WIDTH_DP
   const val TEXT_MARGIN_LEFT_DP = 9f
   const val TEXT_MARGIN_TOP_DP = 3f
@@ -26,7 +25,7 @@ object DayEventVisualContract {
   fun eventTextWidth(rectWidthDp: Float): Float =
     (rectWidthDp - TEXT_MARGIN_LEFT_DP - TEXT_MARGIN_RIGHT_DP).coerceAtLeast(0f)
 
-  // Feishu's DayEventInstanceDrawableData converts x/y/width/height percentages
+  // [SOURCE] Feishu's DayEventInstanceDrawableData converts x/y/width/height percentages
   // to the event surface before the drawable is measured. Keep that conversion
   // explicit so a source rectangle never passes through lane fallback math.
   fun instanceLayoutRect(

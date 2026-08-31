@@ -1,10 +1,6 @@
-import type {
-  ActionItemRecord,
-  MeetingNoteRepository,
-} from '../../data/repositories';
+import type { ActionItemRecord, MeetingNoteRepository } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
-import { assertScopeKey, secureClientIdFactory, type ClientIdFactory } from '../../domain/meeting';
-import { requestMeetingActionSync } from './actionSyncTrigger';
+import { assertScopeKey } from '../../domain/meeting';
 
 const MAX_ACTION_CONTENT_LENGTH = 20_000;
 const MAX_ASSIGNEE_LENGTH = 200;
@@ -68,7 +64,6 @@ export class UpdateMeetingActionUseCase {
   constructor(
     private readonly repository: MeetingNoteRepository,
     private readonly now: () => number = Date.now,
-    private readonly idFactory: ClientIdFactory = secureClientIdFactory,
   ) {}
 
   async execute(input: UpdateMeetingActionInput): Promise<UpdateMeetingActionResult> {
@@ -143,44 +138,6 @@ export class UpdateMeetingActionUseCase {
           : null,
         updatedAtMs,
       };
-      if (input.scopeKey !== 'guest') {
-        const operationId = input.operationId?.trim() || this.idFactory.create();
-        const inserted = await transaction.insertOutbox({
-          operationId,
-          scopeKey: input.scopeKey,
-          aggregateType: 'action_item',
-          aggregateId: actionId,
-          operationType: 'action_item.upsert',
-          baseRevision: current.remoteRevision,
-          payloadJson: JSON.stringify({
-            schema_version: 2,
-            meeting_id: meetingId,
-            action_id: actionId,
-            remote_id: current.remoteId,
-            expected_remote_revision: current.remoteRevision,
-            client_created_at_ms: current.createdAtMs,
-            client_updated_at_ms: updatedAtMs,
-            user_edited_at_ms: updatedAtMs,
-            completed_at_ms: next.completedAtMs,
-            content,
-            status,
-            assignee: assigneeText,
-            due_at_ms: dueAtMs,
-            reminder_at_ms: reminderAtMs,
-            followup_event_source_id: current.followupEventSourceId,
-            source_kind: current.sourceKind,
-            source_summary_version_id: current.sourceSummaryVersionId,
-            source_segment_id: current.sourceSegmentId,
-            source_start_ms: current.sourceStartMs,
-            generation_fingerprint: current.generationFingerprint,
-          }),
-          createdAtMs: updatedAtMs,
-        });
-        if (!inserted) {
-          result = { action: current, applied: false };
-          return;
-        }
-      }
       const updated = await transaction.updateMeetingAction(
         actionId,
         meetingId,
@@ -200,15 +157,12 @@ export class UpdateMeetingActionUseCase {
       );
       if (!updated) throw new MeetingActionRevisionConflictError();
       await transaction.updateMeeting(meetingId, input.scopeKey, {
-        syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
         updatedAtMs,
       });
       result = { action: next, applied: true };
     });
 
     if (!result) throw new Error('meeting action transaction produced no result');
-    const committedResult = result as UpdateMeetingActionResult;
-    if (committedResult.applied) requestMeetingActionSync(input.scopeKey);
-    return committedResult;
+    return result as UpdateMeetingActionResult;
   }
 }

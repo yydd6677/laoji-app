@@ -120,7 +120,7 @@ async function postGraph<T>(path: string, body: unknown, signal: AbortSignal | u
   }, fallback);
 }
 
-/** Candidate-only v2 client. Existing api.ts callers remain on the legacy route. */
+/** Current device-v2 ScheduleMentionGraph client used by complex parsing and clarification. */
 export async function parseScheduleGraphV2(input: ScheduleGraphV2Input): Promise<ScheduleGraphV1> {
   const text = input.text.trim();
   if (!text) throw new Error('日程输入不能为空');

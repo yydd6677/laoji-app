@@ -1,5 +1,4 @@
 import * as Crypto from 'expo-crypto';
-import type { SQLiteDatabase } from 'expo-sqlite';
 import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../../db/openDatabase';
 
 export interface ManualNoteRevisionRecord {

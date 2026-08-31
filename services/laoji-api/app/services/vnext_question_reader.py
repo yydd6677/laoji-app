@@ -1,4 +1,4 @@
-"""One-call, source-attributed Q2 reader candidate.
+"""One-call, source-attributed Q2 reader.
 
 The reader is intentionally synchronous and capability-gated.  The mobile
 Q2 repository remains the owner of snapshots/turns; this service only accepts

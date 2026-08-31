@@ -1,8 +1,6 @@
 import type { CalEvent } from '../../types';
-import {
-  sqliteMeetingNoteRepository,
-  type MeetingSeriesCarryImportRecord,
-} from '../../data/repositories';
+import { sqliteMeetingNoteRepository } from "../../data/repositories/sqliteMeetingNoteRepository";
+import type { MeetingSeriesCarryImportRecord } from "../../data/repositories/meetingNoteRepository";
 import { assertScopeKey, type ScopeKey } from '../../domain/meeting';
 import {
   resolveMeetingSeriesMemory,

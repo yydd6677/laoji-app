@@ -1,0 +1,28 @@
+[Unit]
+Description=LaoJi private Ollama service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/laoji-service-platform/compact-production
+EnvironmentFile=%h/.config/laoji/laoji.env
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=OLLAMA_HOST=127.0.0.1:21434
+Environment=OLLAMA_MAX_LOADED_MODELS=2
+Environment=OLLAMA_NUM_PARALLEL=1
+Environment=OLLAMA_KEEP_ALIVE=-1
+Environment=OLLAMA_MODELS=%h/laoji-service-platform/ollama-models
+ExecStart=%h/.local/bin/ollama serve
+ExecStartPost=%h/laoji-service-platform/.venvs/laoji-compact-py312/bin/python %h/laoji-service-platform/current/deploy/linux/prewarm-ollama.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=900
+TimeoutStopSec=90
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

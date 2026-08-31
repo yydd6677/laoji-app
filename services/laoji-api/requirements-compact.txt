@@ -1,7 +1,7 @@
 # LaoJi API and the minimal Qwen3-ASR transformers runtime.
-# GPU Torch/Torchaudio and qwen-asr itself are installed explicitly by
-# deploy/scripts/create-compact-python-env.sh so qwen-asr cannot pull Gradio,
-# Flask, Sox, VibeVoice, Whisper or other unused optional surfaces.
+# GPU Torch/Torchaudio and qwen-asr are installed explicitly by the deployment
+# image/environment step so optional Gradio, Flask, VibeVoice and Whisper
+# surfaces cannot enter the API runtime transitively.
 
 fastapi==0.111.0
 uvicorn[standard]==0.30.1

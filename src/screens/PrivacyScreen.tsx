@@ -6,7 +6,7 @@ import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList } from '../types';
 import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
-import { AppActionSheet } from '../components/AppActionSheet';
+import { ThemePickerSheet } from '../components/ThemePickerSheet';
 import { useAppDialog } from '../components/AppDialog';
 import {
   authenticateWithSystem,
@@ -14,17 +14,15 @@ import {
   loadPrivacyPrefs,
   savePrivacyPrefs,
 } from '../services/privacy';
-import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
+import { UI_MOTION } from '../theme/uiTokens';
 import { useTheme } from '../theme/ThemeProvider';
-import { THEME_LABELS, type ThemeId } from '../theme/themeIds';
+import { THEME_LABELS } from '../theme/themeIds';
 import { eraseLocalInstallationData } from '../services/localDataEraseCoordinator';
 import {
   loadGenerationRetentionPreference,
   saveGenerationRetentionPreference,
 } from '../services/generationPrivacy';
 import { useAppUpdate } from '../services/appUpdate';
-
-const { colors: F } = getFeishuTokens();
 
 // UI-TOKENS-001 / UI-MOTION-001: privacy controls use semantic colors and fixed motion geometry.
 
@@ -45,12 +43,14 @@ function Toggle({
   disabled: boolean;
   testID: string;
 }) {
+  const { tokens } = useTheme();
+  const colors = tokens.colors;
   const progress = React.useRef(new Animated.Value(on ? 1 : 0)).current;
 
   React.useEffect(() => {
     Animated.timing(progress, {
       toValue: on ? 1 : 0,
-      duration: FEISHU_MOTION.fabSegment,
+      duration: UI_MOTION.fabSegment,
       easing: Easing.inOut(Easing.ease),
       useNativeDriver: true,
     }).start();
@@ -69,13 +69,15 @@ function Toggle({
       testID={testID}
     >
       <View
-        style={[s.toggleTrack, { backgroundColor: on ? F.primary : F.iconDisabled }]}
+        style={[s.toggleTrack, { backgroundColor: on ? colors.primary : colors.iconDisabled }]}
         testID={`${testID}-track`}
       />
       <Animated.View
         style={[
           s.toggleThumb,
           {
+            backgroundColor: colors.backgroundFloat,
+            shadowColor: colors.shadow,
             transform: [{
               translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 16] }),
             }],
@@ -95,7 +97,7 @@ export function PrivacyScreen({ navigation }: Props) {
   const [retainGeneratedResults, setRetainGeneratedResults] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const { showDialog } = useAppDialog();
-  const { themeId, setTheme } = useTheme();
+  const { themeId, setTheme, tokens } = useTheme();
   const [themeSheetVisible, setThemeSheetVisible] = useState(false);
   const scope = 'guest' as const;
 
@@ -122,7 +124,7 @@ export function PrivacyScreen({ navigation }: Props) {
       await saveGenerationRetentionPreference(next);
       setRetainGeneratedResults(next);
     } catch {
-      showDialog({ title: '设置未保存', message: '生成质量设置暂时无法保存，请稍后重试。', tone: 'error' });
+      showDialog({ title: '设置未保存', message: '生成结果保留设置暂时无法保存，请稍后重试。', tone: 'error' });
     } finally {
       setPrivacyBusy(false);
     }
@@ -168,15 +170,11 @@ export function PrivacyScreen({ navigation }: Props) {
     setPrivacyBusy(true);
     try {
       if (faceId) {
-        if (await persistPrivacy(false, false)) {
-          showDialog({ title: '已关闭系统验证', message: '启动时验证也已同步关闭。', tone: 'success' });
-        }
+        await persistPrivacy(false, false);
         return;
       }
       if (await enableBiometric()) {
-        if (await persistPrivacy(true, appLock)) {
-          showDialog({ title: '已启用系统验证', message: '现在可以用系统生物识别或设备密码验证身份。', tone: 'success' });
-        }
+        await persistPrivacy(true, appLock);
       }
     } finally {
       setPrivacyBusy(false);
@@ -188,16 +186,12 @@ export function PrivacyScreen({ navigation }: Props) {
     setPrivacyBusy(true);
     try {
       if (appLock) {
-        if (await persistPrivacy(faceId, false)) {
-          showDialog({ title: '已关闭启动验证', message: '再次打开老记时不会自动要求验证。', tone: 'success' });
-        }
+        await persistPrivacy(faceId, false);
         return;
       }
       const biometricReady = faceId || await enableBiometric();
       if (!biometricReady) return;
-      if (await persistPrivacy(true, true)) {
-        showDialog({ title: '已开启启动验证', message: '老记进入前台后会要求系统验证。', tone: 'success' });
-      }
+      await persistPrivacy(true, true);
     } finally {
       setPrivacyBusy(false);
     }
@@ -233,7 +227,7 @@ export function PrivacyScreen({ navigation }: Props) {
                   : `有 ${failures} 项本机数据未能清除。请在系统设置中清除老记的应用存储后再使用。`,
                 tone: 'error',
               }
-              : { title: '本机数据已清除', message: '日程、会议文件、提醒和缓存均已清除。', tone: 'success' });
+              : { title: '本机数据已清除', tone: 'success' });
           },
         },
         { text: '取消', role: 'cancel' },
@@ -242,7 +236,7 @@ export function PrivacyScreen({ navigation }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+    <ScreenContainer edges={['top', 'bottom']} bg={tokens.colors.backgroundBase}>
       <SettingsTitleBar title="设置" onBack={() => navigation.goBack()} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <SettingsGroup testID="privacy-settings-group">
@@ -291,10 +285,10 @@ export function PrivacyScreen({ navigation }: Props) {
             />
           ) : null}
           <SettingsRow
-            label="帮助改进生成质量"
+            label="保留匿名生成结果"
             right={(
               <Toggle
-                label="帮助改进生成质量"
+                label="保留匿名生成结果"
                 on={retainGeneratedResults}
                 onToggle={() => { void handleGenerationRetentionToggle(); }}
                 disabled={privacyBusy}
@@ -309,33 +303,29 @@ export function PrivacyScreen({ navigation }: Props) {
           <SettingsRow label="用户协议" onPress={() => navigation.navigate('Legal', { kind: 'terms' })} />
           <SettingsRow label="隐私政策" onPress={() => navigation.navigate('Legal', { kind: 'privacy' })} />
           <SettingsRow label="帮助中心" onPress={() => navigation.navigate('Legal', { kind: 'help' })} />
-          <SettingsRow label="使用指南" onPress={() => navigation.navigate('Legal', { kind: 'guide' })} />
           <SettingsRow
             label="版本信息"
             value={appUpdate.status === 'available' && appUpdate.manifest
-              ? `新版本 ${appUpdate.manifest.version_name}`
+              ? `${APP_VERSION} · 有更新`
               : APP_VERSION}
             onPress={() => navigation.navigate('Legal', { kind: 'version' })}
+            testID="privacy-version-row"
           />
           <SettingsRow label="联系我们" onPress={() => navigation.navigate('Legal', { kind: 'contact' })} last />
         </SettingsGroup>
       </ScrollView>
-      <AppActionSheet
+      <ThemePickerSheet
         visible={themeSheetVisible}
-        title="皮肤主题"
-        items={([
-          ['neutral', THEME_LABELS.neutral],
-          ['vivid', THEME_LABELS.vivid],
-        ] as const).map(([id, label]) => ({
-          key: id,
-          label: id === themeId ? `${label}（当前）` : label,
-          onPress: () => {
+        selected={themeId}
+        onSelect={id => {
+          if (id === themeId) {
             setThemeSheetVisible(false);
-            void setTheme(id as ThemeId).catch(() => {
-              showDialog({ title: '主题未保存', message: '皮肤主题暂时无法保存，请稍后重试。', tone: 'error' });
-            });
-          },
-        }))}
+            return;
+          }
+          void setTheme(id).catch(() => {
+            showDialog({ title: '主题未保存', message: '请重试。', tone: 'error' });
+          });
+        }}
         onClose={() => setThemeSheetVisible(false)}
       />
     </ScreenContainer>
@@ -354,8 +344,6 @@ const s = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: F.backgroundFloat,
-    shadowColor: F.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.18,
     shadowRadius: 2,

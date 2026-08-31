@@ -5,11 +5,8 @@ import {
   secureClientIdFactory,
   transitionProcessingStage,
 } from '../../domain/meeting';
-import type {
-  MeetingNoteRepository,
-  RecordingAssetRecord,
-} from '../../data/repositories';
-import { canonicalRecordingSourceSha256 } from '../../data/repositories';
+import type { MeetingNoteRepository, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 import { CreateMeetingNoteUseCase } from './createMeetingNote';
 
 export interface RecoveredMeetingRecording {
@@ -97,7 +94,7 @@ export class RecordingReconciler {
       let aggregate = await this.repository.findByNativeSessionId(sessionId, scopeKey);
       if (!aggregate) {
         // Old journals did not contain a scope. They may belong to a signed-out or
-        // different account scope, so an orphan can only be adopted when the
+        // different installation scope, so an orphan can only be adopted when the
         // journal itself proves its owner.
         if (recording.storageScope !== scopeKey) {
           result.ignoredOtherScopes += 1;
@@ -125,7 +122,7 @@ export class RecordingReconciler {
           },
           initialStageStatuses: {
             capture: 'local_ready',
-            upload: scopeKey === 'guest' ? 'not_required' : 'queued',
+            upload: 'queued',
             transcript: 'none',
             summary: 'none',
             speaker: 'none',
@@ -227,7 +224,7 @@ export class RecordingReconciler {
       if (upload.status !== 'uploaded') {
         await transaction.upsertStage(transitionProcessingStage(upload, {
           stage: 'upload',
-          status: scopeKey === 'guest' ? 'not_required' : 'queued',
+          status: 'queued',
           progress: null,
         }, Math.max(nowMs, upload.updatedAtMs)), scopeKey);
       }

@@ -66,7 +66,7 @@ internal class MinutesListSurface(
   private var renderingSearch = false
   private var wasSearching = false
   private var renderedTitle = "会议记录"
-  // Feishu's home V2 opens in the two-column cover grid; the list is an
+  // Meeting home opens in the two-column cover grid; the list is an
   // explicit secondary mode exposed by the trailing switch icon.
   private var recycleBin = false
   private var canOpenRecycleBin = false
@@ -203,7 +203,7 @@ internal class MinutesListSurface(
       endColor = MinutesPalette.recordGradientEnd,
       radiusDp = 24,
     )
-    // Feishu UDShadow.S.Down is a 6dp blur with a 2dp downward offset and an
+    // [SOURCE] Feishu UDShadow.S.Down is a 6dp blur with a 2dp downward offset and an
     // 8% neutral shadow. Native elevation 2 is the closest platform rendering
     // without introducing a second custom shadow owner.
     recordButton.elevation = context.dp(2).toFloat()
@@ -396,7 +396,7 @@ internal class MinutesListSurface(
 
   private fun applyListPadding(topPadding: Int = 0) {
     val sidePadding = if (!recycleBin && viewMode == MinutesHomeViewMode.GRID) {
-      context.dp(if (MinutesPalette.vivid) 12 else 7)
+      context.dp(MinutesPalette.gridSidePaddingDp)
     } else 0
     list.setPadding(sidePadding, topPadding, sidePadding, context.dp(84))
   }

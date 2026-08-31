@@ -1,4 +1,4 @@
-import type { ParseResult } from './api';
+import type { ParseResult } from './scheduleParsing';
 import {
   colorForEventCategory,
   inferEventCategory,
@@ -1224,28 +1224,13 @@ function extractTitleAndDescription(text: string): [string, string | null] {
   return [title.slice(0, 20), description];
 }
 
-function defaultEndTime(startTime: string | null): string | null {
-  if (!startTime) return null;
-  const [hourText, minute] = startTime.split(':');
-  const hour = Number(hourText) + 1;
-  if (hour >= 24) return null;
-  return `${String(hour).padStart(2, '0')}:${minute}`;
-}
-
-function addOneHourTime(startTime: string | null): string | null {
-  if (!startTime) return null;
-  const [hourText, minuteText] = startTime.split(':');
-  const total = (Number(hourText) * 60 + Number(minuteText) + 60) % (24 * 60);
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
 function quickClarificationQuestion(hasDate: boolean, hasTime: boolean): string | null {
   if (!hasDate && !hasTime) return '需要补充具体日期。';
   if (!hasDate) return '没有听到具体日期，需要补充日期。';
   return null;
 }
 
-function parseLowInformationNote(normalized: string, rawText: string, today: LocalDate): ParseResult | null {
+function parseLowInformationNote(normalized: string, rawText: string): ParseResult | null {
   if (
     !/(记一下|记个|帮我记|提醒我|待办)/.test(normalized)
     && !LOW_INFORMATION_SCHEDULE_INTENT_RE.test(normalized)
@@ -1336,7 +1321,7 @@ export function parseLocalScheduleText(
   // A recurring request without its first occurrence is still a recurring
   // draft. Keep the rule and let the server/editor ask for its anchor.
   const recurrenceMissingAnchor = eventType !== 'once' && (!hasDate || !hasTime);
-  if (!hasDate && !hasTime && eventType === 'once') return parseLowInformationNote(normalized, text, today);
+  if (!hasDate && !hasTime && eventType === 'once') return parseLowInformationNote(normalized, text);
 
   let [title, description] = extractTitleAndDescription(recurrenceText);
   if (parsedTimeRange) title = title.replace(/(?:到|至|直到)$/u, '').trim();

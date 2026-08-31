@@ -21,8 +21,8 @@ from app.services.summary_v3_evidence import (
     EvidenceSource,
     build_evidence_package_from_sources,
     normalize_transcript_evidence_sources,
+    source_fingerprint,
 )
-from app.services.summary_v3_store import source_fingerprint
 
 
 ARTIFACT_CONTRACT_REVISION = "meeting.facts.v3"

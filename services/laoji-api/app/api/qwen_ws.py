@@ -29,7 +29,6 @@ from app.database import async_session
 from app.models.meeting import Meeting
 from app.models.transcript import TranscriptLine
 from app.api.ws_auth import authorize_app_meeting_ws_context
-from app.services.guest_meeting_session_service import append_guest_transcript
 from app.privacy_logging import privacy_log
 
 router = APIRouter()
@@ -156,8 +155,6 @@ def _qwen_transcribe(
 
 
 def _speaker_profiles_for_context(speaker_db, auth_context):
-    if auth_context.mode == "user" and auth_context.user_id is not None:
-        return speaker_db.load_for_owner(auth_context.user_id, active_only=True)
     if (
         auth_context.mode == "device"
         and auth_context.user_id is not None
@@ -168,27 +165,7 @@ def _speaker_profiles_for_context(speaker_db, auth_context):
             auth_context.epoch_id,
             active_only=True,
         )
-    if auth_context.mode == "prototype":
-        return speaker_db.load_all(active_only=True)
     return []
-
-
-def _cache_guest_transcript(auth_context, session_id: str, message: dict) -> dict:
-    """Cache a final guest line and expose its stable identity to the client."""
-    if auth_context.mode != "guest" or message.get("type") != "transcript.completed":
-        return message
-    stored = append_guest_transcript(
-        session_id,
-        speaker_id=message.get("speaker_id"),
-        speaker_label=message.get("speaker_name"),
-        text=str(message.get("text") or ""),
-        start_time=message.get("start_time"),
-        end_time=message.get("end_time"),
-        confidence=message.get("speaker_confidence"),
-    )
-    if stored is None:
-        return message
-    return {**message, "id": stored["id"]}
 
 
 def _build_speaker_engine(model_manager, speaker_profiles):
@@ -554,13 +531,11 @@ async def _serve_qwen(
             "segment_reason": getattr(segment, "segment_reason", None),
             "infer_ms": result.get("infer_ms"),
         }
-        if persist_transcript and is_final:
-            message = _cache_guest_transcript(auth_context, session_id, message)
         try:
             await websocket.send_json(message)
         except Exception:
             return
-        if persist_transcript and is_final and auth_context.mode != "guest":
+        if persist_transcript and is_final:
             asyncio.create_task(
                 _persist_transcript(
                     meeting_id=session_id,

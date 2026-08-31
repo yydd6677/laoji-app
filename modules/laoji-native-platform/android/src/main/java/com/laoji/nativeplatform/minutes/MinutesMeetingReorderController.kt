@@ -56,7 +56,7 @@ internal class MinutesMeetingReorderController(
         downY = event.y
         list.parent?.requestDisallowInterceptTouchEvent(true)
         holder.itemView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-        // [PRODUCT] A stationary long press exposes the Feishu-mapped item
+        // [PRODUCT] A stationary long press exposes the item
         // menu as soon as the threshold is reached. If this same gesture then
         // moves, ACTION_MOVE dismisses the menu and preserves LaoJi drag-sort.
         MinutesSwipeMenuLayout.closeOpenMenu()

@@ -2,7 +2,7 @@ import type { AppDialogOptions } from '../components/AppDialog';
 import type { CalEvent, EventRecurrenceScope } from '../types';
 import { eventListTitle } from '../utils/eventTitle';
 
-// CAL-REPEAT-RRULE-001: scope policy follows Feishu's normal/exception instance matrix.
+// CAL-REPEAT-RRULE-001: scope policy follows the normal/exception instance matrix.
 export type RecurrenceRuleControlMode = 'hidden' | 'disabled' | 'editable';
 
 export type RecurrenceScopeChoice = {

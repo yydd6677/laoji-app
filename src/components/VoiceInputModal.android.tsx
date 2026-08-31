@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, InteractionManager, PermissionsAndroid } from 'react-native';
 import { NavigationProp, useIsFocused, useNavigation } from '@react-navigation/native';
 import * as Crypto from 'expo-crypto';
@@ -31,7 +31,7 @@ import {
   clarifyText,
   parseAudio,
   parseText,
-} from '../services/api';
+} from '../services/scheduleParsing';
 import { scheduleTimePeriodFromText, scheduleTimePeriodLabel } from '../services/localScheduleParser';
 import { getApiConfig } from '../services/config';
 import { buildRealtimeAsrUrl, createRealtimeMeetingId } from '../services/realtimeAsr';

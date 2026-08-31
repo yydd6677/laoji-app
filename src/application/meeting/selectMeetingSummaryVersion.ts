@@ -1,10 +1,6 @@
-import type {
-  MeetingNoteRepository,
-  SummaryVersionRecord,
-} from '../../data/repositories';
+import type { MeetingNoteRepository, SummaryVersionRecord } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
-import { requestMeetingSummarySync } from './summarySyncTrigger';
 
 export class MeetingSummaryVersionConflictError extends Error {
   constructor() {
@@ -77,7 +73,6 @@ export class SelectMeetingSummaryVersionUseCase {
 
     if (!result) throw new Error('meeting summary selection produced no result');
     const committed = result as SelectMeetingSummaryVersionResult;
-    if (committed.applied) requestMeetingSummarySync(input.scopeKey);
     return committed;
   }
 }

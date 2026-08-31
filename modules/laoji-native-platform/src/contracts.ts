@@ -1,12 +1,4 @@
-export const NATIVE_PLATFORM_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const NATIVE_CALENDAR_SNAPSHOT_SCHEMA_VERSION = 1 as const;
-
-export interface NativePlatformCapabilities {
-  calendarSurface: boolean;
-  minutesSurface: boolean;
-  nativeAudioRuntime: boolean;
-  mediaPlayer: boolean;
-}
 
 export type NativeAudioPurpose = 'schedule' | 'meeting';
 
@@ -39,7 +31,7 @@ export interface NativeCalendarEventSnapshot {
   allDay: boolean;
   editable: boolean;
   revision: number;
-  /** Optional Feishu-compatible timed-event rectangle in percentages. */
+  /** Optional timed-event rectangle in percentages. */
   instanceLayout?: NativeCalendarInstanceLayout | null;
 }
 

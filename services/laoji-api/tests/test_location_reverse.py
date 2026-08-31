@@ -25,11 +25,7 @@ async def test_amap_result_is_normalized_and_cached_without_plain_coordinates(
 ):
     monkeypatch.setenv("AMAP_WEB_SERVICE_KEY", "test-key")
     location._CACHE.clear()
-    monkeypatch.setattr(
-        location.auth,
-        "consume_auth_rate_limit",
-        lambda *_args, **_kwargs: (True, 0),
-    )
+    location._QUOTA.clear()
     calls = 0
 
     async def fetch(_latitude, _longitude, _key):
@@ -81,11 +77,7 @@ async def test_amap_result_is_normalized_and_cached_without_plain_coordinates(
 @pytest.mark.asyncio
 async def test_missing_amap_key_fails_cleanly_for_client_fallback(tmp_path, monkeypatch):
     monkeypatch.delenv("AMAP_WEB_SERVICE_KEY", raising=False)
-    monkeypatch.setattr(
-        location.auth,
-        "consume_auth_rate_limit",
-        lambda *_args, **_kwargs: (True, 0),
-    )
+    location._QUOTA.clear()
     with pytest.raises(HTTPException) as error:
         await location.reverse_location(
             location.ReverseLocationRequest(latitude=22.5, longitude=114.0),

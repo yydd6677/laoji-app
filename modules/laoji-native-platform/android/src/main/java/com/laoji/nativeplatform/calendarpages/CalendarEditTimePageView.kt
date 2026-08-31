@@ -17,12 +17,10 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import java.time.LocalDate
 import java.time.YearMonth
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("CAL-PICKER-WHEEL-TAP-001", "CAL-TIMEFORMAT-001", "UI-TITLE-COMMON-001")
 internal class CalendarEditTimePageView(
   context: Context,
   initialState: CalendarEditTimeState,

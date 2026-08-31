@@ -28,7 +28,7 @@ const SOURCE_TYPES = new Set<MeetingFactSourceV3['sourceType']>([
   'transcript', 'manual_note', 'attachment',
 ]);
 const TEMPLATE_IDS = new Set<MeetingTemplate['id']>([
-  'general', 'one_on_one', 'project_sync', 'interview',
+  'general',
 ]);
 
 function record(value: unknown): Record<string, unknown> | null {

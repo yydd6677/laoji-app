@@ -6,10 +6,10 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import com.laoji.nativeplatform.NativeThemePreference
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import java.util.Locale
 
 data class CalendarPalette(
@@ -19,7 +19,7 @@ data class CalendarPalette(
   val fillPressed: Int,
   val textPrimary: Int,
   val textSecondary: Int,
-  // Feishu UD_N400: adjacent-month dates use the disabled/muted semantic token,
+  // Adjacent-month dates use the disabled/muted semantic token,
   // not the readable secondary-text token.
   val textDisabled: Int,
   val textPlaceholder: Int,
@@ -47,7 +47,7 @@ data class CalendarEventVisual(
   val pressedOverlay: Int,
 )
 
-// [PRODUCT] Intentional LaoJi calendar overrides. Feishu remains the geometry
+// [PRODUCT] LaoJi owns the calendar geometry
 // baseline, while date emphasis and bounded event entries follow the user's
 // explicit personalization contract.
 internal object CalendarProductVisualContract {
@@ -99,7 +99,7 @@ object CalendarUi {
     val key = normalizeEventCategory(category)
     val border = eventCategoryColors[key] ?: eventCategoryColors.getValue("其他")
     val isDark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-      Configuration.UI_MODE_NIGHT_YES
+      Configuration.UI_MODE_NIGHT_YES || NativeThemePreference.isMidnight(context)
     val fillAlpha = if (isDark) 58 else 30
     val text = if (isDark) border else eventCategoryTextColors[key] ?: eventCategoryTextColors.getValue("其他")
     return CalendarEventVisual(
@@ -111,12 +111,21 @@ object CalendarUi {
   }
 
   fun eventRadiusDp(context: Context, sourceRadiusDp: Float): Float =
-    sourceRadiusDp + if (NativeThemePreference.isVivid(context)) 2f else 0f
+    sourceRadiusDp + when {
+      NativeThemePreference.isVivid(context) -> 2f
+      NativeThemePreference.isMidnight(context) -> 1f
+      else -> 0f
+    }
 
   fun eventBorderRadiusDp(context: Context): Float =
-    if (NativeThemePreference.isVivid(context)) 7f else CalendarProductVisualContract.EVENT_BORDER_RADIUS_DP
+    when {
+      NativeThemePreference.isVivid(context) -> 7f
+      NativeThemePreference.isMidnight(context) -> 6f
+      NativeThemePreference.isPaper(context) -> 5f
+      else -> CalendarProductVisualContract.EVENT_BORDER_RADIUS_DP
+    }
 
-  // Feishu keeps an empty summary in storage and supplies copy only at render
+  // Keep an empty summary in storage and supply copy only at render
   // time. List/chip surfaces use the parenthesized variant; detail uses its own
   // non-parenthesized title in the page snapshot builder.
   fun listEventTitle(title: String): String = title.ifBlank { "(无主题)" }
@@ -132,77 +141,123 @@ object CalendarUi {
   fun palette(context: Context): CalendarPalette {
     val isDark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
       Configuration.UI_MODE_NIGHT_YES
-    val isVivid = NativeThemePreference.isVivid(context)
-    if (isVivid && !isDark) {
+    val theme = NativeThemePreference.read(context)
+    if (theme == "paper") {
       return CalendarPalette(
-        background = Color.rgb(255, 240, 246),
-        surface = Color.rgb(253, 234, 245),
-        surfaceMuted = Color.rgb(240, 232, 255),
-        fillPressed = Color.argb(31, 123, 92, 184),
-        textPrimary = Color.rgb(28, 27, 51),
-        textSecondary = Color.rgb(148, 144, 181),
-        textDisabled = Color.rgb(210, 206, 227),
-        textPlaceholder = Color.rgb(184, 180, 212),
-        divider = Color.argb(46, 150, 100, 200),
-        monthGridDivider = Color.argb(61, 150, 100, 200),
-        accent = Color.rgb(123, 92, 184),
-        accentSoft = Color.rgb(237, 232, 255),
-        selectionMarker = Color.rgb(255, 181, 204),
+        background = Color.rgb(243, 240, 231),
+        surface = Color.rgb(252, 251, 246),
+        surfaceMuted = Color.rgb(239, 238, 230),
+        fillPressed = Color.argb(23, 37, 38, 33),
+        textPrimary = Color.rgb(37, 38, 33),
+        textSecondary = Color.rgb(98, 99, 93),
+        textDisabled = Color.rgb(180, 181, 173),
+        textPlaceholder = Color.rgb(133, 134, 126),
+        divider = Color.argb(33, 37, 38, 33),
+        monthGridDivider = Color.argb(43, 37, 38, 33),
+        accent = Color.rgb(99, 120, 36),
+        accentSoft = Color.rgb(233, 237, 217),
+        selectionMarker = Color.rgb(216, 215, 205),
         accentText = Color.WHITE,
-        eventBorder = Color.rgb(146, 104, 224),
-        eventFill = Color.rgb(240, 236, 255),
-        eventText = Color.rgb(46, 24, 128),
-        eventPressedOverlay = Color.rgb(184, 180, 212),
+        eventBorder = Color.rgb(62, 113, 143),
+        eventFill = Color.rgb(229, 237, 239),
+        eventText = Color.rgb(47, 87, 108),
+        eventPressedOverlay = Color.rgb(133, 134, 126),
+        destructive = Color.rgb(201, 80, 69)
+      )
+    }
+    if (theme == "midnight") {
+      return CalendarPalette(
+        background = Color.rgb(16, 20, 27),
+        surface = Color.rgb(21, 26, 34),
+        surfaceMuted = Color.rgb(32, 40, 52),
+        fillPressed = Color.argb(26, 238, 243, 250),
+        textPrimary = Color.rgb(238, 243, 250),
+        textSecondary = Color.rgb(176, 186, 200),
+        textDisabled = Color.rgb(86, 97, 112),
+        textPlaceholder = Color.rgb(127, 138, 154),
+        divider = Color.argb(36, 222, 231, 242),
+        monthGridDivider = Color.argb(46, 222, 231, 242),
+        accent = Color.rgb(116, 167, 255),
+        accentSoft = Color.rgb(30, 50, 80),
+        selectionMarker = Color.rgb(44, 55, 69),
+        accentText = Color.rgb(16, 20, 27),
+        eventBorder = Color.rgb(117, 169, 255),
+        eventFill = Color.rgb(27, 49, 78),
+        eventText = Color.rgb(164, 197, 255),
+        eventPressedOverlay = Color.rgb(127, 138, 154),
+        destructive = Color.rgb(255, 119, 112)
+      )
+    }
+    if (theme == "vivid" && !isDark) {
+      return CalendarPalette(
+        background = Color.rgb(248, 246, 252),
+        surface = Color.WHITE,
+        surfaceMuted = Color.rgb(242, 238, 252),
+        fillPressed = Color.argb(28, 114, 85, 201),
+        textPrimary = Color.rgb(33, 29, 45),
+        textSecondary = Color.rgb(110, 104, 123),
+        textDisabled = Color.rgb(201, 196, 209),
+        textPlaceholder = Color.rgb(153, 146, 167),
+        divider = Color.argb(33, 71, 55, 92),
+        monthGridDivider = Color.argb(43, 71, 55, 92),
+        accent = Color.rgb(114, 85, 201),
+        accentSoft = Color.rgb(238, 233, 252),
+        selectionMarker = Color.rgb(234, 219, 230),
+        accentText = Color.WHITE,
+        eventBorder = Color.rgb(130, 101, 212),
+        eventFill = Color.rgb(241, 236, 252),
+        eventText = Color.rgb(79, 54, 157),
+        eventPressedOverlay = Color.rgb(153, 146, 167),
         destructive = Color.rgb(255, 77, 79)
       )
     }
     return if (isDark) {
       CalendarPalette(
-        background = Color.rgb(26, 26, 26),
-        surface = Color.rgb(10, 10, 10),
-        surfaceMuted = Color.rgb(41, 41, 41),
-        fillPressed = Color.argb(31, 235, 235, 235),
-        textPrimary = Color.rgb(235, 235, 235),
-        textSecondary = Color.rgb(166, 166, 166),
-        textDisabled = Color.rgb(95, 95, 95),
-        textPlaceholder = DayRulerContract.TEXT_COLOR_DARK,
-        divider = Color.rgb(65, 65, 65),
-        monthGridDivider = Color.rgb(72, 72, 72),
-        accent = Color.rgb(117, 164, 255),
-        accentSoft = Color.rgb(21, 35, 64),
-        selectionMarker = Color.rgb(67, 67, 67),
+        background = Color.rgb(16, 20, 27),
+        surface = Color.rgb(21, 26, 34),
+        surfaceMuted = Color.rgb(32, 40, 52),
+        fillPressed = Color.argb(26, 238, 243, 250),
+        textPrimary = Color.rgb(238, 243, 250),
+        textSecondary = Color.rgb(176, 186, 200),
+        textDisabled = Color.rgb(86, 97, 112),
+        textPlaceholder = Color.rgb(127, 138, 154),
+        divider = Color.argb(36, 222, 231, 242),
+        monthGridDivider = Color.argb(46, 222, 231, 242),
+        accent = Color.rgb(116, 167, 255),
+        accentSoft = Color.rgb(30, 50, 80),
+        selectionMarker = Color.rgb(44, 55, 69),
         accentText = Color.WHITE,
         // [PRODUCT] The bounded LaoJi event entry uses a quieter B400 blue;
         // weekend dates continue to use the normal Calendar accent.
-        eventBorder = Color.rgb(76, 136, 255),
-        // Feishu calendar light/dark event tokens: bg_blue and text_blue.
-        eventFill = Color.rgb(23, 49, 102),
-        eventText = Color.rgb(143, 180, 255),
-        eventPressedOverlay = Color.rgb(117, 117, 117),
-        destructive = Color.rgb(240, 91, 86)
+        eventBorder = Color.rgb(117, 169, 255),
+        // Calendar event fill and text use the shared semantic blue pair.
+        eventFill = Color.rgb(27, 49, 78),
+        eventText = Color.rgb(164, 197, 255),
+        eventPressedOverlay = Color.rgb(127, 138, 154),
+        destructive = Color.rgb(255, 119, 112)
       )
     } else {
       CalendarPalette(
-        background = Color.rgb(245, 246, 247),
+        background = Color.rgb(243, 246, 250),
         surface = Color.WHITE,
-        surfaceMuted = Color.rgb(242, 243, 245),
-        fillPressed = Color.argb(31, 31, 35, 41),
-        textPrimary = Color.rgb(31, 35, 41),
-        textSecondary = Color.rgb(100, 106, 115),
-        textDisabled = Color.rgb(187, 191, 196),
-        textPlaceholder = DayRulerContract.TEXT_COLOR_LIGHT,
-        divider = Color.argb(38, 31, 35, 41),
-        monthGridDivider = Color.argb(46, 31, 35, 41),
-        accent = Color.rgb(20, 86, 240),
-        accentSoft = Color.rgb(240, 244, 255),
-        selectionMarker = Color.rgb(222, 224, 227),
+        surfaceMuted = Color.rgb(238, 243, 250),
+        fillPressed = Color.argb(26, 23, 32, 51),
+        textPrimary = Color.rgb(23, 32, 51),
+        textSecondary = Color.rgb(91, 101, 119),
+        textDisabled = Color.rgb(180, 188, 200),
+        textPlaceholder = Color.rgb(135, 146, 165),
+        divider = Color.argb(33, 23, 32, 51),
+        monthGridDivider = Color.argb(43, 23, 32, 51),
+        accent = Color.rgb(39, 104, 232),
+        accentSoft = Color.rgb(234, 241, 255),
+        selectionMarker = Color.rgb(220, 227, 236),
         accentText = Color.WHITE,
         // [PRODUCT] One step lighter than primary B600, while retaining enough
         // contrast against the pale event fill and neutral list surface.
-        eventBorder = Color.rgb(51, 112, 255),
-        eventFill = Color.rgb(224, 233, 255),
-        eventText = Color.rgb(4, 66, 210),
-        eventPressedOverlay = Color.rgb(143, 149, 158),
+        eventBorder = Color.rgb(60, 120, 238),
+        eventFill = Color.rgb(226, 235, 252),
+        eventText = Color.rgb(27, 85, 200),
+        eventPressedOverlay = Color.rgb(135, 146, 165),
         destructive = Color.rgb(226, 46, 40)
       )
     }
@@ -212,7 +267,10 @@ object CalendarUi {
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
       this.color = color
       textSize = sp(context, sizeSp)
-      typeface = if (bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
+      typeface = LaojiThemeTypography.typeface(
+        context,
+        if (bold) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
+      )
     }
 
   fun background(
@@ -238,7 +296,7 @@ object CalendarUi {
 
   fun weekdayLabels(): List<String> {
     // The app language is Chinese even when the emulator/device system locale is
-    // English. Feishu's retained calendar surface also uses the fixed, compact
+    // English. The calendar surface uses the fixed, compact
     // Sunday-first labels instead of inheriting DateFormatSymbols from Android.
     return listOf("日", "一", "二", "三", "四", "五", "六")
   }

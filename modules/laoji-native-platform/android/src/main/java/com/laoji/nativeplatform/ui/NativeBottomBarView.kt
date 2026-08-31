@@ -25,8 +25,6 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.graphics.PathParser
 import com.laoji.nativeplatform.NativeThemePreference
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -41,7 +39,6 @@ enum class NativeBottomTab(val wireName: String, val label: String) {
 }
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
 private class NativeBottomTabItemView(
   context: Context,
   private val tab: NativeBottomTab,
@@ -54,6 +51,21 @@ private class NativeBottomTabItemView(
     clipChildren = false
     clipToPadding = false
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+  }
+  private val selectionPill = View(context).apply {
+    alpha = 0f
+    scaleX = 0.72f
+    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    background = NativeUiTokens.roundedBackground(
+      context,
+      palette.primarySoft,
+      when (NativeThemePreference.read(context)) {
+        "vivid" -> 14f
+        "paper" -> 8f
+        "midnight" -> 11f
+        else -> 10f
+      },
+    )
   }
   private val icon = ImageView(context).apply {
     scaleType = ImageView.ScaleType.CENTER
@@ -97,16 +109,11 @@ private class NativeBottomTabItemView(
     clipChildren = false
     clipToPadding = false
 
-    FeishuEvidenceRuntime.bind(this, "UI-SHELL-BOTTOM-MAIN-001", "tab", "bottom-tab-${tab.wireName}")
-    FeishuEvidenceRuntime.bind(
-      iconContainer,
-      "UI-SHELL-BOTTOM-MAIN-001",
-      "icon-container",
-      "bottom-tab-${tab.wireName}-icon-container",
-    )
-    FeishuEvidenceRuntime.bind(icon, "UI-SHELL-BOTTOM-MAIN-001", "icon", "bottom-tab-${tab.wireName}-icon")
-    FeishuEvidenceRuntime.bind(label, "UI-SHELL-BOTTOM-MAIN-001", "label", "bottom-tab-${tab.wireName}-label")
 
+    iconContainer.addView(
+      selectionPill,
+      LayoutParams(dp(44f), dp(30f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL),
+    )
     iconContainer.addView(
       icon,
       LayoutParams(dp(NativeBottomBarContract.ICON_SIZE_DP), dp(NativeBottomBarContract.ICON_SIZE_DP), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL),
@@ -129,12 +136,24 @@ private class NativeBottomTabItemView(
   }
 
   fun setItemSelected(value: Boolean, animateSelection: Boolean = false) {
+    val changed = isSelected != value
     if (!value) icon.clearAnimation()
     isSelected = value
     icon.isSelected = value
     label.isSelected = value
     iconDrawable.setSelected(value)
     label.setTextColor(if (value) selectedColor else palette.textSecondary)
+    selectionPill.animate().cancel()
+    if (changed && isLaidOut) {
+      selectionPill.animate()
+        .alpha(if (value) 1f else 0f)
+        .scaleX(if (value) 1f else 0.72f)
+        .setDuration(170L)
+        .start()
+    } else {
+      selectionPill.alpha = if (value) 1f else 0f
+      selectionPill.scaleX = if (value) 1f else 0.72f
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       stateDescription = if (value) "当前页面" else null
     }
@@ -150,6 +169,7 @@ private class NativeBottomTabItemView(
 
   override fun onDetachedFromWindow() {
     icon.clearAnimation()
+    selectionPill.animate().cancel()
     super.onDetachedFromWindow()
   }
 
@@ -225,7 +245,6 @@ private class NativeBottomTabIconDrawable(
 }
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
 class LaojiNativeBottomBarView(
   context: Context,
   appContext: AppContext,
@@ -262,8 +281,6 @@ class LaojiNativeBottomBarView(
     clipChildren = false
     clipToPadding = false
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-    FeishuEvidenceRuntime.bind(this, "UI-SHELL-BOTTOM-MAIN-001", "navigation", "bottom-bar")
-    FeishuEvidenceRuntime.bind(divider, "UI-SHELL-BOTTOM-MAIN-001", "divider", "bottom-bar-divider")
     addView(divider)
     addView(scheduleItem)
     addView(meetingsItem)

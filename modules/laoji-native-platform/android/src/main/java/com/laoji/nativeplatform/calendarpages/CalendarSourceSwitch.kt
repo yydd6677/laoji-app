@@ -17,14 +17,12 @@ import android.widget.CompoundButton
 import androidx.core.content.ContextCompat
 import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.R
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import kotlin.math.abs
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("CAL-REPEAT-RRULE-001")
 internal class CalendarSourceSwitch(context: Context) : CompoundButton(context) {
   private val paletteReady = CalendarPagePalette.configure(context)
-  private val vivid = NativeThemePreference.isVivid(context)
+  private val themed = NativeThemePreference.read(context) != "neutral"
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val switchBounds = RectF()
   private val trackBounds = RectF()
@@ -167,7 +165,7 @@ internal class CalendarSourceSwitch(context: Context) : CompoundButton(context) 
     super.onDraw(canvas)
     val thumbSize = context.pageDp(THUMB_SIZE_DP).toFloat()
 
-    paint.color = if (vivid) {
+    paint.color = if (themed) {
       when {
         !isEnabled -> CalendarPagePalette.disabled
         isChecked -> CalendarPagePalette.primarySoft
@@ -186,7 +184,7 @@ internal class CalendarSourceSwitch(context: Context) : CompoundButton(context) 
     canvas.drawRoundRect(trackBounds, trackBounds.height() / 2f, trackBounds.height() / 2f, paint)
 
     val thumbLeft = switchBounds.left + thumbOffset()
-    paint.color = if (vivid) {
+    paint.color = if (themed) {
       when {
         !isEnabled -> CalendarPagePalette.disabled
         isChecked -> CalendarPagePalette.primary

@@ -1,14 +1,10 @@
-import type {
-  ApplySpeakerCorrectionResult,
-  MeetingNoteRepository,
-} from '../../data/repositories';
+import type { ApplySpeakerCorrectionResult, MeetingNoteRepository } from "../../data/repositories/meetingNoteRepository";
 import {
   assertScopeKey,
   secureClientIdFactory,
   type ClientIdFactory,
   type ScopeKey,
 } from '../../domain/meeting';
-import { requestMeetingSpeakerCorrectionSync } from './speakerCorrectionSyncTrigger';
 
 const MAX_SPEAKER_NAME_LENGTH = 120;
 
@@ -113,25 +109,6 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
         ? transcript.segments.filter(segment => segment.speakerClusterId === sourceClusterId)
         : [target];
       if (affected.length === 0) throw new SpeakerAssignmentTargetUnavailableError();
-      const remoteSegmentIds: string[] = [];
-      const seenRemoteSegmentIds = new Set<string>();
-      let hasCompleteRemoteSegmentIdentity = true;
-      for (const segment of affected) {
-        const remoteSegmentId = segment.sourceId?.trim() || '';
-        if (
-          !remoteSegmentId
-          || remoteSegmentId.length > 512
-          || /[\u0000-\u001f\u007f]/.test(remoteSegmentId)
-          || seenRemoteSegmentIds.has(remoteSegmentId)
-        ) {
-          hasCompleteRemoteSegmentIdentity = false;
-          break;
-        }
-        seenRemoteSegmentIds.add(remoteSegmentId);
-        remoteSegmentIds.push(remoteSegmentId);
-      }
-      const shouldQueueRemoteCorrection = input.scopeKey !== 'guest'
-        && hasCompleteRemoteSegmentIdentity;
       if (affected.every(segment => (
         (segment.speakerLabelOverride ?? segment.speakerLabel ?? '').trim() === displayName
         && (
@@ -165,40 +142,10 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
         displayName,
         speakerProfileId,
         consentToProfileUpdate,
-        syncState: shouldQueueRemoteCorrection ? 'pending' : 'local_only',
         createdAtMs,
       }, input.scopeKey);
       if (applied.applied) {
         await transaction.markCurrentSummaryStale(meeting.id, input.scopeKey);
-        if (shouldQueueRemoteCorrection) {
-          const inserted = await transaction.insertOutbox({
-            operationId: `speaker-correction:${applied.correctionId}`,
-            scopeKey: input.scopeKey,
-            aggregateType: 'speaker_correction',
-            aggregateId: applied.correctionId,
-            operationType: 'speaker_correction.submit',
-            baseRevision: applied.assignmentRevision - 1,
-            payloadJson: JSON.stringify({
-              schema_version: 2,
-              meeting_id: meeting.id,
-              client_request_id: applied.correctionId,
-              local_transcript_revision_id: transcript.revision.id,
-              scope: input.scope,
-              segment_ids: remoteSegmentIds,
-              cluster_id: sourceClusterId,
-              speaker_profile_id: speakerProfileId,
-              display_name: displayName,
-              consent_to_profile_update: consentToProfileUpdate,
-              base_revision: applied.assignmentRevision - 1,
-            }),
-            createdAtMs,
-          });
-          if (!inserted) throw new Error('speaker correction sync identity already exists');
-          await transaction.updateMeeting(meeting.id, input.scopeKey, {
-            syncState: 'pending',
-            updatedAtMs: Math.max(createdAtMs, meeting.updatedAtMs + 1),
-          });
-        }
         await transaction.reconcileSpeakerProcessingStage(
           meeting.id,
           input.scopeKey,
@@ -209,8 +156,6 @@ export class UpdateMeetingSpeakerAssignmentUseCase {
     });
 
     if (!result) throw new Error('speaker assignment transaction produced no result');
-    const committedResult = result as UpdateMeetingSpeakerAssignmentResult;
-    if (committedResult.applied) requestMeetingSpeakerCorrectionSync(input.scopeKey);
-    return committedResult;
+    return result as UpdateMeetingSpeakerAssignmentResult;
   }
 }

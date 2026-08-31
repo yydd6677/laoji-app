@@ -100,6 +100,56 @@ def test_v2_binding_task_and_purge_wire_contract(tmp_path, monkeypatch) -> None:
     assert set(purged.json()) == {"schema_version", "state", "purge_id", "error_code"}
 
 
+def test_v2_binding_cursor_tracks_contiguous_registration_prefix(tmp_path, monkeypatch) -> None:
+    client, _ = _client(tmp_path, monkeypatch)
+    empty = client.get("/api/device/v2/bindings/cursor")
+    assert empty.status_code == 200
+    assert empty.json() == {
+        "schema_version": 2,
+        "cursor": {
+            "binding_epoch_seq": 0,
+            "binding_id": None,
+            "binding_generation": None,
+            "binding_revision": None,
+            "cancel_revision": None,
+            "state": None,
+        },
+    }
+
+    registered: list[tuple[str, str]] = []
+    for sequence in (1, 2):
+        binding_id = str(uuid.uuid4())
+        generation = uuid.uuid4().hex
+        registered.append((binding_id, generation))
+        response = client.put(
+            f"/api/device/v2/meetings/{binding_id}",
+            json={
+                "schema_version": 2,
+                "binding_generation": generation,
+                "binding_epoch_seq": sequence,
+                "binding_revision": 1,
+                "cancel_revision": 0,
+                "purge_capability": {
+                    "capability_id": str(uuid.uuid4()),
+                    "secret_sha256": hashlib.sha256(f"cursor-secret-{sequence}".encode()).hexdigest(),
+                    "registration_request_id": f"cursor-binding-request-{sequence}",
+                },
+            },
+        )
+        assert response.status_code == 200
+
+    cursor = client.get("/api/device/v2/bindings/cursor")
+    assert cursor.status_code == 200
+    assert cursor.json()["cursor"] == {
+        "binding_epoch_seq": 2,
+        "binding_id": registered[-1][0],
+        "binding_generation": registered[-1][1],
+        "binding_revision": 1,
+        "cancel_revision": 0,
+        "state": "active",
+    }
+
+
 def test_worker_attempt_routes_are_not_device_bearer_surface(tmp_path, monkeypatch) -> None:
     client, _ = _client(tmp_path, monkeypatch)
     paths = {route.path for route in client.app.routes}
@@ -161,7 +211,7 @@ def test_upload_wire_routes_keep_binding_fence_and_task_identity(tmp_path, monke
     assert response.json()["session"]["put_url"] == "https://r2.invalid/put"
 
 
-def test_source_stream_candidate_is_default_off_and_device_fenced(tmp_path, monkeypatch) -> None:
+def test_source_stream_is_current_and_device_fenced(tmp_path, monkeypatch) -> None:
     client, _ = _client(tmp_path, monkeypatch)
     binding_id = str(uuid.uuid4())
     binding_generation = uuid.uuid4().hex
@@ -181,14 +231,6 @@ def test_source_stream_candidate_is_default_off_and_device_fenced(tmp_path, monk
         "entity_revision": 1,
         "task_input_sha256": "sha256:" + "b" * 64,
     }
-    disabled = client.post(
-        f"/api/device/v2/meetings/{binding_id}/source-streams",
-        json=payload,
-    )
-    assert disabled.status_code == 404
-    assert disabled.json()["detail"]["code"] == "SOURCE_STREAM_V2_DISABLED"
-
-    monkeypatch.setenv("LAOJI_VNEXT_SOURCE_STREAM_V2_ENABLED", "1")
     runtime = vnext_summary_runtime.current_summary_runtime_revision()
     enabled_capabilities = client.get("/api/device/v2/capabilities")
     assert enabled_capabilities.status_code == 200
@@ -247,7 +289,7 @@ def test_source_stream_candidate_is_default_off_and_device_fenced(tmp_path, monk
     assert cancelled.json()["cancelled"] is True
 
 
-def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypatch) -> None:
+def test_question_reader_route_is_current_and_typed(tmp_path, monkeypatch) -> None:
     client, _ = _client(tmp_path, monkeypatch)
     binding_id = str(uuid.uuid4())
     binding_generation = uuid.uuid4().hex
@@ -273,11 +315,6 @@ def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypat
             "text": source_text,
         }],
     }
-    disabled = client.post(f"/api/device/v2/meetings/{binding_id}/questions-v2", json=payload)
-    assert disabled.status_code == 404
-    assert disabled.json()["detail"]["code"] == "QUESTION_READER_V2_DISABLED"
-
-    monkeypatch.setenv("LAOJI_VNEXT_Q2_READER_ENABLED", "1")
     secret = "question-reader-purge-secret"
     registered = client.put(
         f"/api/device/v2/meetings/{binding_id}",
@@ -325,7 +362,6 @@ def test_question_reader_route_is_capability_gated_and_typed(tmp_path, monkeypat
 
 def test_question_reader_route_rejects_binding_revision_and_source_hash(tmp_path, monkeypatch) -> None:
     client, _ = _client(tmp_path, monkeypatch)
-    monkeypatch.setenv("LAOJI_VNEXT_Q2_READER_ENABLED", "1")
     binding_id = str(uuid.uuid4())
     binding_generation = uuid.uuid4().hex
     secret = "question-reader-fence-secret"
@@ -374,7 +410,6 @@ def test_question_reader_route_rejects_binding_revision_and_source_hash(tmp_path
 
 def test_question_reader_source_stream_commits_result_and_replays_by_task(tmp_path, monkeypatch) -> None:
     client, context = _client(tmp_path, monkeypatch)
-    monkeypatch.setenv("LAOJI_VNEXT_Q2_READER_ENABLED", "1")
     binding_id = str(uuid.uuid4())
     binding_generation = uuid.uuid4().hex
     secret = "question-stream-route-secret"

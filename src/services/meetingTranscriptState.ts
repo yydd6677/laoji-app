@@ -1,5 +1,4 @@
-import { getFeatureFlags } from '../config/featureFlags';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { ScopeKey } from '../domain/meeting';
 import type { TranscriptLine } from '../types';
 import { transcriptProjectionToLegacyLines } from './meetingContentProjection';
@@ -12,12 +11,11 @@ export interface ActiveMeetingTranscriptState {
   completing: boolean;
 }
 
-/** Reads the local active revision without enabling the global canonical list cutover. */
+/** Reads the current local active transcript revision. */
 export async function loadActiveMeetingTranscriptState(
   scopeKey: ScopeKey,
   legacyMeetingId: string,
 ): Promise<ActiveMeetingTranscriptState | null> {
-  if (!getFeatureFlags().localMeetingDbV1) return null;
   const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeetingId, scopeKey);
   if (!aggregate || aggregate.note.lifecycle === 'deleted') return null;
   const projection = await sqliteMeetingNoteRepository.getActiveTranscriptContent(

@@ -3,9 +3,9 @@ import { withAlpha } from '../theme/colors';
 export const EVENT_CATEGORIES = ['工作', '学习', '健康', '生活', '社交', '出行', '财务', '重要', '其他'] as const;
 export type EventCategory = typeof EVENT_CATEGORIES[number];
 
-// [PRODUCT] These are the colors from LaoJi's pre-Feishu event buckets.
+// [PRODUCT] These are LaoJi's established semantic event-bucket colors.
 // They intentionally do not read the page theme: a schedule keeps its type
-// color when the user switches between 标准蓝 and 绚彩.
+// color when the user switches between 标准 and 绚彩.
 const CATEGORY_COLORS: Readonly<Record<EventCategory, string>> = Object.freeze({
   工作: '#5B8CFF',
   学习: '#52C41A',

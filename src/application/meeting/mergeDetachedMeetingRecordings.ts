@@ -4,13 +4,9 @@ import {
   ingestMeetingMedia,
   type IngestedMeetingMedia,
 } from 'laoji-native-platform';
-import type {
-  MeetingNoteRepository,
-  MeetingRecordingMergeTaskRecord,
-  RecordingAssetRecord,
-} from '../../data/repositories';
-import { sqliteMeetingNoteRepository } from '../../data/repositories';
-import { canonicalRecordingSourceSha256 } from '../../data/repositories';
+import type { MeetingNoteRepository, MeetingRecordingMergeTaskRecord, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../../data/repositories/sqliteMeetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
 

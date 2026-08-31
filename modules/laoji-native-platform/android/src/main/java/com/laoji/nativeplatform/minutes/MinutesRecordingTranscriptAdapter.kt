@@ -14,6 +14,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 
 internal class MinutesRecordingTranscriptAdapter :
   ListAdapter<MinutesTranscriptLine, MinutesRecordingTranscriptAdapter.Holder>(DIFF) {
@@ -61,7 +62,7 @@ internal class MinutesRecordingTranscriptAdapter :
 
       speaker.maxLines = 1
       speaker.ellipsize = TextUtils.TruncateAt.END
-      speaker.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+      speaker.typeface = LaojiThemeTypography.typeface(parent.context, Typeface.NORMAL)
       metaRow.addView(
         speaker,
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, parent.context.dp(20)).apply {

@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import type { StyleProp, TextStyle } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { CalendarSlidePage } from './CalendarSlidePage';
 import { dateFromKey, formatMonthTitle } from '../utils/calendarDate';
 import { sortEventsForSearch } from '../utils/eventOrdering';

@@ -1,5 +1,5 @@
 import { Share } from 'react-native';
-import type { MarkerRecord } from '../data/repositories';
+import type { MarkerRecord } from "../data/repositories/meetingNoteRepository";
 import type { TranscriptLine } from '../types';
 import { formatNativeMinutesTimestamp } from '../native/nativeMinutesSnapshots';
 import { speakerDisplayLabel } from '../utils/speakerLabels';

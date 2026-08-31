@@ -9,13 +9,7 @@ export type MeetingSummarySectionKind =
   | 'comparison'
   | 'risk_card'
   | 'stat'
-  | 'bullets'
-  | 'numbered'
-  | 'decisions'
-  | 'topics'
-  | 'risks'
-  | 'action_items'
-  | 'legacy';
+  | 'action_items';
 
 export interface MeetingSummaryCitation {
   id: string;

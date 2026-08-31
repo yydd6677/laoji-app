@@ -12,6 +12,9 @@ export interface DeviceIdentity {
   epochId: string;
 }
 
+let cachedIdentity: DeviceIdentity | null = null;
+let identityRevision = 0;
+
 function uuid(): string {
   const value = Crypto.randomUUID();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
@@ -37,8 +40,12 @@ async function readStored(): Promise<DeviceIdentity | null> {
 }
 
 export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
+  if (cachedIdentity) return cachedIdentity;
   const current = await readStored();
-  if (current) return current;
+  if (current) {
+    cachedIdentity = current;
+    return current;
+  }
   const next: DeviceIdentity = {
     deviceId: uuid(),
     deviceSecret: await secret(),
@@ -49,6 +56,8 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
     SecureStore.setItemAsync(DEVICE_SECRET_KEY, next.deviceSecret),
     SecureStore.setItemAsync(DATA_EPOCH_KEY, next.epochId),
   ]);
+  cachedIdentity = next;
+  identityRevision += 1;
   return next;
 }
 
@@ -57,6 +66,8 @@ export async function replaceDataEpoch(epochId = uuid()): Promise<DeviceIdentity
   if (!/^[0-9a-f-]{36}$/i.test(epochId)) throw new Error('本机数据域无效');
   const next = { ...current, epochId: epochId.toLowerCase() };
   await SecureStore.setItemAsync(DATA_EPOCH_KEY, next.epochId);
+  cachedIdentity = next;
+  identityRevision += 1;
   return next;
 }
 
@@ -78,6 +89,13 @@ export async function clearDeviceIdentity(): Promise<void> {
     SecureStore.deleteItemAsync(DEVICE_SECRET_KEY),
     SecureStore.deleteItemAsync(DATA_EPOCH_KEY),
   ]);
+  cachedIdentity = null;
+  identityRevision += 1;
+}
+
+/** Synchronous generation used to invalidate short-lived authenticated caches. */
+export function getDeviceIdentityRevision(): number {
+  return identityRevision;
 }
 
 /** Backward-compatible test alias; production cleanup uses the explicit name. */

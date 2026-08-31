@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 const MOTION_MS = 300;
 
@@ -62,7 +62,7 @@ export function MeetingSummarySectionEditorSheet({
   onSave: (value: MeetingSummarySectionEditorSaveValue) => void;
   onRestore: () => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;

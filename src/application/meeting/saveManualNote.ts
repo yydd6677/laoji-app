@@ -1,11 +1,6 @@
-import type {
-  ManualNoteRecord,
-  MeetingNoteRepository,
-  MeetingTransaction,
-} from '../../data/repositories';
+import type { ManualNoteRecord, MeetingNoteRepository, MeetingTransaction } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
-import { assertScopeKey, secureClientIdFactory, type ClientIdFactory } from '../../domain/meeting';
-import { requestMeetingManualNoteSync } from './manualNoteSyncTrigger';
+import { assertScopeKey } from '../../domain/meeting';
 
 const MAX_MANUAL_NOTE_LENGTH = 200_000;
 
@@ -33,7 +28,6 @@ export class SaveManualNoteUseCase {
   constructor(
     private readonly repository: MeetingNoteRepository,
     private readonly now: () => number = Date.now,
-    private readonly idFactory: ClientIdFactory = secureClientIdFactory,
   ) {}
 
   async execute(input: SaveManualNoteInput): Promise<SaveManualNoteResult> {
@@ -42,9 +36,7 @@ export class SaveManualNoteUseCase {
       result = await this.executeInTransaction(transaction, input);
     });
     if (!result) throw new Error('manual note transaction produced no result');
-    const committed = result as SaveManualNoteResult;
-    if (committed.applied) requestMeetingManualNoteSync(input.scopeKey);
-    return committed;
+    return result as SaveManualNoteResult;
   }
 
   async executeInTransaction(
@@ -78,40 +70,14 @@ export class SaveManualNoteUseCase {
       ...current,
       content,
       revision,
-      dirty: true,
       lastSavedAtMs: savedAtMs,
       userEditedAtMs: savedAtMs,
     };
-    if (input.scopeKey !== 'guest') {
-      const operationId = input.operationId?.trim() || this.idFactory.create();
-      const inserted = await transaction.insertOutbox({
-        operationId,
-        scopeKey: input.scopeKey,
-        aggregateType: 'manual_note',
-        aggregateId: meetingId,
-        operationType: 'manual_note.upsert',
-        baseRevision: current.baseRemoteRevision,
-        payloadJson: JSON.stringify({
-          schema_version: 2,
-          meeting_id: meetingId,
-          expected_remote_revision: current.baseRemoteRevision,
-          client_note_revision: revision,
-          client_updated_at_ms: savedAtMs,
-          user_edited_at_ms: savedAtMs,
-          content,
-        }),
-        createdAtMs: savedAtMs,
-      });
-      if (!inserted) throw new Error('manual note sync identity already exists');
-    }
     await transaction.saveManualNote(next, input.scopeKey);
     await transaction.markCurrentSummaryStale(meetingId, input.scopeKey);
-    if (input.scopeKey !== 'guest') {
-      await transaction.updateMeeting(meetingId, input.scopeKey, {
-        syncState: 'pending',
-        updatedAtMs: savedAtMs,
-      });
-    }
+    await transaction.updateMeeting(meetingId, input.scopeKey, {
+      updatedAtMs: savedAtMs,
+    });
     return { note: next, applied: true };
   }
 }

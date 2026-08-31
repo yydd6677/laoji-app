@@ -1,7 +1,7 @@
 import type { NativeProjectionEnvelope } from 'laoji-native-platform';
 
 export type NativeProjectionActionFenceResult =
-  | { accepted: true; reason: 'candidate_disabled' | 'current_projection' }
+  | { accepted: true; reason: 'current_projection' }
   | { accepted: false; reason: 'projection_pending' | 'projection_missing' | 'projection_stale' };
 
 function sameProjection(
@@ -21,15 +21,12 @@ function sameProjection(
  *
  * Native views already reject stale incoming snapshots. This second boundary
  * covers an event that was queued on the bridge before a newer JS snapshot was
- * accepted. Candidate mode fails closed while the current hash is pending;
- * stable builds retain their pre-vNext interaction contract.
+ * accepted. The current path fails closed while the hash is pending.
  */
 export function fenceNativeProjectionAction(
-  candidateEnabled: boolean,
   current: NativeProjectionEnvelope | null | undefined,
   action: NativeProjectionEnvelope | null | undefined,
 ): NativeProjectionActionFenceResult {
-  if (!candidateEnabled) return { accepted: true, reason: 'candidate_disabled' };
   if (!current) return { accepted: false, reason: 'projection_pending' };
   if (!action) return { accepted: false, reason: 'projection_missing' };
   if (!sameProjection(current, action)) return { accepted: false, reason: 'projection_stale' };

@@ -1,9 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Meeting } from '../types';
 import { Appearance, Colors as C } from '../theme/colors';
 import { displayMeetingTitle } from '../utils/meetingTitle';
+import { MotionPressable } from './MotionPressable';
 
 export const MEETING_LIST_ITEM_GEOMETRY = Object.freeze({
   minHeight: 72,
@@ -52,11 +53,11 @@ export function MeetingListItem({
   const displayTitle = displayMeetingTitle(meeting.title);
 
   return (
-    <TouchableOpacity
+    <MotionPressable
       testID={`meeting-list-item-${meeting.id}`}
       style={[
         s.row,
-        Appearance.cardRadius > 6 && {
+        Appearance.surfaceMode !== 'flat' && {
           marginHorizontal: 8,
           marginVertical: 4,
           backgroundColor: C.card,
@@ -66,14 +67,15 @@ export function MeetingListItem({
           shadowColor: C.purpleDark,
           shadowOffset: { width: 0, height: 2 },
           shadowOpacity: Appearance.shadowOpacity,
-          shadowRadius: 6,
-          elevation: 2,
+          shadowRadius: Appearance.shadowRadius,
+          elevation: Appearance.elevation,
         },
       ]}
+      pressedStyle={{ backgroundColor: C.inputBg }}
+      feedback="quiet"
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={320}
-      activeOpacity={0.65}
       accessibilityRole="button"
       accessibilityLabel={displayTitle}
       accessibilityHint="打开会议详情，长按显示更多操作"
@@ -83,7 +85,7 @@ export function MeetingListItem({
         <Ionicons name={meta.icon} size={14} color={meta.color} />
         <Text style={[s.metaText, { color: meta.color }]} numberOfLines={1}>{meta.text}</Text>
       </View>
-    </TouchableOpacity>
+    </MotionPressable>
   );
 }
 

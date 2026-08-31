@@ -73,7 +73,6 @@ export interface BuildNativeRecordingSnapshotInput {
   manualNoteEnabled?: boolean;
   manualNoteError?: string;
   manualNoteRetryable?: boolean;
-  manualNoteConflict?: boolean;
   transcript: readonly NativeMinutesTranscriptLine[];
   projection?: NativeProjectionEnvelope | null;
 }
@@ -100,9 +99,7 @@ export interface BuildNativeDetailSnapshotInput {
   transcript: readonly NativeMinutesTranscriptLine[];
   markers?: readonly NativeMinutesMarkerInput[];
   actionItemCandidates?: readonly MeetingSummaryActionCandidate[];
-  conflictedActionIds?: ReadonlySet<string>;
   summaryDocument?: MeetingSummaryDocument | null;
-  summaryText?: string;
   transcriptLoading?: boolean;
   transcriptStatusMessage?: string;
   summaryLoading?: boolean;
@@ -112,12 +109,9 @@ export interface BuildNativeDetailSnapshotInput {
   canShare?: boolean;
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
-  canSelectSummaryTemplate?: boolean;
-  summaryTemplateLabel?: string;
   canEditSummary?: boolean;
   canCreateAction?: boolean;
   canShareActions?: boolean;
-  canCreateClip?: boolean;
   summaryGenerating?: boolean;
   updatingActionId?: string | null;
   projection?: NativeProjectionEnvelope | null;
@@ -133,7 +127,6 @@ export interface BuildNativeDetailSnapshotInput {
   manualNoteEnabled?: boolean;
   manualNoteError?: string;
   manualNoteRetryable?: boolean;
-  manualNoteConflict?: boolean;
   pageGenerations?: Partial<Record<MinutesDetailTab, number>>;
   pageCached?: Partial<Record<MinutesDetailTab, boolean>>;
   playerSource?: MinutesPlayerSourceSnapshot | null;
@@ -142,8 +135,6 @@ export interface BuildNativeDetailSnapshotInput {
   audioErrorMessage?: string;
   processingStatusLabel?: string;
   processingStatusTone?: MinutesStatusTone;
-  rootSyncConflict?: boolean;
-  summarySyncConflict?: boolean;
   processingRetryStage?: MinutesProcessingStage;
   processingRetrying?: boolean;
   recordingMergeStatusLabel?: string;
@@ -300,119 +291,6 @@ export function toNativeMinutesTranscript(
     });
 }
 
-function stripSummaryMarkdown(value: string): string {
-  return toSimplifiedChinese(value)
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/(\*\*|__|~~|`)(.*?)\1/g, '$2')
-    .trim();
-}
-
-type NativeSummaryKind = NonNullable<import('laoji-native-platform').MinutesSummaryBlockSnapshot['kind']>;
-
-function isDecisionSummarySection(section: Pick<MinutesSummarySectionSnapshot, 'kind' | 'stableKey' | 'title'>): boolean {
-  const values = [section.kind, section.stableKey, section.title ?? '']
-    .map(value => toSimplifiedChinese(String(value)).replace(/[\s:：\-—_（）()【】\[\]]/g, '').toLowerCase());
-  return values.some(value => value === 'decisions' || value === 'decision' || value === '决定' || value === '关键决定' || value === 'commitments' || value === '双方约定');
-}
-
-function legacySummarySections(
-  markdown: string,
-  hideActionSection = false,
-): MinutesSummarySectionSnapshot[] {
-  const blocks: Array<{ kind: NativeSummaryKind; text: string; checked?: boolean }> = [];
-  const paragraph: string[] = [];
-  const code: string[] = [];
-  let inCode = false;
-  let skippedActionHeadingLevel: number | null = null;
-  let keptActionSection = false;
-  const flushParagraph = () => {
-    const text = stripSummaryMarkdown(paragraph.join('\n'));
-    if (text) blocks.push({ kind: 'paragraph', text });
-    paragraph.length = 0;
-  };
-  const flushCode = () => {
-    const text = code.join('\n').trimEnd();
-    if (text) blocks.push({ kind: 'code', text });
-    code.length = 0;
-  };
-  toSimplifiedChinese(markdown).replace(/\r\n?/g, '\n').split('\n').forEach(rawLine => {
-    const line = rawLine.trimEnd();
-    if (/^\s*```/.test(line)) {
-      if (inCode) flushCode();
-      else flushParagraph();
-      inCode = !inCode;
-      return;
-    }
-    if (inCode) {
-      code.push(rawLine);
-      return;
-    }
-    if (!line.trim() || /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
-      flushParagraph();
-      return;
-    }
-    const normalized = line.trim();
-    const heading = /^\s*(#{1,6})\s+(.+)$/.exec(normalized);
-    const task = /^\s*[-*+]\s+\[([ xX])\]\s+(.+)$/.exec(normalized);
-    const bullet = /^\s*[-*+]\s+(.+)$/.exec(normalized);
-    const ordered = /^\s*\d+[.)]\s+(.+)$/.exec(normalized);
-    const quote = /^\s*>\s?(.*)$/.exec(normalized);
-
-    if (heading) {
-      const headingLevel = heading[1].length;
-      const headingText = stripSummaryMarkdown(heading[2]);
-      if (skippedActionHeadingLevel !== null) {
-        // Keep nested headings inside a skipped action section hidden. A
-        // same-level (or higher-level) heading starts the next real section.
-        if (headingLevel > skippedActionHeadingLevel) return;
-        skippedActionHeadingLevel = null;
-      }
-      const isActionSection = isMeetingSummaryActionSection({
-        kind: 'paragraph',
-        stableKey: headingText,
-        title: headingText,
-      });
-      const isDecisionSection = isDecisionSummarySection({
-        kind: 'paragraph',
-        stableKey: headingText,
-        title: headingText,
-      });
-      if (isDecisionSection || (isActionSection && (hideActionSection || keptActionSection))) {
-        flushParagraph();
-        skippedActionHeadingLevel = headingLevel;
-        return;
-      }
-      if (isActionSection) keptActionSection = true;
-    }
-    if (skippedActionHeadingLevel !== null) return;
-
-    const matched = heading || task || bullet || ordered || quote;
-    if (!matched) {
-      paragraph.push(normalized);
-      return;
-    }
-    flushParagraph();
-    if (heading) blocks.push({ kind: 'heading', text: stripSummaryMarkdown(heading[2]) });
-    else if (task) blocks.push({ kind: 'task', checked: task[1].toLowerCase() === 'x', text: stripSummaryMarkdown(task[2]) });
-    else if (bullet) blocks.push({ kind: 'bullet', text: stripSummaryMarkdown(bullet[1]) });
-    else if (ordered) blocks.push({ kind: 'ordered', text: stripSummaryMarkdown(ordered[1]) });
-    else if (quote) blocks.push({ kind: 'quote', text: stripSummaryMarkdown(quote[1]) });
-  });
-  if (inCode) flushCode();
-  flushParagraph();
-  return blocks.map((block, index) => ({
-    id: `summary-${index}`,
-    stableKey: `legacy_${index}`,
-    kind: block.kind === 'task' ? 'bullet' as const : block.kind,
-    title: null,
-    text: block.kind === 'task'
-      ? `${block.checked ? '已完成' : '待办'}：${block.text}`
-      : block.text,
-    citations: [],
-  }));
-}
-
 function structuredSummarySections(
   document: MeetingSummaryDocument,
   hasActions: boolean,
@@ -421,7 +299,6 @@ function structuredSummarySections(
   let keptFallbackActionSection = false;
   return meetingSummarySectionsForPresentation(document.sections)
     .filter(section => {
-      if (isDecisionSummarySection(section)) return false;
       if (!isMeetingSummaryActionSection(section)) return true;
       if (hasActions) return false;
       if (keptFallbackActionSection) return false;
@@ -470,7 +347,6 @@ function structuredSummarySections(
 function structuredSummaryActions(
   actions: readonly MeetingSummaryActionCandidate[],
   updatingActionId?: string | null,
-  conflictedActionIds: ReadonlySet<string> = new Set<string>(),
   canShare = false,
 ) {
   return dedupeMeetingSummaryActions(actions).map(action => {
@@ -501,8 +377,7 @@ function structuredSummaryActions(
       sourceStartMs,
       updatedAtMs: action.updatedAtMs ?? 0,
       updating: actionId === updatingActionId,
-      syncConflict: conflictedActionIds.has(actionId),
-      canShare: canShare && !conflictedActionIds.has(actionId),
+      canShare,
     } as const;
   });
 }
@@ -644,7 +519,6 @@ function detailContentState(
   tab: MinutesDetailTab,
 ): { phase: MinutesContentPhase; message: string } {
   if (tab === 'notes') {
-    if (input.manualNoteLoading) return { phase: 'loading', message: '正在读取我的笔记' };
     if (input.manualNoteError) return { phase: 'error', message: input.manualNoteError };
     return { phase: 'ready', message: '' };
   }
@@ -665,7 +539,7 @@ function detailContentState(
   }
   if (tab === 'summary') {
     if (input.summaryLoading) {
-      return { phase: 'loading', message: input.summaryProgress || '正在生成整理结果' };
+      return { phase: 'loading', message: input.summaryProgress || '正在整理会议记录' };
     }
     if (input.summaryError) return { phase: 'error', message: input.summaryError };
     return detail.summary.length > 0 || (detail.actions?.length ?? 0) > 0
@@ -708,7 +582,6 @@ export function buildNativeMinutesRecordingSnapshot(
       manualNoteEnabled: input.manualNoteEnabled ?? false,
       manualNoteError: input.manualNoteError ?? '',
       manualNoteRetryable: input.manualNoteRetryable ?? true,
-      manualNoteConflict: input.manualNoteConflict ?? false,
       transcript: toNativeMinutesTranscript(input.transcript),
     },
     projection: input.projection ?? null,
@@ -726,7 +599,6 @@ export function buildNativeMinutesDetailSnapshot(
   const actions = structuredSummaryActions(
     dedupedActionCandidates,
     input.updatingActionId,
-    input.conflictedActionIds,
     input.canShareActions ?? false,
   );
   const summary = input.summaryDocument
@@ -736,10 +608,7 @@ export function buildNativeMinutesDetailSnapshot(
         || dedupeMeetingSummaryActions(input.summaryDocument.actionItemCandidates).length > 0,
       input.canEditSummary === true,
     )
-    // A legacy Markdown summary may already contain an "行动项" section.
-    // Once structured action rows are available, that section is only a
-    // second projection of the same data and must not be rendered as well.
-    : legacySummarySections(input.summaryText?.trim() ?? '', actions.length > 0);
+    : [];
   const speakers = nativeMinutesSpeakers(input.transcript, Boolean(input.canManageSpeakers));
   const markers: MinutesMarkerSnapshot[] = (input.markers ?? [])
     .filter(marker => marker.id.trim() && Number.isSafeInteger(marker.positionMs) && marker.positionMs >= 0)
@@ -766,10 +635,7 @@ export function buildNativeMinutesDetailSnapshot(
     canShare: input.canShare ?? false,
     canManageSpeakers: input.canManageSpeakers ?? false,
     canGenerateSummary: input.canGenerateSummary ?? false,
-    canSelectSummaryTemplate: input.canSelectSummaryTemplate ?? false,
-    summaryTemplateLabel: input.summaryTemplateLabel ?? '',
     canCreateAction: input.canCreateAction ?? false,
-    canCreateClip: input.canCreateClip ?? false,
     summaryGenerating: input.summaryGenerating ?? false,
     summaryActionLabel: summary.length > 0 ? '重新整理' : '生成整理结果',
     titleEditRequestId: Math.max(0, input.titleEditRequestId ?? 0),
@@ -784,7 +650,6 @@ export function buildNativeMinutesDetailSnapshot(
     manualNoteEnabled: input.manualNoteEnabled ?? false,
     manualNoteError: input.manualNoteError ?? '',
     manualNoteRetryable: input.manualNoteRetryable ?? true,
-    manualNoteConflict: input.manualNoteConflict ?? false,
     transcript: toNativeMinutesTranscript(
       input.transcript,
       input.playerSources ?? (input.playerSource ? [input.playerSource] : []),
@@ -802,8 +667,6 @@ export function buildNativeMinutesDetailSnapshot(
     // Root revisions are reconciled by the durable sync worker.  They are not
     // a user-selectable version-merge workflow, so never expose a manual
     // "处理" action while a background retry is in progress.
-    rootSyncConflict: false,
-    summarySyncConflict: input.summarySyncConflict ?? false,
     processingRetryStage: input.processingRetryStage,
     processingRetrying: input.processingRetrying ?? false,
     recordingMergeStatusLabel: input.recordingMergeStatusLabel ?? '',

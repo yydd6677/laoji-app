@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsFocused, type CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,7 +25,7 @@ import { QuickDatePanel } from '../components/QuickDatePanel';
 import { CalendarSearchPage } from '../components/CalendarSearchPage';
 import { getAppStorageItem, setAppStorageItem } from '../services/appStorage';
 import { useEvents } from '../store/EventsStore';
-import { useAuth } from '../store/AuthStore';
+import { useLocalProfile } from '../store/LocalProfileStore';
 import {
   addMonths,
   dateKey,
@@ -69,7 +69,7 @@ export function ScheduleScreen({ navigation }: Props) {
     refreshEvents,
   } = useEvents();
   const { showDialog } = useAppDialog();
-  const { initializing, mode: authMode, session, profile } = useAuth();
+  const { initializing, profile } = useLocalProfile();
   const initialDate = useMemo(() => new Date(), []);
   const [selectedDate, setSelectedDate] = useState(initialDate);
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(initialDate));
@@ -79,11 +79,7 @@ export function ScheduleScreen({ navigation }: Props) {
   const [quickDateVisible, setQuickDateVisible] = useState(false);
   const [voiceVisible, setVoiceVisible] = useState(false);
   const quickDateProgress = useRef(new Animated.Value(0)).current;
-  const dataScope = initializing
-    ? null
-    : authMode === 'authenticated'
-      ? session ? `user:${session.user.id}` : null
-      : authMode === 'guest' ? 'guest' : 'signed_out';
+  const dataScope = initializing ? null : 'guest';
   const viewMode = dataScope && restoredViewMode?.scope === dataScope
     ? restoredViewMode.mode
     : null;

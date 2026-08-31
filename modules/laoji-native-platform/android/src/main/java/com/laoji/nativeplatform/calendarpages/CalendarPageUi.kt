@@ -5,7 +5,6 @@ package com.laoji.nativeplatform.calendarpages
 
 import android.content.Context
 import android.content.res.ColorStateList
-import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -20,8 +19,8 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.view.ViewCompat
-import com.laoji.nativeplatform.NativeThemePreference
-import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.ui.NativeUiTokens
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 
 internal object CalendarPagePalette {
   var body = Color.WHITE
@@ -40,75 +39,21 @@ internal object CalendarPagePalette {
   var scrim = Color.argb(112, 255, 255, 255)
 
   fun configure(context: Context) {
-    val isDark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-      Configuration.UI_MODE_NIGHT_YES
-    val vivid = NativeThemePreference.isVivid(context)
-    when {
-      vivid && !isDark -> {
-        body = Color.rgb(255, 240, 246)
-        float = Color.rgb(253, 234, 245)
-        neutralBackground = Color.rgb(240, 232, 255)
-        text = Color.rgb(28, 27, 51)
-        secondary = Color.rgb(148, 144, 181)
-        placeholder = Color.rgb(184, 180, 212)
-        disabled = Color.rgb(210, 206, 227)
-        divider = Color.rgb(229, 207, 232)
-        primary = Color.rgb(123, 92, 184)
-        primaryPressed = Color.rgb(46, 24, 128)
-        primaryHeader = Color.rgb(46, 24, 128)
-        primarySoft = Color.rgb(237, 232, 255)
-        danger = Color.rgb(255, 77, 79)
-        scrim = Color.argb(112, 46, 24, 128)
-      }
-      vivid -> {
-        body = Color.rgb(33, 28, 43)
-        float = Color.rgb(48, 40, 61)
-        neutralBackground = Color.rgb(68, 55, 90)
-        text = Color.rgb(247, 241, 255)
-        secondary = Color.rgb(197, 183, 216)
-        placeholder = Color.rgb(152, 137, 174)
-        disabled = Color.rgb(102, 89, 117)
-        divider = Color.rgb(92, 76, 112)
-        primary = Color.rgb(169, 130, 232)
-        primaryPressed = Color.rgb(216, 196, 255)
-        primaryHeader = Color.rgb(195, 163, 255)
-        primarySoft = Color.rgb(59, 44, 85)
-        danger = Color.rgb(255, 123, 123)
-        scrim = Color.argb(153, 0, 0, 0)
-      }
-      isDark -> {
-        body = Color.rgb(26, 26, 26)
-        float = Color.rgb(10, 10, 10)
-        neutralBackground = Color.rgb(41, 41, 41)
-        text = Color.rgb(235, 235, 235)
-        secondary = Color.rgb(166, 166, 166)
-        placeholder = Color.rgb(117, 117, 117)
-        disabled = Color.rgb(95, 95, 95)
-        divider = Color.rgb(65, 65, 65)
-        primary = Color.rgb(117, 164, 255)
-        primaryPressed = Color.rgb(76, 136, 255)
-        primaryHeader = Color.rgb(143, 180, 255)
-        primarySoft = Color.rgb(21, 35, 64)
-        danger = Color.rgb(240, 91, 86)
-        scrim = Color.argb(153, 0, 0, 0)
-      }
-      else -> {
-        body = Color.WHITE
-        float = Color.WHITE
-        neutralBackground = Color.rgb(245, 246, 247)
-        text = Color.rgb(31, 35, 41)
-        secondary = Color.rgb(100, 106, 115)
-        placeholder = Color.rgb(143, 149, 158)
-        disabled = Color.rgb(187, 191, 196)
-        divider = Color.rgb(222, 224, 227)
-        primary = Color.rgb(20, 86, 240)
-        primaryPressed = Color.rgb(4, 66, 210)
-        primaryHeader = Color.rgb(4, 66, 210)
-        primarySoft = Color.rgb(240, 244, 255)
-        danger = Color.rgb(226, 46, 40)
-        scrim = Color.argb(112, 255, 255, 255)
-      }
-    }
+    val palette = NativeUiTokens.palette(context)
+    body = palette.surface
+    float = palette.surface
+    neutralBackground = palette.body
+    text = palette.textPrimary
+    secondary = palette.textSecondary
+    placeholder = palette.textTertiary
+    disabled = palette.textDisabled
+    divider = palette.divider
+    primary = palette.primary
+    primaryPressed = palette.primaryPressed
+    primaryHeader = palette.primaryPressed
+    primarySoft = palette.primarySoft
+    danger = palette.danger
+    scrim = palette.mask
   }
 }
 
@@ -117,7 +62,6 @@ internal fun Context.pageDp(value: Float): Int =
 
 internal fun Context.pageDp(value: Int): Int = pageDp(value.toFloat())
 
-@FeishuEvidence("UI-TOKENS-001")
 internal fun Context.pageText(
   value: CharSequence = "",
   sizeSp: Float = 14f,
@@ -127,7 +71,7 @@ internal fun Context.pageText(
   text = value
   setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
   setTextColor(color)
-  typeface = Typeface.create(Typeface.DEFAULT, weight)
+  typeface = LaojiThemeTypography.typeface(this@pageText, weight)
   includeFontPadding = false
 }
 
@@ -146,7 +90,6 @@ internal fun View.pageShape(
   }
 }
 
-@FeishuEvidence("UI-TOKENS-001")
 internal fun Context.pageDivider(startInsetDp: Int = 16): View = View(this).apply {
   setBackgroundColor(CalendarPagePalette.divider)
   minimumHeight = pageDp(0.5f).coerceAtLeast(1)
@@ -156,7 +99,6 @@ internal fun Context.pageDivider(startInsetDp: Int = 16): View = View(this).appl
   ).apply { marginStart = pageDp(startInsetDp) }
 }
 
-@FeishuEvidence("UI-ICON-PRIMITIVES-001")
 internal fun Context.pageIconButton(
   drawableRes: Int,
   description: String,
@@ -173,7 +115,6 @@ internal fun Context.pageIconButton(
   isFocusable = true
 }
 
-@FeishuEvidence("UI-STATE-EMPTY-ERROR-001")
 internal class CalendarPageEmptyArt(context: Context) : View(context) {
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     style = Paint.Style.STROKE
@@ -191,7 +132,6 @@ internal class CalendarPageEmptyArt(context: Context) : View(context) {
   }
 }
 
-@FeishuEvidence("UI-STATE-EMPTY-ERROR-001")
 internal class CalendarPageStateView(
   context: Context,
   private val onRetry: (() -> Unit)? = null,

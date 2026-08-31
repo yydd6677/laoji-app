@@ -24,24 +24,20 @@ import { displayMeetingTitle } from '../utils/meetingTitle';
 import { useMeetingMediaImport } from '../components/MeetingMediaImportProvider';
 import { deriveLegacyMeetingPresentationState } from '../services/meetingPresentation';
 import { useMeetingRecycleCapability } from '../hooks/useMeetingRecycleCapability';
-import { useAuth } from '../store/AuthStore';
-import {
-  getMeetingTagCatalogSyncConflict,
-  resolveMeetingTagCatalogSyncConflict,
-  sqliteMeetingNoteRepository,
-} from '../data/repositories';
-import type { MeetingSearchResult, MeetingTagRecord } from '../data/repositories';
+import { AppActionSheet } from '../components/AppActionSheet';
+import { useLocalProfile } from '../store/LocalProfileStore';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
+import type { MeetingSearchResult, MeetingTagRecord } from "../data/repositories/meetingNoteRepository";
 import {
   ManageMeetingOrganizationUseCase,
-  notifyMeetingTagCatalogChanged,
-  requestMeetingTagCatalogSync,
-  subscribeMeetingTagCatalogChanged,
 } from '../application/meeting';
 import { listMeetingRecycleBin, type MeetingRecycleBinEntry } from '../services/meetingRecycleBin';
 import type { ScopeKey } from '../domain/meeting';
 import { MeetingTagSheet } from '../components/MeetingTagSheet';
 import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
 import { meetingMatchesSearchMetadata } from '../services/meetingSearchQuery';
+import { createClientRequestState } from '../services/clientRequestId';
+import { prewarmDeviceV2RealtimeRecording } from '../services/deviceV2Realtime';
 
 type MeetingListNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -69,19 +65,6 @@ function meetingListPresentation(meeting: Meeting, captureInterrupted: boolean) 
   const presentation = deriveLegacyMeetingPresentationState(meeting, captureInterrupted
     ? { captureOverride: 'failed_recoverable' }
     : undefined);
-  const hasRootSyncPending = Boolean(meeting.statusSyncPending)
-    || meeting.tags.some(tag => tag.label === '待同步');
-  // Root revision conflicts are handled by the background sync worker.  Do
-  // not expose a permanent red state that implies a manual repair action.
-  if (meeting.tags.some(tag => tag.label === '同步冲突')) {
-    return { label: '待同步', tone: 'warning' as const };
-  }
-  if (
-    hasRootSyncPending
-    && (presentation.key === 'ready' || presentation.key === 'not_started')
-  ) {
-    return { label: '待同步', tone: 'warning' as const };
-  }
   const imported = meeting.tags.some(tag => tag.label === '已导入');
   if (imported && (presentation.key === 'ready' || presentation.key === 'not_started')) {
     return { label: '已导入', tone: 'primary' as const };
@@ -101,12 +84,17 @@ function cleanCoverText(value: string): string {
 }
 
 /**
- * Feishu's Android client consumes server-selected text_cover_type/text_cover.
+ * The Android client consumes server-selected text_cover_type/text_cover.
  * LaoJi has no equivalent home-list field, so this is an explicit local inference:
  * a usable summary wins; otherwise use a named dominant speaker and one representative line.
  */
-function inferredMeetingCover(summary: MeetingSummary | null, transcript: readonly TranscriptLine[]) {
+function inferredMeetingCover(
+  summaryPreview: string | undefined,
+  summary: MeetingSummary | null,
+  transcript: readonly TranscriptLine[],
+) {
   const summaryText = [
+    summaryPreview,
     meetingSummaryToText(summary),
     briefGreetingSummaryText(transcript),
   ]
@@ -187,6 +175,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     meetings,
     loading,
     error,
+    createMeeting,
     reorderMeetings,
     deleteMeeting,
     restoreDeletedMeeting,
@@ -196,7 +185,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     getCachedTranscript,
     getCachedSummary,
   } = useMeetings();
-  const { isGuest, session, profile } = useAuth();
+  const { profile } = useLocalProfile();
   const {
     retentionDays,
     refresh: refreshRecycleCapability,
@@ -224,6 +213,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const [tagAssignments, setTagAssignments] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
   const [tagSheetMode, setTagSheetMode] = useState<'assign' | 'manage' | null>(null);
   const [tagMeetingId, setTagMeetingId] = useState<string | null>(null);
+  const [recordSourceVisible, setRecordSourceVisible] = useState(false);
   const [searchResults, setSearchResults] = useState<readonly MeetingSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -231,11 +221,11 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   const focusRequestRef = useRef(0);
   const reorderInFlightRef = useRef(false);
   const recycleBinEmptyingRef = useRef(false);
-  const accountScope = !isGuest && session ? `user:${session.user.id}` as ScopeKey : null;
-  const meetingScope = isGuest ? 'guest' as ScopeKey : accountScope;
+  const phoneRecordingStartRef = useRef(false);
+  const meetingScope: ScopeKey = 'guest';
   const profileEntry = useMemo(
-    () => buildNativeProfileEntrySnapshot(profile, isGuest),
-    [isGuest, profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
+    () => buildNativeProfileEntrySnapshot(profile, true),
+    [profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
   );
 
   const refreshRecycleBin = useCallback(async (syncRemote = false) => {
@@ -280,11 +270,6 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
   }, [recycleBinVisible]);
 
   const refreshOrganization = useCallback(async () => {
-    if (!meetingScope) {
-      setMeetingTags([]);
-      setTagAssignments(new Map());
-      return '当前无法使用会议标签。';
-    }
     try {
       const [tags, assignments] = await Promise.all([
         meetingOrganization.listTags(meetingScope),
@@ -310,10 +295,6 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     if (!isFocused) return;
     void refreshOrganization();
   }, [isFocused, meetings, refreshOrganization]);
-
-  useEffect(() => subscribeMeetingTagCatalogChanged(changedScope => {
-    if (changedScope === meetingScope) void refreshOrganization();
-  }), [meetingScope, refreshOrganization]);
 
   useEffect(() => {
     const request = ++searchRequestRef.current;
@@ -474,7 +455,11 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       statusTone: presentation.tone,
       canResume: canResumeMeetingRecording(meeting),
       supportText,
-      ...inferredMeetingCover(getCachedSummary(meeting.id), getCachedTranscript(meeting.id)),
+      ...inferredMeetingCover(
+        meeting.summaryCoverText,
+        getCachedSummary(meeting.id),
+        getCachedTranscript(meeting.id),
+      ),
     };
   }), [getCachedSummary, getCachedTranscript, orderedMeetings, staleRecordingIds, tagAssignments, tagNameById]);
   const metadataSearchMeetings = useMemo(
@@ -537,13 +522,9 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
             ? '正在清理'
           : permanentlyDeletingMeetingId === entry.meetingId
             ? '正在删除'
-          : entry.canRestore ? `还可恢复${entry.remainingDays}天` : '正在同步',
-        // A deleted root revision conflict is retried by the background
-        // reconciler. It must not be presented as a permanent red error.
+          : `还可恢复${entry.remainingDays}天`,
         statusTone: 'warning' as const,
         action: 'restore' as const,
-        // A conflicted tombstone may not be restorable, but it must remain
-        // long-pressable so the user can still permanently remove it.
         actionEnabled: restoringMeetingId === null
           && permanentlyDeletingMeetingId === null
           && !recycleBinEmptying,
@@ -776,7 +757,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
 
   const confirmRestore = (meetingId: string) => {
     const entry = recycleBinEntries.find(item => item.meetingId === meetingId);
-    if (!entry || !entry.canRestore || retentionDays === null || restoringMeetingId) return;
+    if (!entry || retentionDays === null || restoringMeetingId) return;
     showDialog({
       title: '恢复会议记录？',
       message: '恢复后，此会议会重新显示在会议记录中。',
@@ -838,6 +819,57 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
       setReorderSaving(false);
     }
   };
+
+  const openRecordingSourcePicker = useCallback(async () => {
+    // Use the source-choice dwell time to refresh the device token,
+    // capability cache and native credential lease.  This never opens the
+    // microphone or chooses a source on the user's behalf.
+    void prewarmDeviceV2RealtimeRecording().catch(() => undefined);
+    if (hasNativeRecorder()) {
+      const active = await getNativeRecorderState().catch(() => null);
+      if (active && ACTIVE_RECORDER_STATES.has(active.state)) {
+        const activeMeeting = meetings.find(meeting => meeting.id === active.sessionId);
+        if (activeMeeting) {
+          navigation.navigate('MeetingLive', { meetingId: activeMeeting.id });
+          return;
+        }
+        showDialog({ title: '录音正在处理中', tone: 'info' });
+        return;
+      }
+    }
+    setRecordSourceVisible(true);
+  }, [meetings, navigation, showDialog]);
+
+  const startPhoneRecording = useCallback(async () => {
+    if (phoneRecordingStartRef.current) return;
+    phoneRecordingStartRef.current = true;
+    try {
+      // Give the recording route a stable meeting identity on its first frame.
+      // Otherwise its revisioned native projection changes entity while the
+      // microphone is starting, leaving the visible controls on PREPARING even
+      // though Android is already capturing audio.
+      const request = createClientRequestState('meeting');
+      const meeting = await createMeeting('', {
+        mode: 'realtime',
+        clientRequestId: request.id,
+        entryPoint: 'meeting_tab',
+        fastLocalResult: true,
+      });
+      navigation.navigate('MeetingLive', {
+        meetingId: meeting.id,
+        startRequested: true,
+        entryPoint: 'meeting_tab',
+      });
+    } catch (reason) {
+      showDialog({
+        title: '无法开始录音',
+        message: readableErrorMessage(reason, '会议记录暂时无法创建，请重试。'),
+        tone: 'error',
+      });
+    } finally {
+      phoneRecordingStartRef.current = false;
+    }
+  }, [createMeeting, navigation, showDialog]);
 
   const handleAction = (action: MinutesSemanticAction) => {
     switch (action.type) {
@@ -924,11 +956,7 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
         void confirmDelete(action.meetingId);
         break;
       case 'startRecording':
-        {
-          const resumable = meetings.find(canResumeMeetingRecording);
-          if (resumable) navigation.navigate('MeetingLive', { meetingId: resumable.id });
-          else navigation.navigate('MeetingLive');
-        }
+        void openRecordingSourcePicker();
         break;
       case 'importMedia':
         void selectMeetingMedia();
@@ -967,52 +995,6 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
     if (loadError) {
       showDialog({ title: '标签暂时不可用', message: loadError, tone: 'error' });
       return;
-    }
-    if (accountScope) {
-      try {
-        const conflict = await getMeetingTagCatalogSyncConflict(accountScope);
-        if (conflict) {
-          const resolve = async (resolution: 'keep_local' | 'use_cloud') => {
-            try {
-              const result = await resolveMeetingTagCatalogSyncConflict(
-                accountScope,
-                resolution,
-                Date.now(),
-              );
-              if (!result.resolved) throw new Error('标签同步冲突已经变化');
-              notifyMeetingTagCatalogChanged(accountScope);
-              requestMeetingTagCatalogSync(accountScope);
-              await refreshOrganization();
-              setTagMeetingId(meetingId);
-              setTagSheetMode(mode);
-            } catch (reason) {
-              showDialog({
-                title: '标签同步冲突未解决',
-                message: readableErrorMessage(reason, '标签暂时无法合并，请稍后重试。'),
-                tone: 'error',
-              });
-            }
-          };
-          showDialog({
-            title: '标签已在其他设备更新',
-            message: '请选择保留本机标签，或使用云端标签。',
-            tone: 'warning',
-            actions: [
-              { text: '保留本机', role: 'primary', onPress: () => resolve('keep_local') },
-              { text: '使用云端', onPress: () => resolve('use_cloud') },
-              { text: '取消', role: 'cancel' },
-            ],
-          });
-          return;
-        }
-      } catch (reason) {
-        showDialog({
-          title: '标签暂时不可用',
-          message: readableErrorMessage(reason, '标签同步状态暂时无法读取，请稍后重试。'),
-          tone: 'error',
-        });
-        return;
-      }
     }
     setTagMeetingId(meetingId);
     setTagSheetMode(mode);
@@ -1099,6 +1081,23 @@ export function MeetingListScreen({ navigation, onTabPress, bottomBarSelectionCo
           onSave={tagSheetMode === 'assign' ? saveMeetingTags : undefined}
         />
       ) : null}
+      <AppActionSheet
+        visible={recordSourceVisible}
+        title="录音"
+        onClose={() => setRecordSourceVisible(false)}
+        items={[
+          {
+            key: 'phone',
+            label: '手机录音',
+            onPress: () => { void startPhoneRecording(); },
+          },
+          {
+            key: 'external',
+            label: '外接设备',
+            onPress: () => navigation.navigate('HardwareDevices'),
+          },
+        ]}
+      />
     </>
   );
 }

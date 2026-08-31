@@ -1,11 +1,9 @@
-import { getFeatureFlags } from '../config/featureFlags';
-import {
-  sqliteMeetingNoteRepository,
-  type TranscriptSegmentRecord,
-} from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
+import type { TranscriptSegmentRecord } from "../data/repositories/meetingNoteRepository";
 import type { MeetingSummaryDocument, ScopeKey } from '../domain/meeting';
 import { transitionProcessingStage } from '../domain/meeting';
 import { summaryProjectionToDocument } from './meetingContentProjection';
+import { loadMeetingFactsRecordV3ForVersion } from '../data/repositories/meetingSummaryV3Repository';
 
 export interface CurrentMeetingSummaryState {
   canonicalMeetingId: string;
@@ -137,12 +135,11 @@ async function reconcileSummaryStageWithCurrentVersion(
   return reconciled;
 }
 
-/** Reads the current immutable summary version without enabling global canonical list cutover. */
+/** Reads the current immutable local summary version. */
 export async function loadCurrentMeetingSummaryState(
   scopeKey: ScopeKey,
   legacyMeetingId: string,
 ): Promise<CurrentMeetingSummaryState | null> {
-  if (!getFeatureFlags().localMeetingDbV1) return null;
   const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeetingId, scopeKey);
   if (!aggregate || aggregate.note.lifecycle === 'deleted') return null;
   await repairFalseSummaryStaleness(scopeKey, aggregate.note.id);
@@ -151,6 +148,9 @@ export async function loadCurrentMeetingSummaryState(
     aggregate.note.id,
     scopeKey,
   );
+  if (!projection) return null;
+  const facts = await loadMeetingFactsRecordV3ForVersion(projection.version.id);
+  if (!facts || facts.canonicalMeetingId !== aggregate.note.id) return null;
   const document = summaryProjectionToDocument(projection, legacyMeetingId);
   if (!document) return null;
   return {

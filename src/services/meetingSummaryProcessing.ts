@@ -1,12 +1,11 @@
 import { UpdateProcessingStageUseCase } from '../application/meeting';
-import { getFeatureFlags } from '../config/featureFlags';
 import type {
   ProcessingStage,
   ProcessingStageTransition,
   ScopeKey,
 } from '../domain/meeting';
 import { transitionProcessingStage } from '../domain/meeting';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import { HttpResponseError } from './errors';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 
@@ -216,7 +215,6 @@ function transitionChangesStage(
 async function writeProcessingState(
   input: RecordMeetingSummaryProcessingInput,
 ): Promise<MeetingSummaryProcessingWriteOutcome> {
-  if (!getFeatureFlags().localMeetingDbV1) return 'disabled';
   try {
     const legacyMeetingId = normalizedRequired(input.legacyMeetingId, 'legacy meeting ID');
     const direct = await sqliteMeetingNoteRepository.get(legacyMeetingId, input.scopeKey);
@@ -265,7 +263,7 @@ export function recordMeetingSummaryProcessing(
       diagnosticAudit('meeting_summary_processing_stage', {
         signal: input.signal.type,
         outcome,
-        scope: input.scopeKey === 'guest' ? 'guest' : 'account',
+        scope: 'guest',
       });
     }
     if (pendingWrites.get(key) === operation) pendingWrites.delete(key);

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { InteractionManager } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import type { NativeProjectionEnvelope } from 'laoji-native-platform';
 import { createNativeRandomUuid } from 'laoji-native-platform';
@@ -12,45 +13,33 @@ import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRep
 import {
   createProjectionEnvelope,
   projectionPayloadSha256,
-  stableProjectionJson,
 } from './projectionEnvelope';
 
 type ProjectionState = {
-  key: string;
+  source: object;
   envelope: NativeProjectionEnvelope;
 } | null;
 
 /**
- * Adds a revisioned native projection only when the candidate flag is on.
- * While a new hash is being computed, null is deliberately emitted so a live
+ * Adds a revisioned native projection. While a new hash is being computed,
+ * null is deliberately emitted so a live
  * native host keeps its previous projection instead of rendering body/hash
  * from different revisions.
  */
 export function useNativeProjection<T extends object>(
   snapshot: T,
-  options: { enabled: boolean; entityId: string; surfaceKey: string },
+  options: { entityId: string; surfaceKey: string },
 ): T & { projection?: NativeProjectionEnvelope | null } {
-  const { enabled, entityId, surfaceKey } = options;
+  const { entityId, surfaceKey } = options;
   const surfaceInstanceId = useMemo(
     () => createNativeRandomUuid() ?? Crypto.randomUUID(),
     [],
   );
-  const payloadKey = enabled ? stableProjectionJson(snapshot) : '';
   const [deviceEpoch, setDeviceEpoch] = useState<string | null>(null);
   const [checkpointReady, setCheckpointReady] = useState(false);
   const [projection, setProjection] = useState<ProjectionState>(null);
   const checkpointRef = useRef<NativeProjectionCheckpoint | null>(null);
-  const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
-
   useEffect(() => {
-    if (!enabled) {
-      setDeviceEpoch(null);
-      setCheckpointReady(false);
-      checkpointRef.current = null;
-      setProjection(null);
-      return;
-    }
     let active = true;
     setCheckpointReady(false);
     checkpointRef.current = null;
@@ -76,19 +65,20 @@ export function useNativeProjection<T extends object>(
       setCheckpointReady(true);
     });
     return () => { active = false; };
-  }, [enabled, entityId, surfaceKey]);
+  }, [entityId, surfaceKey]);
 
   useEffect(() => {
-    if (!enabled || !deviceEpoch || !checkpointReady || !payloadKey) {
+    if (!deviceEpoch || !checkpointReady) {
       setProjection(null);
       return;
     }
     let active = true;
-    void (async () => {
+    const task = InteractionManager.runAfterInteractions(() => { void (async () => {
       // Hash and envelope one immutable render snapshot. A newer render can
-      // replace snapshotRef while the digest is pending; mixing its body with
-      // the previous payload key would corrupt the persistent action fence.
-      const payloadSnapshot = snapshotRef.current;
+      // replace state while the digest is pending; mixing its body with the
+      // previous source would corrupt the persistent action fence. The stable
+      // serialization is intentionally deferred until navigation settles.
+      const payloadSnapshot = snapshot;
       const payloadSha256 = await projectionPayloadSha256(payloadSnapshot);
       if (!active) return;
       // At most one retry is needed when a cancelled previous render committed
@@ -105,6 +95,7 @@ export function useNativeProjection<T extends object>(
             entityRevision,
             viewRevision,
             surfaceInstanceId,
+            payloadSha256,
           },
           payloadSnapshot,
         );
@@ -121,17 +112,20 @@ export function useNativeProjection<T extends object>(
         if (!active) return;
         checkpointRef.current = accepted.checkpoint;
         if (accepted.status === 'stale') continue;
-        setProjection({ key: payloadKey, envelope });
+        setProjection({ source: payloadSnapshot, envelope });
         return;
       }
     })().catch(() => {
       if (active) setProjection(null);
-    });
-    return () => { active = false; };
-  }, [checkpointReady, deviceEpoch, enabled, entityId, payloadKey, surfaceKey, surfaceInstanceId]);
+    }); });
+    return () => {
+      active = false;
+      task.cancel();
+    };
+  }, [checkpointReady, deviceEpoch, entityId, snapshot, surfaceKey, surfaceInstanceId]);
 
   return useMemo(() => ({
     ...snapshot,
-    ...(enabled ? { projection: projection?.key === payloadKey ? projection.envelope : null } : {}),
-  }), [enabled, payloadKey, projection, snapshot]);
+    projection: projection?.source === snapshot ? projection.envelope : null,
+  }), [projection, snapshot]);
 }

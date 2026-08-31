@@ -10,19 +10,24 @@ def test_sensitive_api_responses_are_never_cacheable():
     app = FastAPI()
     app.add_middleware(SensitiveApiHeadersMiddleware)
 
-    @app.get("/api/laoji/private")
-    def private_route():
+    @app.get("/api/device/v2/private")
+    def device_private_route():
         return {"private": True}
+
+    @app.get("/api/location/private")
+    def location_private_route():
+        return {"location": True}
 
     @app.get("/health")
     def health_route():
         return {"status": "ok"}
 
     client = TestClient(app)
-    response = client.get("/api/laoji/private")
-    assert response.headers["cache-control"] == "no-store, max-age=0"
-    assert response.headers["pragma"] == "no-cache"
-    assert response.headers["x-content-type-options"] == "nosniff"
+    for route in ("/api/device/v2/private", "/api/location/private"):
+        response = client.get(route)
+        assert response.headers["cache-control"] == "no-store, max-age=0"
+        assert response.headers["pragma"] == "no-cache"
+        assert response.headers["x-content-type-options"] == "nosniff"
     assert "cache-control" not in client.get("/health").headers
 
 

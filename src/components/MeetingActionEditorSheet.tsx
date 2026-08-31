@@ -16,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
+import { UI_MOTION, getUiTokens } from '../theme/uiTokens';
 import { meetingActionReminderAtForDue } from '../services/notifications';
 
 export interface MeetingActionEditorValue {
@@ -70,13 +70,13 @@ function ReminderToggle({
   disabled: boolean;
   onToggle: () => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const progress = useRef(new Animated.Value(enabled ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.timing(progress, {
       toValue: enabled ? 1 : 0,
-      duration: FEISHU_MOTION.fabSegment,
+      duration: UI_MOTION.fabSegment,
       easing: Easing.inOut(Easing.ease),
       useNativeDriver: true,
     }).start();
@@ -129,7 +129,7 @@ export function MeetingActionEditorSheet({
   onSave: (value: MeetingActionEditorSaveValue) => void;
   onStatusChange: (status: 'pending' | 'dismissed') => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;

@@ -8,7 +8,7 @@ import {
 import { getOrCreateDeviceIdentity } from './deviceIdentity';
 import { ensureLocalMeetingServiceBinding } from './deviceAuthority';
 import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRepository';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 
 function required(value: string, label: string): string {
   const normalized = value.trim();
@@ -40,7 +40,7 @@ export async function ensureDeviceUploadOperation(
 ): Promise<DeviceOperationRecord> {
   const meetingId = required(input.meetingId, '会议 ID');
   const operationId = required(input.operationId, '上传 operation ID');
-  const assetId = required(input.recordingAssetId, '录音资产 ID');
+  required(input.recordingAssetId, '录音资产 ID');
   const generation = required(input.assetGeneration, '录音代际');
   const sourceSha256 = required(input.sourceSha256, '录音校验值');
   const existing = await getDeviceOperation(operationId);

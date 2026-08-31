@@ -1,4 +1,4 @@
-"""Durable Stage 2 realtime ASR session, chunk and stable-event owner."""
+"""Durable realtime ASR session, chunk and stable-event owner."""
 
 from __future__ import annotations
 

@@ -28,7 +28,7 @@ interface RecorderEngineHost {
 
 class RecorderEngine(
   context: Context,
-  private val config: RecorderStartConfig,
+  @Volatile private var config: RecorderStartConfig,
   private val repository: RecordingRepository,
   private val host: RecorderEngineHost,
 ) : RealtimeAsrSocketListener {
@@ -91,6 +91,42 @@ class RecorderEngine(
   fun start(): CompletableFuture<RecorderSnapshot> {
     commandExecutor.execute(::startInternal)
     return startFuture
+  }
+
+  fun attachRealtime(nextConfig: RecorderStartConfig): CompletableFuture<RecorderSnapshot> = submitCommand {
+    val current = config
+    if (
+      current.mode != RecorderMode.REALTIME ||
+      !current.realtimeAttachPending ||
+      nextConfig.realtimeAttachPending ||
+      nextConfig.mode != RecorderMode.REALTIME ||
+      nextConfig.sessionId != current.sessionId ||
+      nextConfig.purpose != current.purpose ||
+      nextConfig.storageScope != current.storageScope
+    ) {
+      throw RecorderRuntimeException(
+        RecorderErrorCode.SESSION_MISMATCH,
+        "realtime attachment does not match the active recording session",
+      )
+    }
+    if (state != RecorderState.RECORDING && state != RecorderState.PAUSED) {
+      throw RecorderRuntimeException(
+        RecorderErrorCode.SESSION_MISMATCH,
+        "recording session is not ready for realtime attachment",
+      )
+    }
+    config = nextConfig
+    try {
+      fileSession?.updateAsrState(JournalAsrState.CONNECTING)
+      startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
+      publishSnapshot()
+    } catch (_: Exception) {
+      markAsrUnavailable(
+        RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
+        "实时语音服务连接失败",
+      )
+      snapshot()
+    }
   }
 
   fun pause(): CompletableFuture<RecorderSnapshot> = submitCommand {
@@ -390,7 +426,7 @@ class RecorderEngine(
       // realtime socket so the first PCM frame is journaled even when DNS,
       // TLS, or device authentication is slow. sendOrQueueAsrFrame() keeps a
       // bounded in-memory prefix until the asynchronous connection is ready.
-      if (config.mode == RecorderMode.REALTIME) {
+      if (config.mode == RecorderMode.REALTIME && !config.realtimeAttachPending) {
         try {
           startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
         } catch (error: Exception) {
@@ -851,6 +887,7 @@ class RecorderEngine(
   private fun currentJournalAsrState(): JournalAsrState = when {
     config.mode == RecorderMode.LOCAL_ONLY -> JournalAsrState.NOT_REQUIRED
     asrConnected -> JournalAsrState.CONNECTED
+    config.realtimeAttachPending -> JournalAsrState.CONNECTING
     asrSocket != null -> JournalAsrState.CONNECTING
     else -> JournalAsrState.FAILED
   }

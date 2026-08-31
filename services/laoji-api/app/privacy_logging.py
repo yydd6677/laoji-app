@@ -84,7 +84,7 @@ def privacy_log(event: str, **fields: Any) -> None:
 
     Unknown fields raise in development and are dropped in production callers
     that catch the exception.  Raising here is intentional: it makes a future
-    privacy regression visible during candidate startup/tests instead of
+    privacy regression visible during service startup/tests instead of
     silently accepting a meeting ID or user text.
     """
     unknown = set(fields) - _ALLOWED_FIELDS

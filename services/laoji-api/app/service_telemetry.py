@@ -1,4 +1,4 @@
-"""Privacy-safe request and model-stage telemetry for the candidate service."""
+"""Privacy-safe request and model-stage telemetry for the LaoJi device service."""
 
 from __future__ import annotations
 
@@ -103,8 +103,6 @@ _CLIENT_TRACE_HEADERS = {
     b"x-laoji-input-fingerprint": "input_fingerprint",
     b"x-laoji-input-lines": "input_line_count",
     b"x-laoji-input-chars": "input_char_count",
-    b"x-laoji-template-id": "template_id",
-    b"x-laoji-template-revision": "template_revision",
     b"x-laoji-auth-mode": "auth_mode",
     b"x-laoji-device-id": "device_id",
     b"x-laoji-device-name": "device_name",

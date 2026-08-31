@@ -22,7 +22,7 @@ import {
   type ReverseGeocoderAdapter,
 } from './currentAddressPolicy';
 import { createHttpReverseGeocoder } from './reverseGeocoder';
-import { loadStoredToken } from './auth';
+import { getLocalDeviceRealtimeAuth } from './deviceApi';
 
 const CURRENT_LOCATION_TIMEOUT_MS = 12_000;
 const NATIVE_LOCATION_TIMEOUT_MS = 10_000;
@@ -148,7 +148,10 @@ function configuredGeocoder(): ReverseGeocoderAdapter | null {
       url,
       undefined,
       CONFIGURED_GEOCODER_TIMEOUT_MS,
-      loadStoredToken,
+      async () => {
+        const auth = await getLocalDeviceRealtimeAuth();
+        return { token: auth.deviceToken, dataEpoch: auth.dataEpoch };
+      },
     );
   } catch {
     // Configuration validation normally rejects this before a build is made;
@@ -198,10 +201,8 @@ function expoLiveLocationAttempt(): LocationProviderAttempt {
   let subscription: Location.LocationSubscription | null = null;
   let cancelled = false;
   let resolveResult: (value: Location.LocationObject | null) => void = () => undefined;
-  let rejectResult: (reason: unknown) => void = () => undefined;
   const result = new Promise<Location.LocationObject | null>((resolve, reject) => {
     resolveResult = resolve;
-    rejectResult = reject;
     void Location.watchPositionAsync(
       { accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: true },
       value => {

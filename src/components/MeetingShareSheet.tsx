@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -18,7 +18,7 @@ import {
   type MeetingShareContentKey,
   type MeetingShareSelection,
 } from '../services/meetingShare';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 const MOTION_MS = 300;
 const CONTENT_ROWS: readonly { key: MeetingShareContentKey; label: string }[] = [
@@ -51,21 +51,15 @@ function availableSelection(
 export function MeetingShareSheet({
   visible,
   availability,
-  linkEnabled,
   onClose,
   onShare,
-  onCreateLink,
-  onManageLinks,
 }: {
   visible: boolean;
   availability: MeetingShareAvailability;
-  linkEnabled: boolean;
   onClose: () => void;
   onShare: (selection: MeetingShareSelection) => void;
-  onCreateLink: (selection: MeetingShareSelection, followLatestSummary: boolean) => void;
-  onManageLinks: () => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -73,17 +67,12 @@ export function MeetingShareSheet({
   const closingRef = useRef(false);
   const closeRef = useRef(onClose);
   const shareRef = useRef(onShare);
-  const createLinkRef = useRef(onCreateLink);
-  const manageLinksRef = useRef(onManageLinks);
   const availabilityRef = useRef(availability);
   const [mounted, setMounted] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [selection, setSelection] = useState(() => defaultMeetingShareSelection(availability));
-  const [followLatestSummary, setFollowLatestSummary] = useState(false);
   closeRef.current = onClose;
   shareRef.current = onShare;
-  createLinkRef.current = onCreateLink;
-  manageLinksRef.current = onManageLinks;
   availabilityRef.current = availability;
 
   const finishClose = useCallback((notify: boolean, afterExit?: () => void) => {
@@ -109,7 +98,6 @@ export function MeetingShareSheet({
   useEffect(() => {
     if (visible) {
       if (!mountedRef.current) setSelection(defaultMeetingShareSelection(availabilityRef.current));
-      if (!mountedRef.current) setFollowLatestSummary(false);
       mountedRef.current = true;
       closingRef.current = false;
       setMounted(true);
@@ -136,22 +124,11 @@ export function MeetingShareSheet({
   if (!mounted) return null;
   const activeSelection = availableSelection(selection, availability);
   const canShare = selectedMeetingShareContents(activeSelection, availability).length > 0 && !closing;
-  const canCreateLink = linkEnabled && canShare && !activeSelection.audio;
   const requestClose = () => finishClose(true);
   const submit = () => {
     if (!canShare) return;
     const submitted = activeSelection;
     finishClose(true, () => shareRef.current(submitted));
-  };
-  const submitLink = () => {
-    if (!canCreateLink) return;
-    const submitted = activeSelection;
-    const followsLatest = followLatestSummary && submitted.summary;
-    finishClose(true, () => createLinkRef.current(submitted, followsLatest));
-  };
-  const manageLinks = () => {
-    if (!linkEnabled || closing) return;
-    finishClose(true, () => manageLinksRef.current());
   };
 
   return (
@@ -197,16 +174,7 @@ export function MeetingShareSheet({
               <Ionicons name="close" size={24} color={colors.iconPrimary} />
             </Pressable>
             <Text style={[styles.title, { color: colors.textTitle }]}>分享会议资料</Text>
-            {linkEnabled ? (
-              <Pressable
-                style={({ pressed }) => [styles.titleAction, pressed && { backgroundColor: colors.pressedFill }]}
-                onPress={manageLinks}
-                accessibilityRole="button"
-                accessibilityLabel="管理共享链接"
-              >
-                <Ionicons name="link-outline" size={22} color={colors.iconPrimary} />
-              </Pressable>
-            ) : <View style={styles.titleAction} />}
+            <View style={styles.titleAction} />
           </View>
 
           <ScrollView style={styles.rows} bounces={false} showsVerticalScrollIndicator={false}>
@@ -222,9 +190,6 @@ export function MeetingShareSheet({
                   ]}
                   onPress={() => {
                     if (!enabled) return;
-                    if (row.key === 'summary' && checked) {
-                      setFollowLatestSummary(false);
-                    }
                     setSelection(current => ({ ...current, [row.key]: !current[row.key] }));
                   }}
                   disabled={!enabled || closing}
@@ -255,63 +220,6 @@ export function MeetingShareSheet({
           </ScrollView>
 
           <View style={styles.footer}>
-            {linkEnabled ? (
-              <>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.followRow,
-                    pressed && activeSelection.summary && { backgroundColor: colors.pressedFill },
-                  ]}
-                  onPress={() => {
-                    if (activeSelection.summary) setFollowLatestSummary(current => !current);
-                  }}
-                  disabled={!activeSelection.summary || closing}
-                  accessibilityRole="checkbox"
-                  accessibilityLabel="链接使用最新整理结果"
-                  accessibilityState={{
-                    checked: followLatestSummary && activeSelection.summary,
-                    disabled: !activeSelection.summary || closing,
-                  }}
-                >
-                  <Text style={[styles.followLabel, { color: activeSelection.summary ? colors.textTitle : colors.textDisabled }]}>链接使用最新整理结果</Text>
-                  <View
-                    style={[
-                      styles.checkbox,
-                      {
-                        borderColor: followLatestSummary && activeSelection.summary
-                          ? colors.primary
-                          : activeSelection.summary ? colors.iconTertiary : colors.iconDisabled,
-                        backgroundColor: followLatestSummary && activeSelection.summary
-                          ? colors.primary
-                          : colors.backgroundFloat,
-                      },
-                    ]}
-                  >
-                    {followLatestSummary && activeSelection.summary
-                      ? <Ionicons name="checkmark" size={16} color={colors.onPrimary} />
-                      : null}
-                  </View>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.createLink,
-                    {
-                      borderColor: canCreateLink ? colors.primary : colors.divider,
-                      backgroundColor: pressed && canCreateLink ? colors.primarySoft : colors.backgroundFloat,
-                    },
-                  ]}
-                  onPress={submitLink}
-                  disabled={!canCreateLink}
-                  accessibilityRole="button"
-                  accessibilityLabel={activeSelection.audio ? '录音仅支持文件分享' : '创建会议资料文字链接'}
-                  accessibilityState={{ disabled: !canCreateLink }}
-                >
-                  <Text style={[styles.createLinkText, { color: canCreateLink ? colors.primary : colors.textDisabled }]}>
-                    {activeSelection.audio ? '录音请用文件分享' : '创建文字链接'}
-                  </Text>
-                </Pressable>
-              </>
-            ) : null}
             <Pressable
               style={({ pressed }) => [
                 styles.share,
@@ -349,10 +257,6 @@ const styles = StyleSheet.create({
   checkbox: { width: 22, height: 22, borderWidth: 1.5, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   divider: { position: 'absolute', left: 16, right: 0, bottom: 0, height: StyleSheet.hairlineWidth },
   footer: { paddingHorizontal: 16, paddingTop: 12 },
-  followRow: { height: 44, flexDirection: 'row', alignItems: 'center', borderRadius: 6, paddingHorizontal: 4 },
-  followLabel: { flex: 1, fontSize: 14, lineHeight: 22 },
-  createLink: { height: 48, borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  createLinkText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
   share: { height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   shareText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
 });

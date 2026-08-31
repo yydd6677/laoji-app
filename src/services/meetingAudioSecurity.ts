@@ -61,7 +61,7 @@ export function validateMeetingAudioUrl(
 export function meetingAudioUrlErrorMessage(error: unknown): string | null {
   if (!(error instanceof MeetingAudioUrlError)) return null;
   if (error.code === 'EXPIRED') return '录音链接已过期，请刷新会议后重试。';
-  if (error.code === 'AUTH_ORIGIN_MISMATCH') return '录音地址未通过安全校验，已停止发送登录凭据。';
+  if (error.code === 'AUTH_ORIGIN_MISMATCH') return '录音地址未通过安全校验，已停止发送设备凭据。';
   if (error.code === 'INSECURE_URL') return '录音地址未使用安全连接，已停止加载。';
   return '录音地址无效，无法加载。';
 }

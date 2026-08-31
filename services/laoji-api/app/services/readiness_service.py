@@ -13,7 +13,7 @@ from app.config import settings
 from app.services.database_health import database_health
 from app.services.llm_provider import provider_state
 from app.services.storage_admission import storage_state
-from app.services.summary_task_store import task_counts, task_worker_state
+from app.services.vnext_task_store import task_counts, task_worker_state
 from app.services import r2_storage_service
 
 

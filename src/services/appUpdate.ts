@@ -1,5 +1,5 @@
 import { AppState, AppStateStatus } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -149,7 +149,7 @@ export async function downloadAndInstallAppUpdate(): Promise<AppUpdateState> {
     }
     return state;
   }
-  publish({ ...state, status: 'downloading', progress: null, message: '正在下载更新。' });
+  publish({ ...state, status: 'downloading', progress: null, message: null });
   const cacheDir = FileSystem.cacheDirectory;
   if (!cacheDir) throw new Error('本机缓存目录不可用。');
   const updateDir = `${cacheDir}updates/`;
@@ -168,7 +168,7 @@ export async function downloadAndInstallAppUpdate(): Promise<AppUpdateState> {
       ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
         const total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : manifest.size_bytes;
         const progress = Math.max(0, Math.min(1, totalBytesWritten / total));
-        publish({ ...state, status: 'downloading', progress, message: '正在下载更新。' });
+        publish({ ...state, status: 'downloading', progress, message: null });
       },
     );
     const result = await download.downloadAsync();
@@ -181,7 +181,7 @@ export async function downloadAndInstallAppUpdate(): Promise<AppUpdateState> {
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
       throw new Error('下载文件校验失败，已取消安装。');
     }
-    publish({ ...state, status: 'ready_to_install', progress: 1, downloadedUri: result.uri, message: '更新已下载，等待系统确认安装。' });
+    publish({ ...state, status: 'ready_to_install', progress: 1, downloadedUri: result.uri, message: null });
   } catch (error) {
     await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => undefined);
     publish({ ...state, status: 'failed', progress: null, message: error instanceof Error ? error.message : '下载更新失败，请稍后重试。' });

@@ -2,7 +2,7 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { getApiConfig } from './config';
 import { fetchWithTimeout, readJsonWithTimeout } from './http';
-import { getOrCreateDeviceIdentity } from './deviceIdentity';
+import { getDeviceIdentityRevision, getOrCreateDeviceIdentity } from './deviceIdentity';
 import {
   findDeviceProofOfWork,
   getOrCreateDeviceKey,
@@ -20,6 +20,7 @@ const TOKEN_KEY = 'laoji.device.v2.token';
 const TOKEN_EXPIRES_KEY = 'laoji.device.v2.token.expires';
 const KEY_VERSION_KEY = 'laoji.device.v2.key.version';
 const PUBLIC_HASH_KEY = 'laoji.device.v2.key.hash';
+const SESSION_KEY = 'laoji.device.v2.session';
 const CAPABILITY_CACHE_MS = 60_000;
 
 let capabilityValue: DeviceV2Capabilities | null = null;
@@ -27,6 +28,8 @@ let capabilityPromise: Promise<DeviceV2Capabilities> | null = null;
 let capabilityUntil = 0;
 let sessionPromise: Promise<DeviceV2Session> | null = null;
 let refreshPromise: Promise<DeviceV2Session> | null = null;
+let sessionValue: DeviceV2Session | null = null;
+let sessionIdentityRevision = -1;
 
 export class DeviceV2ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly code?: string) {
@@ -127,31 +130,86 @@ async function jsonRequest<T>(path: string, init: RequestInit, fallback: string)
   return data as T;
 }
 
-async function readStoredSession(
+function normalizeStoredSessionEnvelope(
   identity: { deviceId: string; epochId: string },
-  key: DeviceKeyInfo,
-  hash: string,
+  input: {
+    token?: unknown;
+    expiresAt?: unknown;
+    keyVersion?: unknown;
+    publicKeyHash?: unknown;
+    deviceId?: unknown;
+    epochId?: unknown;
+  },
   options: { allowExpired?: boolean } = {},
-): Promise<DeviceV2Session | null> {
-  const [token, expiresRaw, versionRaw, storedHash] = await Promise.all([
-    SecureStore.getItemAsync(TOKEN_KEY),
-    SecureStore.getItemAsync(TOKEN_EXPIRES_KEY),
-    SecureStore.getItemAsync(KEY_VERSION_KEY),
-    SecureStore.getItemAsync(PUBLIC_HASH_KEY),
-  ]);
-  const expiresAt = Number(expiresRaw);
-  const keyVersion = Number(versionRaw);
+): DeviceV2Session | null {
+  const token = typeof input.token === 'string' ? input.token : '';
+  const expiresAt = Number(input.expiresAt);
+  const keyVersion = Number(input.keyVersion);
+  const storedHash = typeof input.publicKeyHash === 'string' ? input.publicKeyHash : '';
   if (!token || !Number.isSafeInteger(expiresAt)
     || (!options.allowExpired && expiresAt <= Date.now() + 30_000)
-    || keyVersion !== key.keyVersion || storedHash !== hash) return null;
+    || !Number.isSafeInteger(keyVersion) || keyVersion < 1
+    || !/^[0-9a-f]{64}$/.test(storedHash)) return null;
+  if ((typeof input.deviceId === 'string' && input.deviceId !== identity.deviceId)
+    || (typeof input.epochId === 'string' && input.epochId !== identity.epochId)) return null;
   return {
     token,
     expiresAt,
     deviceId: identity.deviceId,
     epochId: identity.epochId,
     keyVersion,
-    publicKeyHash: hash,
+    publicKeyHash: storedHash,
   };
+}
+
+async function readStoredSessionEnvelope(
+  identity: { deviceId: string; epochId: string },
+  options: { allowExpired?: boolean } = {},
+): Promise<DeviceV2Session | null> {
+  const packed = await SecureStore.getItemAsync(SESSION_KEY);
+  if (packed) {
+    try {
+      const stored = normalizeStoredSessionEnvelope(identity, JSON.parse(packed), options);
+      if (stored) return stored;
+    } catch {
+      // A malformed value is treated as absent and rebuilt from the previous
+      // four-key layout or the next successful authentication.
+    }
+  }
+
+  const [token, expiresAt, keyVersion, publicKeyHash] = await Promise.all([
+    SecureStore.getItemAsync(TOKEN_KEY),
+    SecureStore.getItemAsync(TOKEN_EXPIRES_KEY),
+    SecureStore.getItemAsync(KEY_VERSION_KEY),
+    SecureStore.getItemAsync(PUBLIC_HASH_KEY),
+  ]);
+  const legacy = normalizeStoredSessionEnvelope(
+    identity,
+    { token, expiresAt, keyVersion, publicKeyHash },
+    options,
+  );
+  if (legacy) {
+    await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify({
+      token: legacy.token,
+      expiresAt: legacy.expiresAt,
+      keyVersion: legacy.keyVersion,
+      publicKeyHash: legacy.publicKeyHash,
+      deviceId: legacy.deviceId,
+      epochId: legacy.epochId,
+    }));
+  }
+  return legacy;
+}
+
+async function readStoredSession(
+  identity: { deviceId: string; epochId: string },
+  key: DeviceKeyInfo,
+  hash: string,
+  options: { allowExpired?: boolean } = {},
+): Promise<DeviceV2Session | null> {
+  const stored = await readStoredSessionEnvelope(identity, options);
+  if (!stored || stored.keyVersion !== key.keyVersion || stored.publicKeyHash !== hash) return null;
+  return stored;
 }
 
 async function persistDeviceV2Token(
@@ -169,13 +227,7 @@ async function persistDeviceV2Token(
   if (token.key_version !== expectedKeyVersion) {
     throw new DeviceV2ApiError('设备密钥版本不一致', 409, 'DEVICE_V2_KEY_VERSION_CHANGED');
   }
-  await Promise.all([
-    SecureStore.setItemAsync(TOKEN_KEY, token.access_token),
-    SecureStore.setItemAsync(TOKEN_EXPIRES_KEY, String(expiresAt)),
-    SecureStore.setItemAsync(KEY_VERSION_KEY, String(token.key_version)),
-    SecureStore.setItemAsync(PUBLIC_HASH_KEY, hash),
-  ]);
-  return {
+  const session = {
     token: token.access_token,
     expiresAt,
     deviceId: identity.deviceId,
@@ -183,6 +235,15 @@ async function persistDeviceV2Token(
     keyVersion: token.key_version,
     publicKeyHash: hash,
   };
+  await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify({
+    token: session.token,
+    expiresAt: session.expiresAt,
+    keyVersion: session.keyVersion,
+    publicKeyHash: session.publicKeyHash,
+    deviceId: session.deviceId,
+    epochId: session.epochId,
+  }));
+  return session;
 }
 
 async function issueDeviceV2Token(
@@ -272,10 +333,17 @@ async function refreshDeviceV2SessionSingleFlight(
   const operation = refreshOrRestoreDeviceV2Session(previous);
   refreshPromise = operation;
   try {
-    return await operation;
+    const session = await operation;
+    rememberDeviceV2Session(session);
+    return session;
   } finally {
     if (refreshPromise === operation) refreshPromise = null;
   }
+}
+
+function rememberDeviceV2Session(session: DeviceV2Session): void {
+  sessionValue = session;
+  sessionIdentityRevision = getDeviceIdentityRevision();
 }
 
 async function bootstrapDeviceV2Session(
@@ -341,12 +409,29 @@ async function bootstrapDeviceV2Session(
 }
 
 export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
+  if (
+    sessionValue
+    && sessionIdentityRevision === getDeviceIdentityRevision()
+    && sessionValue.expiresAt > Date.now() + 30_000
+  ) {
+    diagnosticAudit('device_v2_session_memory_cached', {});
+    return sessionValue;
+  }
   if (sessionPromise) return sessionPromise;
   const operation = (async () => {
     diagnosticAudit('device_v2_session_start', {});
     try {
       const identity = await getOrCreateDeviceIdentity();
       diagnosticAudit('device_v2_session_identity_ready', {});
+      // A still-valid bearer is already bound to this device/epoch and public
+      // key hash. Reusing it avoids opening Android Keystore during every cold
+      // start; the non-exportable private key is loaded only when the token
+      // must be refreshed or the device must be registered again.
+      const cached = await readStoredSessionEnvelope(identity);
+      if (cached) {
+        diagnosticAudit('device_v2_session_cached', {});
+        return cached;
+      }
       const key = await getOrCreateDeviceKey(1);
       diagnosticAudit('device_v2_session_key_ready', { key_version: key.keyVersion });
       const hash = await publicKeyHash(key.publicKeyDer);
@@ -371,7 +456,9 @@ export async function ensureDeviceV2Session(): Promise<DeviceV2Session> {
   })();
   sessionPromise = operation;
   try {
-    return await operation;
+    const session = await operation;
+    rememberDeviceV2Session(session);
+    return session;
   } finally {
     if (sessionPromise === operation) sessionPromise = null;
   }
@@ -461,6 +548,7 @@ export function resumeDeviceV2PurgeOnlyErase(): Promise<PurgeOnlyJournalStatus> 
 }
 
 export const deviceV2StorageKeys = {
+  session: SESSION_KEY,
   token: TOKEN_KEY,
   tokenExpires: TOKEN_EXPIRES_KEY,
   keyVersion: KEY_VERSION_KEY,

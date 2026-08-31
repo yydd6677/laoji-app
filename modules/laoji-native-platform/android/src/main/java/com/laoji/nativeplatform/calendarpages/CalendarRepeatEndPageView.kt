@@ -12,8 +12,6 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeParseException
@@ -75,7 +73,6 @@ internal data class CalendarRepeatEndState(
 }
 
 @SuppressLint("ViewConstructor", "UseSwitchCompatOrMaterialCode")
-@FeishuEvidence("UI-TITLE-COMMON-001", "CAL-REPEAT-RRULE-001")
 internal class CalendarRepeatEndPageView(
   context: Context,
   initialState: CalendarRepeatEndState,
@@ -115,10 +112,6 @@ internal class CalendarRepeatEndPageView(
     isFocusable = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
 
-    FeishuEvidenceRuntime.bind(this, "CAL-REPEAT-RRULE-001", "repeat-end-page", "calendar-repeat-end-page")
-    FeishuEvidenceRuntime.bind(neverEndsSwitch, "CAL-REPEAT-RRULE-001", "switch", "calendar-repeat-end-never-switch")
-    FeishuEvidenceRuntime.bind(wheelContainer, "CAL-REPEAT-RRULE-001", "date-picker", "calendar-repeat-end-date-picker")
-    FeishuEvidenceRuntime.bind(errorText, "CAL-REPEAT-RRULE-001", "error", "calendar-repeat-end-error")
 
     addView(titleBar, LayoutParams(
       LayoutParams.MATCH_PARENT,

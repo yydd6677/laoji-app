@@ -9,12 +9,8 @@ import {
   createSecureAssetGeneration,
   transitionProcessingStage,
 } from '../../domain/meeting';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-  RecordingAssetRecord,
-} from '../../data/repositories';
-import { canonicalRecordingSourceSha256 } from '../../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 
 export interface MeetingAudioUploadEvidence {
   status: UploadStatus;
@@ -140,9 +136,6 @@ export class ReconcileMeetingAudioUploadUseCase {
 
   async execute(input: ReconcileMeetingAudioUploadInput): Promise<ReconcileMeetingAudioUploadResult> {
     assertScopeKey(input.scopeKey);
-    if (input.scopeKey === 'guest') {
-      throw new Error('guest meeting audio does not require upload reconciliation');
-    }
     const meetingId = input.meetingId.trim();
     if (!meetingId) throw new Error('meeting ID is invalid');
     const recordingAssetId = optionalText(
@@ -164,14 +157,12 @@ export class ReconcileMeetingAudioUploadUseCase {
     const fileName = optionalText(input.evidence.fileName, 2_000, 'recording file name');
     const byteSize = optionalTimestamp(input.evidence.byteSize, 'recording byte size');
     const durationMs = optionalTimestamp(input.evidence.durationMs, 'recording duration');
-    const checksumSha256 = optionalText(
+    const checksumText = optionalText(
       input.evidence.checksumSha256,
       128,
       'recording checksum',
     );
-    if (checksumSha256 && !/^sha256:[0-9a-f]{64}$/i.test(checksumSha256)) {
-      throw new Error('recording checksum is invalid');
-    }
+    const checksumSha256 = canonicalRecordingSourceSha256(checksumText);
     const remoteAssetId = optionalText(
       input.evidence.remoteAssetId,
       512,

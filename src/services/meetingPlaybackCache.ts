@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import type { ApiMeetingAudioInfo } from './api';
+import type { MeetingAudioInfo } from './meetingAudioInfo';
 import { validateMeetingAudioUrl } from './meetingAudioSecurity';
 
 const PLAYBACK_CACHE_DIRECTORY = 'meeting-playback/';
@@ -10,7 +10,7 @@ function cacheRoot(): string {
   return `${FileSystem.cacheDirectory}${PLAYBACK_CACHE_DIRECTORY}`;
 }
 
-function audioExtension(info: ApiMeetingAudioInfo): string {
+function audioExtension(info: MeetingAudioInfo): string {
   const source = info.file_name || info.url.split(/[?#]/)[0];
   const match = source.match(/\.([A-Za-z0-9]{2,6})$/);
   if (match) return `.${match[1].toLowerCase()}`;
@@ -48,7 +48,7 @@ async function existingFile(uri: string): Promise<boolean> {
 export async function materializeMeetingPlaybackAudio(input: {
   meetingId: string;
   meetingUpdatedAt?: string | null;
-  audio: ApiMeetingAudioInfo;
+  audio: MeetingAudioInfo;
   accessToken?: string | null;
 }): Promise<string> {
   const { audio } = input;

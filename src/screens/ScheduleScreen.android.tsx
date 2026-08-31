@@ -35,10 +35,9 @@ import { recurrenceEditDialog } from '../services/recurrenceActions';
 import { readableErrorMessage } from '../services/errors';
 import { buildNativeCalendarSearchSnapshot } from '../native/nativeCalendarPages';
 import { useCurrentDate } from '../hooks/useCurrentDate';
-import { useAuth } from '../store/AuthStore';
+import { useLocalProfile } from '../store/LocalProfileStore';
 import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
 import { Colors as C } from '../theme/colors';
-import { getFeatureFlags } from '../config/featureFlags';
 import { useNativeProjection } from '../native/useNativeProjection';
 import { fenceNativeProjectionAction } from '../native/projectionActionFence';
 import { diagnosticAudit } from '../services/diagnostics';
@@ -93,7 +92,7 @@ export function ScheduleScreen({
     refreshEvents,
     updateEvent,
   } = useEvents();
-  const { profile, isGuest } = useAuth();
+  const { profile } = useLocalProfile();
   const { showDialog } = useAppDialog();
   const currentDate = useCurrentDate();
   const today = useMemo(() => calendarEpochDay(localCalendarDate(currentDate)), [currentDate]);
@@ -107,11 +106,10 @@ export function ScheduleScreen({
   const [searchQuery, setSearchQuery] = useState('');
   const generationRef = useRef(0);
   const currentProjectionRef = useRef<NativeProjectionEnvelope | null>(null);
-  const projectionCandidateEnabled = getFeatureFlags().nativeProjectionEnvelopeCandidate;
   const searchOwnerId = useMemo(() => createNativeOverlayOwnerId('calendar-search'), []);
   const profileEntry = useMemo(
-    () => buildNativeProfileEntrySnapshot(profile, isGuest),
-    [isGuest, profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
+    () => buildNativeProfileEntrySnapshot(profile, true),
+    [profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
   );
 
   useEffect(() => {
@@ -137,7 +135,6 @@ export function ScheduleScreen({
     });
   }, [events, selectedEpochDay, today, visibleRange.endExclusive, visibleRange.start]);
   const snapshot = useNativeProjection(snapshotBody, {
-    enabled: projectionCandidateEnabled,
     entityId: 'calendar',
     surfaceKey: 'calendar',
   });
@@ -158,7 +155,6 @@ export function ScheduleScreen({
 
   const handleMutation = useCallback(async (mutation: NativeCalendarMutationRequest) => {
     const projectionFence = fenceNativeProjectionAction(
-      projectionCandidateEnabled,
       currentProjectionRef.current,
       mutation.projection,
     );
@@ -200,7 +196,7 @@ export function ScheduleScreen({
         message: readableErrorMessage(error, '修改失败，原日程时间已保留。'),
       });
     }
-  }, [chooseEditScope, events, projectionCandidateEnabled, updateEvent]);
+  }, [chooseEditScope, events, updateEvent]);
 
   const openCreate = useCallback((draft?: NativeCalendarCreateEvent, epochDay = selectedEpochDay) => {
     navigation.navigate('AddEvent', draft ? {

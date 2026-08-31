@@ -17,10 +17,10 @@ import {
   updateDeviceOperation,
 } from '../data/repositories/vnext/deviceOperationsRepository';
 import type {
-  Q2CandidateProvider,
-  Q2CandidateProviderRequest,
-  Q2CandidateProviderResponse,
-} from './questionQ2Candidate';
+  Q2Provider,
+  Q2ProviderRequest,
+  Q2ProviderResponse,
+} from './questionQ2Execution';
 import * as Crypto from 'expo-crypto';
 
 export const Q2_READER_PROVIDER_REVISION = 'q2-reader-v2';
@@ -49,7 +49,7 @@ function sourceType(value: unknown): SourceStreamSourceType {
   return normalized as SourceStreamSourceType;
 }
 
-function normalizeResponse(value: any, request: Q2CandidateProviderRequest): Q2CandidateProviderResponse {
+function normalizeResponse(value: any, request: Q2ProviderRequest): Q2ProviderResponse {
   if (!value || Number(value.schema_version) !== 2 || value.contract_revision !== 'question.reader.v2') {
     throw new Error('Q2 reader 响应格式无效');
   }
@@ -97,7 +97,7 @@ async function digest(value: unknown): Promise<string> {
 }
 
 export async function q2TransportHandles(
-  request: Pick<Q2CandidateProviderRequest, 'operationId' | 'snapshotId' | 'sourceFingerprint'>,
+  request: Pick<Q2ProviderRequest, 'operationId' | 'snapshotId' | 'sourceFingerprint'>,
 ): Promise<{ taskId: string; streamId: string; transportSeed: string }> {
   if (!request.operationId) throw new Error('Q2 operation identity is required for durable transport');
   const transportDigest = await digest({
@@ -132,7 +132,7 @@ async function bindRemoteTaskToOperation(operationId: string, taskId: string): P
 }
 
 export async function bindQ2DurableTransport(
-  request: Pick<Q2CandidateProviderRequest, 'operationId' | 'snapshotId' | 'sourceFingerprint'>,
+  request: Pick<Q2ProviderRequest, 'operationId' | 'snapshotId' | 'sourceFingerprint'>,
 ): Promise<{ taskId: string; streamId: string }> {
   const handles = await q2TransportHandles(request);
   await bindRemoteTaskToOperation(request.operationId!, handles.taskId);
@@ -152,9 +152,9 @@ function retryableReaderError(error: unknown): boolean {
 
 async function recoverQuestionTask(
   taskId: string,
-  request: Q2CandidateProviderRequest,
-  runAttempt: () => Promise<Q2CandidateProviderResponse>,
-): Promise<Q2CandidateProviderResponse> {
+  request: Q2ProviderRequest,
+  runAttempt: () => Promise<Q2ProviderResponse>,
+): Promise<Q2ProviderResponse> {
   const deadline = Date.now() + Q2_TASK_RECOVERY_TIMEOUT_MS;
   let lastError: unknown = null;
   let claimedRetryKey: string | null = null;
@@ -207,9 +207,9 @@ async function recoverQuestionTask(
 }
 
 async function readExistingDurableTask(
-  request: Q2CandidateProviderRequest,
+  request: Q2ProviderRequest,
 ): Promise<
-  | { kind: 'result'; response: Q2CandidateProviderResponse }
+  | { kind: 'result'; response: Q2ProviderResponse }
   | { kind: 'active'; taskId: string; streamId: string }
   | null
 > {
@@ -248,11 +248,11 @@ async function readExistingDurableTask(
 }
 
 async function readFromSourceStream(
-  request: Q2CandidateProviderRequest,
+  request: Q2ProviderRequest,
   binding: Awaited<ReturnType<typeof ensureRemoteMeetingServiceBinding>>,
   stream: { taskId: string; streamId: string },
-): Promise<Q2CandidateProviderResponse> {
-  const runAttempt = async (): Promise<Q2CandidateProviderResponse> => {
+): Promise<Q2ProviderResponse> {
+  const runAttempt = async (): Promise<Q2ProviderResponse> => {
     const value = await deviceV2Request<any>(
       `/meetings/${encodeURIComponent(binding.bindingId)}/questions-v2`,
       {
@@ -290,7 +290,7 @@ async function readFromSourceStream(
 }
 
 async function streamLongSources(
-  request: Q2CandidateProviderRequest,
+  request: Q2ProviderRequest,
   binding: Awaited<ReturnType<typeof ensureRemoteMeetingServiceBinding>>,
 ): Promise<{ taskId: string; streamId: string }> {
   // Android operation IDs deliberately retain their full predecessor lineage,
@@ -435,8 +435,8 @@ export function q2SourceStreamFailureIsTerminal(error: unknown): boolean {
   return true;
 }
 
-export class DeviceQ2CandidateProvider implements Q2CandidateProvider {
-  async read(request: Q2CandidateProviderRequest): Promise<Q2CandidateProviderResponse> {
+export class DeviceQ2Provider implements Q2Provider {
+  async read(request: Q2ProviderRequest): Promise<Q2ProviderResponse> {
     const capabilities = await loadDeviceV2Capabilities();
     if (!capabilities.questionReaderV2) throw new DeviceV2SourceStreamUnavailableError();
     const replay = await readExistingDurableTask(request);
@@ -506,6 +506,6 @@ export class DeviceQ2CandidateProvider implements Q2CandidateProvider {
   }
 }
 
-export function createDeviceQ2CandidateProvider(): Q2CandidateProvider {
-  return new DeviceQ2CandidateProvider();
+export function createDeviceQ2Provider(): Q2Provider {
+  return new DeviceQ2Provider();
 }

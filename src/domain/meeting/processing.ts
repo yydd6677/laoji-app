@@ -141,9 +141,7 @@ export function assertProcessingStage(stage: ProcessingStage): asserts stage is 
   }
 }
 
-export function initialMeetingProcessingStatuses(
-  scopeKey: 'guest' | `user:${string}`,
-): MeetingProcessingStatuses {
+export function initialMeetingProcessingStatuses(): MeetingProcessingStatuses {
   return {
     capture: 'not_started',
     upload: 'not_required',
@@ -155,11 +153,10 @@ export function initialMeetingProcessingStatuses(
 
 export function createInitialProcessingStages(
   meetingId: string,
-  scopeKey: 'guest' | `user:${string}`,
   updatedAtMs: number,
   overrides: Partial<MeetingProcessingStatuses> = {},
 ): readonly TypedProcessingStage[] {
-  const statuses = { ...initialMeetingProcessingStatuses(scopeKey), ...overrides };
+  const statuses = { ...initialMeetingProcessingStatuses(), ...overrides };
   return PROCESSING_STAGE_NAMES.map(stage => {
     const record: ProcessingStage = {
       meetingId,

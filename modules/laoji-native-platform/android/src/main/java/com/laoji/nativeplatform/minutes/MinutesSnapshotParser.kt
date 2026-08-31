@@ -96,7 +96,6 @@ object MinutesSnapshotParser {
       NativeUserMessages.readable(it, "笔记暂时未保存，请稍后重试。")
     }.orEmpty(),
     manualNoteRetryable = raw.boolean("manualNoteRetryable", true),
-    manualNoteConflict = raw.boolean("manualNoteConflict"),
     transcript = parseTranscript(raw.maps("transcript")),
     )
   }
@@ -175,7 +174,6 @@ object MinutesSnapshotParser {
           sourceStartMs = item.long("sourceStartMs").coerceAtLeast(0L),
           updatedAtMs = item.long("updatedAtMs").coerceAtLeast(0L),
           updating = item.boolean("updating"),
-          syncConflict = item.boolean("syncConflict"),
           canShare = item.boolean("canShare"),
         )
       }
@@ -216,10 +214,7 @@ object MinutesSnapshotParser {
       canShare = raw.boolean("canShare"),
       canManageSpeakers = raw.boolean("canManageSpeakers"),
       canGenerateSummary = raw.boolean("canGenerateSummary"),
-      canSelectSummaryTemplate = raw.boolean("canSelectSummaryTemplate"),
-      summaryTemplateLabel = raw.string("summaryTemplateLabel").orEmpty(),
       canCreateAction = raw.boolean("canCreateAction"),
-      canCreateClip = raw.boolean("canCreateClip"),
       summaryGenerating = raw.boolean("summaryGenerating"),
       summaryActionLabel = raw.string("summaryActionLabel").orDefault("生成整理结果"),
       titleEditRequestId = raw.int("titleEditRequestId"),
@@ -236,7 +231,6 @@ object MinutesSnapshotParser {
         NativeUserMessages.readable(it, "笔记暂时未保存，请稍后重试。")
       }.orEmpty(),
       manualNoteRetryable = raw.boolean("manualNoteRetryable", true),
-      manualNoteConflict = raw.boolean("manualNoteConflict"),
       transcript = transcript,
       markers = markers,
       summary = summary,
@@ -256,8 +250,6 @@ object MinutesSnapshotParser {
       processingStatusTone = raw.string("processingStatusTone")
         ?.takeIf { it == "neutral" || it == "primary" || it == "success" || it == "warning" || it == "danger" }
         ?: "neutral",
-      rootSyncConflict = raw.boolean("rootSyncConflict"),
-      summarySyncConflict = raw.boolean("summarySyncConflict"),
       processingRetryStage = MinutesProcessingStage.fromWireName(raw.string("processingRetryStage")),
       processingRetrying = raw.boolean("processingRetrying"),
       recordingMergeStatusLabel = raw.string("recordingMergeStatusLabel")?.takeIf { it.isNotBlank() }?.let {

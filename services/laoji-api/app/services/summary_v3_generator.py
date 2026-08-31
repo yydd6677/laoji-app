@@ -800,8 +800,8 @@ def _validate_model_response(
         )
         return _expand_compact_model_response(compact, package)
     # Keep the verbose parser for immutable historical fixtures and rolling
-    # compatibility during the candidate cycle.  The production schema and
-    # prompt expose only the bounded compact DTO.
+    # compatibility while immutable historical fixtures are still verified.
+    # The production schema and prompt expose only the bounded compact DTO.
     value = _sanitize_model_value(extracted, package)
     if isinstance(value, dict) and isinstance(value.get("relations"), list):
         value["relations"] = [

@@ -17,8 +17,6 @@ export interface ManualNoteRecord {
   meetingId: string;
   content: string;
   revision: number;
-  baseRemoteRevision: number | null;
-  dirty: boolean;
   lastSavedAtMs: number;
   userEditedAtMs: number | null;
 }
@@ -44,8 +42,6 @@ export interface MeetingListQuery {
 
 export interface MeetingListProjectionItem {
   id: string;
-  remoteId: string | null;
-  remoteRevision: number | null;
   legacySourceId: string | null;
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint | null;
@@ -59,7 +55,6 @@ export interface MeetingListProjectionItem {
   lifecycle: MeetingLifecycle;
   startedAtMs: number | null;
   endedAtMs: number | null;
-  syncState: MeetingNote['syncState'];
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs: number | null;
@@ -67,6 +62,8 @@ export interface MeetingListProjectionItem {
   currentSummaryVersionId: string | null;
   activeTranscriptSegmentCount: number;
   currentSummaryReady: boolean;
+  /** Bounded current-summary excerpt owned by the list projection. */
+  currentSummaryPreview: string | null;
   primaryRecording: RecordingAssetRecord | null;
   stages: readonly ProcessingStage[];
 }
@@ -82,30 +79,9 @@ export interface MeetingListOrderEntry {
   updatedAtMs: number;
 }
 
-export interface MeetingRetentionCleanupJob {
-  id: string;
-  scopeKey: ScopeKey;
-  canonicalMeetingId: string;
-  navigationMeetingId: string;
-  localUris: readonly string[];
-  attemptCount: number;
-  lastErrorCode: string | null;
-  createdAtMs: number;
-  updatedAtMs: number;
-}
-
-export interface QueueExpiredMeetingRetentionCleanupInput {
-  scopeKey: ScopeKey;
-  expiresBeforeMs: number;
-  queuedAtMs: number;
-  limit: number;
-}
-
 export interface NewMeetingNote {
   id: string;
   scopeKey: ScopeKey;
-  remoteId?: string | null;
-  remoteRevision?: number | null;
   legacySourceId?: string | null;
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint;
@@ -119,7 +95,6 @@ export interface NewMeetingNote {
   lifecycle: MeetingLifecycle;
   startedAtMs: number | null;
   endedAtMs: number | null;
-  syncState?: MeetingNote['syncState'];
   deletedAtMs?: number | null;
   deletedFromLifecycle?: Exclude<MeetingLifecycle, 'deleted'> | null;
   createdAtMs: number;
@@ -166,112 +141,6 @@ export interface RecordingAssetRecord {
   lastVerifiedAtMs: number | null;
 }
 
-export type RecordingAssetTranscriptionTaskStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed_retryable'
-  | 'blocked';
-
-export interface RecordingAssetTranscriptionTaskRecord {
-  id: string;
-  scopeKey: ScopeKey;
-  meetingId: string;
-  localRecordingAssetId: string | null;
-  clientRecordingAssetId: string;
-  remoteMeetingId: string;
-  remoteRecordingAssetId: string;
-  clientRequestId: string;
-  idempotencyKey: string;
-  language: 'zh' | 'en' | 'auto';
-  requestKind: 'initial' | 'reprocessed';
-  requestGeneration: number;
-  requestBatchId: string | null;
-  sourceTranscriptRevisionId: string | null;
-  status: RecordingAssetTranscriptionTaskStatus;
-  remoteJobId: string | null;
-  requestAttemptCount: number;
-  remoteAttempt: number;
-  progress: number | null;
-  resultRevisionId: string | null;
-  errorCode: string | null;
-  retryable: boolean;
-  nextAttemptAtMs: number | null;
-  remoteUpdatedAtMs: number | null;
-  contentSyncedAtMs: number | null;
-  createdAtMs: number;
-  updatedAtMs: number;
-  completedAtMs: number | null;
-}
-
-export interface RecordingAssetTranscriptReprocessAsset {
-  clientRecordingAssetId: string;
-  remoteRecordingAssetId: string;
-  clientRequestId: string;
-  idempotencyKey: string;
-  language: RecordingAssetTranscriptionTaskRecord['language'];
-}
-
-export interface RequestRecordingAssetTranscriptReprocessInput {
-  meetingId: string;
-  remoteMeetingId: string;
-  scopeKey: Exclude<ScopeKey, 'guest'>;
-  requestBatchId: string;
-  assets: readonly RecordingAssetTranscriptReprocessAsset[];
-  requestedAtMs: number;
-}
-
-export interface ReadyRecordingAssetTranscriptContent {
-  remoteMeetingId: string;
-  candidateKind: 'final' | 'reprocessed';
-  requestBatchId: string | null;
-  sourceTranscriptRevisionId: string | null;
-}
-
-export interface RecordingAssetTranscriptionDiscovery {
-  taskId: string;
-  clientRecordingAssetId: string;
-  remoteRecordingAssetId: string;
-  clientRequestId: string;
-  idempotencyKey: string;
-  language: RecordingAssetTranscriptionTaskRecord['language'];
-}
-
-export interface DiscoverRecordingAssetTranscriptionTasksInput {
-  meetingId: string;
-  remoteMeetingId: string;
-  scopeKey: ScopeKey;
-  assets: readonly RecordingAssetTranscriptionDiscovery[];
-  discoveredAtMs: number;
-}
-
-export interface ApplyRecordingAssetTranscriptionJobInput {
-  taskId: string;
-  scopeKey: ScopeKey;
-  remoteMeetingId: string;
-  remoteRecordingAssetId: string;
-  remoteJobId: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
-  remoteAttempt: number;
-  progress: number | null;
-  errorCode: string | null;
-  retryable: boolean;
-  resultRevisionId: string | null;
-  nextAttemptAtMs: number | null;
-  remoteUpdatedAtMs: number;
-  receivedAtMs: number;
-}
-
-export interface RecordRecordingAssetTranscriptionTransportFailureInput {
-  taskId: string;
-  scopeKey: ScopeKey;
-  disposition: 'retry' | 'blocked';
-  errorCode: string;
-  nextAttemptAtMs: number | null;
-  failedAtMs: number;
-}
-
 export interface MeetingRootPatch {
   origin?: MeetingOrigin;
   entryPoint?: MeetingEntryPoint | null;
@@ -282,13 +151,10 @@ export interface MeetingRootPatch {
   mode?: MeetingCaptureMode | null;
   clientRequestId?: string | null;
   recordedAtMs?: number | null;
-  remoteId?: string | null;
   lifecycle?: MeetingLifecycle;
   startedAtMs?: number | null;
   endedAtMs?: number | null;
   currentSummaryVersionId?: string | null;
-  remoteRevision?: number | null;
-  syncState?: MeetingNote['syncState'];
   deletedAtMs?: number | null;
   deletedFromLifecycle?: Exclude<MeetingLifecycle, 'deleted'> | null;
   updatedAtMs: number;
@@ -301,94 +167,6 @@ export interface OccurrenceLinkRecord extends OccurrenceReference {
   recurrenceSegmentId: string | null;
   seriesKey: string | null;
   linkedAtMs: number;
-}
-
-export type OccurrenceLinkSyncState = 'local_only' | 'pending' | 'synced' | 'failed' | 'conflicted';
-
-export interface OccurrenceSyncClaim {
-  scopeKey: ScopeKey;
-  meetingId: string;
-  meetingRemoteId: string;
-  operationId: string;
-  idempotencyKey: string;
-  claimToken: string;
-  requestPayloadJson: string;
-  attemptCount: number;
-}
-
-export interface ClaimOccurrenceSyncOptions {
-  nowMs: number;
-  staleBeforeMs: number;
-  maxMeetings: number;
-}
-
-export interface OccurrenceSyncFailure {
-  disposition: 'retry' | 'blocked' | 'permanent_error';
-  errorCode: string;
-  nextAttemptAtMs: number | null;
-  updatedAtMs: number;
-}
-
-export interface OccurrenceSyncConflict {
-  remoteRevision: number | null;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export interface RemoteOccurrenceLinkRecord {
-  remoteId: string;
-  meetingRemoteId: string;
-  revision: number;
-  sourceEventId: string;
-  occurrenceDate: string;
-  calendarRevision: number | null;
-  recurrenceSegmentId: string | null;
-  seriesKey: string | null;
-  linkState: 'active' | 'orphaned';
-  clientUpdatedAtMs: number;
-  scheduleSnapshot: ScheduleSnapshot;
-  serverCreatedAtMs: number;
-  serverUpdatedAtMs: number;
-}
-
-export interface MergeOccurrenceRemoteInput {
-  scopeKey: ScopeKey;
-  remote: RemoteOccurrenceLinkRecord;
-  pulledAtMs: number;
-}
-
-export interface MergeOccurrenceRemoteResult {
-  outcome: 'attached' | 'updated' | 'unchanged' | 'conflicted' | 'meeting_unavailable' | 'ignored_stale';
-  meetingId: string | null;
-}
-
-export interface MeetingOccurrenceSyncConflictRecord {
-  id: string;
-  meetingId: string;
-  localRevision: number | null;
-  remoteRevision: number | null;
-  localPayloadJson: string;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export interface ResolveMeetingOccurrenceSyncConflictInput {
-  conflictId: string;
-  meetingId: string;
-  targetMeetingId: string;
-  detachedHistoryId: string;
-  recordingMergePlans: readonly MeetingRecordingMergePlan[];
-  scopeKey: ScopeKey;
-  expectedRemotePayloadJson: string;
-  remote: RemoteOccurrenceLinkRecord;
-  resolvedAtMs: number;
-}
-
-export interface MeetingRecordingMergePlan {
-  taskId: string;
-  sourceRecordingAssetId: string;
-  targetRecordingAssetId: string;
-  targetAssetGeneration: string;
 }
 
 export type MeetingRecordingMergeTaskStatus = 'pending' | 'failed' | 'completed';
@@ -410,10 +188,6 @@ export interface MeetingRecordingMergeTaskRecord {
   createdAtMs: number;
   updatedAtMs: number;
   completedAtMs: number | null;
-}
-
-export interface ResolveMeetingOccurrenceSyncConflictResult {
-  recordingMergeTaskIds: readonly string[];
 }
 
 export interface CompleteMeetingRecordingMergeTaskInput {
@@ -491,7 +265,6 @@ export interface TranscriptRevisionRecord {
 }
 
 export type SpeakerCorrectionScope = 'segment' | 'cluster' | 'future_profile';
-export type SpeakerCorrectionSyncState = 'local_only' | 'pending' | 'synced' | 'failed' | 'blocked';
 
 export interface ApplySpeakerCorrectionInput {
   correctionId: string;
@@ -505,7 +278,6 @@ export interface ApplySpeakerCorrectionInput {
   displayName: string;
   speakerProfileId: string | null;
   consentToProfileUpdate: boolean;
-  syncState: Extract<SpeakerCorrectionSyncState, 'local_only' | 'pending'>;
   createdAtMs: number;
 }
 
@@ -580,8 +352,6 @@ export interface SummaryCitationRecord {
 export interface ActionItemRecord {
   id: string;
   meetingId: string;
-  remoteId: string | null;
-  remoteRevision: number | null;
   content: string;
   status: 'pending' | 'completed' | 'dismissed';
   assigneeText: string | null;
@@ -615,8 +385,6 @@ export interface MarkerRecord {
 }
 
 export type MeetingAttachmentKind = 'text' | 'image';
-export type MeetingAttachmentSyncState = 'local' | 'pending' | 'synced' | 'failed_retryable' | 'blocked';
-export type MeetingAttachmentPendingOperation = 'create' | 'delete';
 
 export interface MeetingAttachmentRecord {
   id: string;
@@ -630,80 +398,8 @@ export interface MeetingAttachmentRecord {
   fileName: string | null;
   byteSize: number | null;
   checksumSha256: string | null;
-  remoteId: string | null;
-  remoteRevision: number | null;
-  syncState: MeetingAttachmentSyncState;
-  pendingOperation: MeetingAttachmentPendingOperation | null;
-  lastErrorCode: string | null;
-  remoteUpdatedAtMs: number | null;
   createdAtMs: number;
   updatedAtMs: number;
-}
-
-export interface MeetingAttachmentSyncClaim {
-  scopeKey: Exclude<ScopeKey, 'guest'>;
-  meetingId: string;
-  meetingRemoteId: string;
-  attachmentId: string;
-  operationId: string;
-  operationType: 'meeting_attachment.create' | 'meeting_attachment.delete';
-  claimToken: string;
-  requestPayloadJson: string;
-  attemptCount: number;
-  localUri: string | null;
-  mimeType: string | null;
-  fileName: string | null;
-  byteSize: number | null;
-  checksumSha256: string | null;
-}
-
-export interface ClaimMeetingAttachmentSyncOptions {
-  nowMs: number;
-  staleBeforeMs: number;
-  limit: number;
-}
-
-export interface MeetingAttachmentSyncFailure {
-  disposition: 'retry' | 'blocked' | 'permanent_error';
-  errorCode: string;
-  nextAttemptAtMs: number | null;
-  updatedAtMs: number;
-}
-
-export interface RemoteMeetingAttachmentRecord {
-  remoteId: string;
-  meetingRemoteId: string;
-  clientAttachmentId: string;
-  revision: number;
-  lifecycle: 'registered' | 'ready' | 'deleted';
-  positionMs: number;
-  kind: MeetingAttachmentKind;
-  textContent: string | null;
-  mimeType: string | null;
-  fileName: string | null;
-  byteSize: number | null;
-  checksumSha256: string | null;
-  contentUrl: string | null;
-  requiresAuth: true;
-  clientCreatedAtMs: number;
-  clientUpdatedAtMs: number;
-  serverCreatedAtMs: number;
-  serverUpdatedAtMs: number;
-  serverDeletedAtMs: number | null;
-}
-
-export interface MergeRemoteMeetingAttachmentInput {
-  scopeKey: Exclude<ScopeKey, 'guest'>;
-  meetingId: string;
-  meetingRemoteId: string;
-  remote: RemoteMeetingAttachmentRecord;
-  localUri: string | null;
-  mergedAtMs: number;
-}
-
-export interface MergeRemoteMeetingAttachmentResult {
-  outcome: 'inserted' | 'attached' | 'unchanged' | 'deleted' | 'pending_local';
-  cleanupUri: string | null;
 }
 
 export interface MeetingTagRecord {
@@ -813,7 +509,6 @@ export interface MeetingSeriesActionRecord {
   action: ActionItemRecord;
   canonicalMeetingId: string;
   legacyMeetingId: string;
-  remoteMeetingId: string | null;
   meetingTitle: string;
   occurrenceDate: string;
 }
@@ -854,389 +549,9 @@ export interface SummaryVersionProjection {
   meetingActions: readonly ActionItemRecord[];
 }
 
-export interface SyncOperationRecord {
-  operationId: string;
+export interface MeetingScopeRevisionState {
   scopeKey: ScopeKey;
-  aggregateType: string;
-  aggregateId: string;
-  operationType: string;
-  baseRevision: number | null;
-  payloadJson: string;
-  createdAtMs: number;
-}
-
-export interface MeetingRootSyncClaim {
-  scopeKey: ScopeKey;
-  meetingId: string;
-  remoteId: string | null;
-  remoteRevision: number | null;
-  operationId: string;
-  operationType: string;
-  idempotencyKey: string;
-  claimToken: string;
-  requestPayloadJson: string;
-  attemptCount: number;
-}
-
-export interface MeetingRootSyncCompletion {
-  remoteId: string;
-  remoteRevision: number | null;
-  occurrence: {
-    remoteId: string;
-    remoteRevision: number;
-    sourceEventId: string;
-    occurrenceDate: string;
-  } | null;
-}
-
-export interface ClaimMeetingRootSyncOptions {
-  nowMs: number;
-  staleBeforeMs: number;
-  maxMeetings: number;
-}
-
-export interface MeetingRootSyncFailure {
-  disposition: 'retry' | 'blocked' | 'permanent_error';
-  errorCode: string;
-  nextAttemptAtMs: number | null;
-  updatedAtMs: number;
-}
-
-export interface MeetingRootSyncConflict {
-  remoteRevision: number | null;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export interface MeetingRootSyncConflictRecord {
-  id: string;
-  meetingId: string;
-  localRevision: number | null;
-  remoteRevision: number | null;
-  localPayloadJson: string;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-/**
- * Requeues a root operation after the automatic conflict reconciler could not
- * safely construct a local/remote merge yet.  The conflict row is retained as
- * resolved history; the meeting returns to the normal pending state and the
- * worker retries it without exposing a permanent manual-repair state.
- */
-export interface RequeueMeetingRootSyncConflictInput {
-  conflictId: string;
-  meetingId: string;
-  scopeKey: ScopeKey;
-  remoteId: string | null;
-  remoteRevision: number | null;
-  retryAtMs: number;
-  resolvedAtMs: number;
-}
-
-export interface RequeueStaleMeetingRootSyncOperationsInput {
-  scopeKey: ScopeKey;
-  retryAtMs: number;
-  updatedAtMs: number;
-}
-
-/**
- * Repairs account-local roots that predate the canonical outbox. Older
- * shadow-imported meetings can have a local recording but no meeting.create
- * operation, or can retain a terminal outbox status from a previous build.
- * They must be returned to the ordinary automatic sync queue.
- */
-export interface MeetingRootSyncRepairResult {
-  created: number;
-  requeued: number;
-}
-
-export interface MeetingRootRemoteConflictFields {
-  remoteId: string;
-  clientNoteId: string;
-  remoteRevision: number;
-  origin: MeetingOrigin;
-  entryPoint: MeetingEntryPoint | null;
-  title: string;
-  description: string | null;
-  participants: readonly string[];
-  location: string | null;
-  mode: MeetingCaptureMode;
-  recordedAtMs: number | null;
-  lifecycle: MeetingLifecycle;
-  deletedFromLifecycle: Exclude<MeetingLifecycle, 'deleted'> | null;
-  deletedAtMs: number | null;
-  serverCreatedAtMs: number;
-  serverUpdatedAtMs: number;
-}
-
-export interface ResolveMeetingRootSyncConflictInput {
-  conflictId: string;
-  meetingId: string;
-  scopeKey: ScopeKey;
-  expectedLocalUpdatedAtMs: number;
-  resolution: 'keep_local' | 'use_remote';
-  remoteId: string;
-  remoteClientNoteId: string;
-  remoteRevision: number;
-  remoteFields: MeetingRootRemoteConflictFields | null;
-  nextOperations: readonly SyncOperationRecord[];
-  resolvedAtMs: number;
-}
-
-export interface MeetingRootPullState {
-  scopeKey: ScopeKey;
-  cursor: string | null;
-  updatedAtMs: number;
-}
-
-export interface AdvanceMeetingRootPullCursorInput {
-  scopeKey: ScopeKey;
-  expectedCursor: string | null;
-  nextCursor: string | null;
-  pulledAtMs: number;
-}
-
-export interface ActionSyncClaim {
-  scopeKey: ScopeKey;
-  meetingId: string;
-  meetingRemoteId: string;
-  actionId: string;
-  operationIds: readonly string[];
-  idempotencyKey: string;
-  claimToken: string;
-  requestPayloadJson: string;
-  attemptCount: number;
-}
-
-export interface ClaimActionSyncOptions {
-  nowMs: number;
-  staleBeforeMs: number;
-  maxMeetings: number;
-}
-
-export interface ActionSyncFailure {
-  disposition: 'retry' | 'blocked' | 'permanent_error';
-  errorCode: string;
-  nextAttemptAtMs: number | null;
-  updatedAtMs: number;
-}
-
-export interface ActionSyncConflict {
-  localRevision: number | null;
-  remoteRevision: number | null;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export interface ManualNoteSyncClaim {
-  scopeKey: ScopeKey;
-  meetingId: string;
-  meetingRemoteId: string;
-  operationIds: readonly string[];
-  idempotencyKey: string;
-  claimToken: string;
-  requestPayloadJson: string;
-  attemptCount: number;
-}
-
-export interface ClaimManualNoteSyncOptions {
-  nowMs: number;
-  staleBeforeMs: number;
-  maxMeetings: number;
-}
-
-export interface ManualNoteSyncFailure {
-  disposition: 'retry' | 'blocked' | 'permanent_error';
-  errorCode: string;
-  nextAttemptAtMs: number | null;
-  updatedAtMs: number;
-}
-
-export interface ManualNoteSyncConflict {
-  remoteRevision: number | null;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export interface MeetingManualNoteSyncConflictRecord {
-  id: string;
-  meetingId: string;
-  localRevision: number | null;
-  remoteRevision: number | null;
-  localPayloadJson: string;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export interface RemoteManualNoteRecord {
-  exists: boolean;
-  remoteId: string | null;
-  revision: number;
-  clientNoteRevision: number;
-  clientUpdatedAtMs: number;
-  userEditedAtMs: number | null;
-  content: string;
-  serverCreatedAtMs: number | null;
-  serverUpdatedAtMs: number | null;
-}
-
-export interface MergeMeetingManualNoteRemoteInput {
-  meetingId: string;
-  remoteMeetingId: string;
-  scopeKey: ScopeKey;
-  remote: RemoteManualNoteRecord;
-  pulledAtMs: number;
-}
-
-export interface MergeMeetingManualNoteRemoteResult {
-  outcome: 'unchanged' | 'updated' | 'attached' | 'conflicted' | 'ignored_stale';
-  previousLocalRevision: number;
-  nextLocalRevision: number;
-}
-
-export interface ResolveMeetingManualNoteSyncConflictInput {
-  conflictId: string;
-  meetingId: string;
-  scopeKey: ScopeKey;
-  expectedLocalRevision: number;
-  resolution: 'keep_local' | 'use_remote';
-  remote: RemoteManualNoteRecord;
-  nextOperation: SyncOperationRecord | null;
-  resolvedAtMs: number;
-}
-
-export interface MeetingActionSyncConflictRecord {
-  id: string;
-  meetingId: string;
-  actionId: string;
-  localRevision: number | null;
-  remoteRevision: number | null;
-  localPayloadJson: string;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export interface MeetingActionRemoteConflictFields {
-  content: string;
-  status: ActionItemRecord['status'];
-  assigneeText: string | null;
-  dueAtMs: number | null;
-  reminderAtMs: number | null;
-  reminderNotificationId: null;
-  followupEventSourceId: string | null;
-  userEditedAtMs: number | null;
-  completedAtMs: number | null;
-  updatedAtMs: number;
-}
-
-export interface MeetingActionPullState {
-  meetingId: string;
-  scopeKey: ScopeKey;
-  remoteMeetingId: string;
-  cursor: string | null;
-  updatedAtMs: number;
-}
-
-export interface RemoteMeetingActionRecord {
-  remoteId: string;
-  clientActionId: string;
-  revision: number;
-  clientCreatedAtMs: number;
-  clientUpdatedAtMs: number;
-  userEditedAtMs: number | null;
-  completedAtMs: number | null;
-  content: string;
-  status: ActionItemRecord['status'];
-  assigneeText: string | null;
-  dueAtMs: number | null;
-  reminderAtMs: number | null;
-  followupEventSourceId: string | null;
-  sourceKind: ActionItemRecord['sourceKind'];
-  sourceSummaryVersionId: string | null;
-  /** Stable provider/server segment identity, never a local transcript_segments primary key. */
-  sourceSegmentId: string | null;
-  sourceStartMs: number | null;
-  generationFingerprint: string | null;
-  serverCreatedAtMs: number;
-  serverUpdatedAtMs: number;
-}
-
-export interface MergeMeetingActionPullPageInput {
-  meetingId: string;
-  remoteMeetingId: string;
-  scopeKey: ScopeKey;
-  expectedCursor: string | null;
-  nextCursor: string | null;
-  items: readonly RemoteMeetingActionRecord[];
-  pulledAtMs: number;
-}
-
-export interface MergeMeetingActionPullPageResult {
-  applied: boolean;
-  inserted: number;
-  updated: number;
-  attached: number;
-  conflicted: number;
-  ignoredStale: number;
-  cursorAdvanced: boolean;
-}
-
-export interface ResolveMeetingActionSyncConflictInput {
-  conflictId: string;
-  meetingId: string;
-  actionId: string;
-  scopeKey: ScopeKey;
-  expectedUpdatedAtMs: number;
-  resolution: 'keep_local' | 'use_remote';
-  remoteId: string | null;
-  remoteRevision: number | null;
-  remoteFields: MeetingActionRemoteConflictFields | null;
-  nextOperation: SyncOperationRecord | null;
-  resolvedAtMs: number;
-}
-
-export interface SpeakerCorrectionSyncClaim {
-  scopeKey: ScopeKey;
-  meetingId: string;
-  meetingRemoteId: string;
-  correctionId: string;
-  operationId: string;
-  idempotencyKey: string;
-  claimToken: string;
-  requestPayloadJson: string;
-  baseRevision: number;
-  attemptCount: number;
-}
-
-export interface ClaimSpeakerCorrectionSyncOptions {
-  nowMs: number;
-  staleBeforeMs: number;
-  maxMeetings: number;
-}
-
-export interface SpeakerCorrectionSyncFailure {
-  disposition: 'retry' | 'blocked' | 'permanent_error';
-  errorCode: string;
-  nextAttemptAtMs: number | null;
-  updatedAtMs: number;
-}
-
-export interface SpeakerCorrectionSyncConflict {
-  remoteRevision: number | null;
-  remotePayloadJson: string;
-  createdAtMs: number;
-}
-
-export type LegacyMirrorStatus = 'clean' | 'pending' | 'failed';
-
-export interface MeetingScopeWriteState {
-  scopeKey: ScopeKey;
-  writeOwner: 'legacy' | 'canonical';
   canonicalRevision: number;
-  legacyMirrorRevision: number;
-  legacyMirrorStatus: LegacyMirrorStatus;
-  lastErrorCode: string | null;
   updatedAtMs: number;
 }
 
@@ -1248,13 +563,6 @@ export interface MeetingTransaction {
     scopeKey: ScopeKey,
   ): Promise<MeetingNote | null>;
   findMeetingByNativeSessionId(sessionId: string, scopeKey: ScopeKey): Promise<MeetingNote | null>;
-  findMeetingByRemoteIdentity(
-    remoteId: string,
-    clientNoteId: string | null,
-    clientRequestId: string | null,
-    scopeKey: ScopeKey,
-  ): Promise<MeetingNote | null>;
-  hasOutstandingMeetingRootSync(meetingId: string, scopeKey: ScopeKey): Promise<boolean>;
   getStage(
     meetingId: string,
     scopeKey: ScopeKey,
@@ -1370,7 +678,7 @@ export interface MeetingTransaction {
     input: ApplySpeakerCorrectionInput,
     scopeKey: ScopeKey,
   ): Promise<ApplySpeakerCorrectionResult>;
-  /** Reprojects the speaker stage from durable corrections and their outbox rows. */
+  /** Reprojects the speaker stage from durable local corrections. */
   reconcileSpeakerProcessingStage(
     meetingId: string,
     scopeKey: ScopeKey,
@@ -1395,15 +703,7 @@ export interface MeetingTransaction {
     citationRemovedAtMs: number | null,
   ): Promise<boolean>;
   /** Returns true only when this transaction inserted a new operation. */
-  insertOutbox(operation: SyncOperationRecord): Promise<boolean>;
   advanceCanonicalWrite(scopeKey: ScopeKey, updatedAtMs: number): Promise<number>;
-  markLegacyMirror(
-    scopeKey: ScopeKey,
-    canonicalRevision: number,
-    status: 'clean' | 'failed',
-    errorCode: string | null,
-    updatedAtMs: number,
-  ): Promise<boolean>;
 }
 
 export interface MeetingNoteRepository {
@@ -1466,39 +766,8 @@ export interface MeetingNoteRepository {
     scopeKey: ScopeKey,
   ): Promise<SummaryVersionProjection | null>;
   listMeetingActions(meetingId: string, scopeKey: ScopeKey): Promise<readonly ActionItemRecord[]>;
-  listMeetingActionSyncConflicts(
-    meetingId: string,
-    scopeKey: ScopeKey,
-  ): Promise<readonly MeetingActionSyncConflictRecord[]>;
-  getMeetingActionPullState(
-    meetingId: string,
-    scopeKey: ScopeKey,
-  ): Promise<MeetingActionPullState | null>;
-  mergeMeetingActionPullPage(
-    input: MergeMeetingActionPullPageInput,
-  ): Promise<MergeMeetingActionPullPageResult>;
-  resolveMeetingActionSyncConflict(
-    input: ResolveMeetingActionSyncConflictInput,
-  ): Promise<boolean>;
   listMeetingMarkers(meetingId: string, scopeKey: ScopeKey): Promise<readonly MarkerRecord[]>;
   listMeetingAttachments(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingAttachmentRecord[]>;
-  getMeetingAttachmentForSync(
-    attachmentId: string,
-    meetingId: string,
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-  ): Promise<MeetingAttachmentRecord | null>;
-  listMeetingAttachmentImagesMissingChecksum(
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-    limit: number,
-  ): Promise<readonly MeetingAttachmentRecord[]>;
-  repairMeetingAttachmentImageChecksum(input: {
-    attachmentId: string;
-    meetingId: string;
-    scopeKey: Exclude<ScopeKey, 'guest'>;
-    localUri: string;
-    byteSize: number;
-    checksumSha256: string;
-  }): Promise<boolean>;
   createMeetingAttachment(
     attachment: MeetingAttachmentRecord,
     scopeKey: ScopeKey,
@@ -1508,44 +777,6 @@ export interface MeetingNoteRepository {
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<MeetingAttachmentRecord | null>;
-  ensureMeetingAttachmentSyncOperations(
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-    createdAtMs: number,
-  ): Promise<number>;
-  claimMeetingAttachmentSyncOperations(
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-    options: ClaimMeetingAttachmentSyncOptions,
-  ): Promise<readonly MeetingAttachmentSyncClaim[]>;
-  getNextMeetingAttachmentSyncAttemptAt(
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-    staleClaimAfterMs: number,
-  ): Promise<number | null>;
-  hasMeetingAttachmentSyncOperationsWaitingForRoot(
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-  ): Promise<boolean>;
-  completeMeetingAttachmentCreateClaim(
-    claim: MeetingAttachmentSyncClaim,
-    remote: RemoteMeetingAttachmentRecord,
-    completedAtMs: number,
-  ): Promise<boolean>;
-  completeMeetingAttachmentDeleteClaim(
-    claim: MeetingAttachmentSyncClaim,
-    remote: RemoteMeetingAttachmentRecord,
-    completedAtMs: number,
-  ): Promise<MeetingAttachmentRecord | null>;
-  failMeetingAttachmentSyncClaim(
-    claim: MeetingAttachmentSyncClaim,
-    failure: MeetingAttachmentSyncFailure,
-  ): Promise<boolean>;
-  retryMeetingAttachmentSync(
-    attachmentId: string,
-    meetingId: string,
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-    retriedAtMs: number,
-  ): Promise<boolean>;
-  mergeRemoteMeetingAttachment(
-    input: MergeRemoteMeetingAttachmentInput,
-  ): Promise<MergeRemoteMeetingAttachmentResult>;
   listMeetingTags(meetingId: string, scopeKey: ScopeKey): Promise<readonly MeetingTagRecord[]>;
   resolveCanonicalMeetingId(navigationMeetingId: string, scopeKey: ScopeKey): Promise<string | null>;
   listMeetingTagAssignments(scopeKey: ScopeKey): Promise<readonly MeetingTagAssignment[]>;
@@ -1578,88 +809,7 @@ export interface MeetingNoteRepository {
     meetingId: string,
     scopeKey: ScopeKey,
   ): Promise<readonly MeetingSeriesCarryImportRecord[]>;
-  getScopeWriteState(scopeKey: ScopeKey): Promise<MeetingScopeWriteState>;
-  getMeetingRootPullState(scopeKey: ScopeKey): Promise<MeetingRootPullState | null>;
-  advanceMeetingRootPullCursor(input: AdvanceMeetingRootPullCursorInput): Promise<boolean>;
-  repairLegacyCalendarMeetingRootCreate(
-    meetingId: string,
-    scopeKey: ScopeKey,
-    repairedAtMs: number,
-  ): Promise<boolean>;
-  repairLegacyCalendarMeetingRootCreates(scopeKey: ScopeKey, repairedAtMs: number): Promise<number>;
-  repairOrphanedMeetingRootSyncOperations(
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-    repairedAtMs: number,
-  ): Promise<MeetingRootSyncRepairResult>;
-  claimMeetingRootSyncOperations(
-    scopeKey: ScopeKey,
-    options: ClaimMeetingRootSyncOptions,
-  ): Promise<readonly MeetingRootSyncClaim[]>;
-  getNextMeetingRootSyncAttemptAt(
-    scopeKey: ScopeKey,
-    staleClaimAfterMs: number,
-  ): Promise<number | null>;
-  completeMeetingRootSyncClaim(
-    claim: MeetingRootSyncClaim,
-    completion: MeetingRootSyncCompletion,
-    completedAtMs: number,
-  ): Promise<boolean>;
-  failMeetingRootSyncClaim(
-    claim: MeetingRootSyncClaim,
-    failure: MeetingRootSyncFailure,
-  ): Promise<boolean>;
-  recordMeetingRootSyncConflict(
-    claim: MeetingRootSyncClaim,
-    conflict: MeetingRootSyncConflict,
-  ): Promise<boolean>;
-  listMeetingRootSyncConflicts(
-    scopeKey: ScopeKey,
-  ): Promise<readonly MeetingRootSyncConflictRecord[]>;
-  getMeetingRootSyncConflict(
-    meetingId: string,
-    scopeKey: ScopeKey,
-  ): Promise<MeetingRootSyncConflictRecord | null>;
-  requeueMeetingRootSyncConflict(
-    input: RequeueMeetingRootSyncConflictInput,
-  ): Promise<boolean>;
-  requeueStaleMeetingRootSyncOperations(
-    input: RequeueStaleMeetingRootSyncOperationsInput,
-  ): Promise<number>;
-  resolveMeetingRootSyncConflict(input: ResolveMeetingRootSyncConflictInput): Promise<boolean>;
-  ensureOccurrenceSyncOperations(scopeKey: ScopeKey, createdAtMs: number): Promise<number>;
-  claimOccurrenceSyncOperations(
-    scopeKey: ScopeKey,
-    options: ClaimOccurrenceSyncOptions,
-  ): Promise<readonly OccurrenceSyncClaim[]>;
-  getNextOccurrenceSyncAttemptAt(
-    scopeKey: ScopeKey,
-    staleClaimAfterMs: number,
-  ): Promise<number | null>;
-  completeOccurrenceSyncClaim(
-    claim: OccurrenceSyncClaim,
-    remoteId: string,
-    remoteRevision: number,
-    completedAtMs: number,
-  ): Promise<boolean>;
-  failOccurrenceSyncClaim(
-    claim: OccurrenceSyncClaim,
-    failure: OccurrenceSyncFailure,
-  ): Promise<boolean>;
-  recordOccurrenceSyncConflict(
-    claim: OccurrenceSyncClaim,
-    conflict: OccurrenceSyncConflict,
-  ): Promise<boolean>;
-  hasOccurrenceSyncConflict(
-    reference: OccurrenceReference,
-    scopeKey: ScopeKey,
-  ): Promise<boolean>;
-  getOccurrenceSyncConflict(
-    reference: OccurrenceReference,
-    scopeKey: ScopeKey,
-  ): Promise<MeetingOccurrenceSyncConflictRecord | null>;
-  resolveMeetingOccurrenceSyncConflict(
-    input: ResolveMeetingOccurrenceSyncConflictInput,
-  ): Promise<ResolveMeetingOccurrenceSyncConflictResult | null>;
+  getScopeRevisionState(scopeKey: ScopeKey): Promise<MeetingScopeRevisionState>;
   listMeetingRecordingMergeTasks(
     targetMeetingId: string,
     scopeKey: ScopeKey,
@@ -1668,154 +818,12 @@ export interface MeetingNoteRepository {
     input: CompleteMeetingRecordingMergeTaskInput,
   ): Promise<boolean>;
   failMeetingRecordingMergeTask(input: FailMeetingRecordingMergeTaskInput): Promise<boolean>;
-  discoverRecordingAssetTranscriptionTasks(
-    input: DiscoverRecordingAssetTranscriptionTasksInput,
-  ): Promise<number>;
-  listRunnableRecordingAssetTranscriptionTasks(
-    scopeKey: ScopeKey,
-    nowMs: number,
-    limit: number,
-  ): Promise<readonly RecordingAssetTranscriptionTaskRecord[]>;
-  applyRecordingAssetTranscriptionJob(
-    input: ApplyRecordingAssetTranscriptionJobInput,
-  ): Promise<boolean>;
-  recordRecordingAssetTranscriptionTransportFailure(
-    input: RecordRecordingAssetTranscriptionTransportFailureInput,
-  ): Promise<boolean>;
-  markRecordingAssetTranscriptionContentSynced(
-    scopeKey: ScopeKey,
-    remoteMeetingId: string,
-    requestBatchId: string | null,
-    syncedAtMs: number,
-  ): Promise<number>;
-  retryRecordingAssetTranscriptionTasks(
-    meetingId: string,
-    scopeKey: ScopeKey,
-    requestedAtMs: number,
-  ): Promise<number>;
-  requestRecordingAssetTranscriptReprocess(
-    input: RequestRecordingAssetTranscriptReprocessInput,
-  ): Promise<number>;
-  listReadyRecordingAssetTranscriptContent(
-    scopeKey: Exclude<ScopeKey, 'guest'>,
-    limit?: number,
-  ): Promise<readonly ReadyRecordingAssetTranscriptContent[]>;
-  getNextRecordingAssetTranscriptionAttemptAt(
-    scopeKey: ScopeKey,
-    nowMs: number,
-  ): Promise<number | null>;
-  mergeOccurrenceRemote(input: MergeOccurrenceRemoteInput): Promise<MergeOccurrenceRemoteResult>;
   setOccurrenceLinkState(input: SetOccurrenceLinkStateInput): Promise<number>;
-  claimActionSyncOperations(
-    scopeKey: ScopeKey,
-    options: ClaimActionSyncOptions,
-  ): Promise<readonly ActionSyncClaim[]>;
-  getNextActionSyncAttemptAt(
-    scopeKey: ScopeKey,
-    staleClaimAfterMs: number,
-  ): Promise<number | null>;
-  completeActionSyncClaim(
-    claim: ActionSyncClaim,
-    remoteId: string,
-    remoteRevision: number,
-    completedAtMs: number,
-  ): Promise<boolean>;
-  failActionSyncClaim(claim: ActionSyncClaim, failure: ActionSyncFailure): Promise<boolean>;
-  recordActionSyncConflict(
-    claim: ActionSyncClaim,
-    conflict: ActionSyncConflict,
-  ): Promise<boolean>;
-  ensureManualNoteSyncOperations(scopeKey: ScopeKey, createdAtMs: number): Promise<number>;
-  claimManualNoteSyncOperations(
-    scopeKey: ScopeKey,
-    options: ClaimManualNoteSyncOptions,
-  ): Promise<readonly ManualNoteSyncClaim[]>;
-  getNextManualNoteSyncAttemptAt(
-    scopeKey: ScopeKey,
-    staleClaimAfterMs: number,
-  ): Promise<number | null>;
-  completeManualNoteSyncClaim(
-    claim: ManualNoteSyncClaim,
-    remoteRevision: number,
-    completedAtMs: number,
-  ): Promise<boolean>;
-  failManualNoteSyncClaim(
-    claim: ManualNoteSyncClaim,
-    failure: ManualNoteSyncFailure,
-  ): Promise<boolean>;
-  recordManualNoteSyncConflict(
-    claim: ManualNoteSyncClaim,
-    conflict: ManualNoteSyncConflict,
-  ): Promise<boolean>;
-  getMeetingManualNoteSyncConflict(
-    meetingId: string,
-    scopeKey: ScopeKey,
-  ): Promise<MeetingManualNoteSyncConflictRecord | null>;
-  mergeMeetingManualNoteRemote(
-    input: MergeMeetingManualNoteRemoteInput,
-  ): Promise<MergeMeetingManualNoteRemoteResult>;
-  resolveMeetingManualNoteSyncConflict(
-    input: ResolveMeetingManualNoteSyncConflictInput,
-  ): Promise<boolean>;
-  claimSpeakerCorrectionSyncOperations(
-    scopeKey: ScopeKey,
-    options: ClaimSpeakerCorrectionSyncOptions,
-  ): Promise<readonly SpeakerCorrectionSyncClaim[]>;
-  /** Restores retry/stale-claim wakeups after the provider process restarts. */
-  getNextSpeakerCorrectionSyncAttemptAt(
-    scopeKey: ScopeKey,
-    staleClaimAfterMs: number,
-  ): Promise<number | null>;
-  completeSpeakerCorrectionSyncClaim(
-    claim: SpeakerCorrectionSyncClaim,
-    remoteAssignmentRevision: number,
-    completedAtMs: number,
-  ): Promise<boolean>;
-  failSpeakerCorrectionSyncClaim(
-    claim: SpeakerCorrectionSyncClaim,
-    failure: SpeakerCorrectionSyncFailure,
-  ): Promise<boolean>;
-  recordSpeakerCorrectionSyncConflict(
-    claim: SpeakerCorrectionSyncClaim,
-    conflict: SpeakerCorrectionSyncConflict,
-  ): Promise<boolean>;
-  /** Makes only retryable speaker corrections for one meeting immediately claimable. */
-  retrySpeakerCorrectionSyncOperations(
-    meetingId: string,
-    scopeKey: ScopeKey,
-    requestedAtMs: number,
-  ): Promise<boolean>;
-  /** Converts claimable queued corrections into durable retry state after capability transport fails. */
-  deferSpeakerCorrectionSyncForCapabilityFailure(
-    scopeKey: ScopeKey,
-    nextAttemptAtMs: number,
-    updatedAtMs: number,
-  ): Promise<number>;
-  /** Keeps local corrections readable when a fresh server contract explicitly disables sync. */
-  projectSpeakerCorrectionSyncDisabled(scopeKey: ScopeKey, updatedAtMs: number): Promise<number>;
   /** Physically removes one local-only guest tombstone after all owned files were deleted. */
   purgeDeletedGuestMeeting(
     meetingId: string,
     purgedAtMs: number,
     options?: { allowRecoverable?: boolean },
-  ): Promise<boolean>;
-  /** Physically removes only remotely-confirmed tombstones and leaves durable file-cleanup jobs. */
-  queueExpiredMeetingRetentionCleanup(
-    input: QueueExpiredMeetingRetentionCleanupInput,
-  ): Promise<readonly MeetingRetentionCleanupJob[]>;
-  listMeetingRetentionCleanupJobs(
-    scopeKey: ScopeKey,
-    limit: number,
-  ): Promise<readonly MeetingRetentionCleanupJob[]>;
-  completeMeetingRetentionCleanupJob(
-    jobId: string,
-    scopeKey: ScopeKey,
-  ): Promise<boolean>;
-  failMeetingRetentionCleanupJob(
-    jobId: string,
-    scopeKey: ScopeKey,
-    errorCode: string,
-    updatedAtMs: number,
   ): Promise<boolean>;
   listProjection(scopeKey: ScopeKey, query: MeetingListQuery): Promise<MeetingListProjection>;
   listMeetingDisplayOrder(scopeKey: ScopeKey): Promise<readonly MeetingListOrderEntry[]>;

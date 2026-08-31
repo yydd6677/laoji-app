@@ -58,7 +58,7 @@ export function classifyMeetingAudioUploadFailure(error: unknown): MeetingAudioU
       return {
         retryable: false,
         code: 'forbidden',
-        message: '当前账号无权上传这段录音，文件仍保存在本机。',
+        message: '服务拒绝上传这段录音，文件仍保存在本机。',
       };
     }
   }

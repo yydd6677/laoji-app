@@ -1,7 +1,8 @@
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Appearance, Colors as C } from '../theme/colors';
+import { MotionPressable } from './MotionPressable';
 
 export function MinutesDetailTitleBar({
   onBack,
@@ -22,39 +23,45 @@ export function MinutesDetailTitleBar({
 }) {
   return (
     <View style={[s.bar, backgroundColor ? { backgroundColor } : null]}>
-      <TouchableOpacity
+      <MotionPressable
         style={[s.action, s.backAction]}
         onPress={onBack}
+        feedback="quiet"
+        pressedStyle={s.actionPressed}
         accessibilityRole="button"
         accessibilityLabel="返回"
       >
         <Ionicons name="chevron-back" size={22} color={C.text} />
-      </TouchableOpacity>
+      </MotionPressable>
       {title ? <Text pointerEvents="none" style={s.title} numberOfLines={1}>{title}</Text> : null}
       <View style={s.rightActions}>
         {onShare ? (
-          <TouchableOpacity
+          <MotionPressable
             style={s.action}
             onPress={onShare}
             disabled={sharing}
             accessibilityRole="button"
             accessibilityLabel="分享会议资料"
             testID={shareTestID}
+            feedback="quiet"
+            pressedStyle={s.actionPressed}
           >
             {sharing
               ? <ActivityIndicator size="small" color={C.primary} />
               : <Ionicons name="share-outline" size={22} color={C.text} />}
-          </TouchableOpacity>
+          </MotionPressable>
         ) : null}
         {onMore ? (
-          <TouchableOpacity
+          <MotionPressable
             style={[s.action, s.moreAction]}
             onPress={onMore}
             accessibilityRole="button"
             accessibilityLabel="更多会议操作"
+            feedback="quiet"
+            pressedStyle={s.actionPressed}
           >
             <Ionicons name="ellipsis-horizontal" size={22} color={C.text} />
-          </TouchableOpacity>
+          </MotionPressable>
         ) : null}
       </View>
     </View>
@@ -64,8 +71,20 @@ export function MinutesDetailTitleBar({
 const s = StyleSheet.create({
   bar: { height: 44, flexDirection: 'row', alignItems: 'center', backgroundColor: C.body },
   action: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  actionPressed: { backgroundColor: C.pressed, borderRadius: Appearance.iconRadius },
   backAction: { marginLeft: 6 },
   rightActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center' },
-  title: { position: 'absolute', left: 60, right: 60, textAlign: 'center', fontSize: 17, lineHeight: 24, color: C.text, fontWeight: '500' },
+  title: {
+    position: 'absolute',
+    left: 60,
+    right: 60,
+    textAlign: 'center',
+    fontSize: 17,
+    lineHeight: 24,
+    color: C.text,
+    fontWeight: '600',
+    fontFamily: Appearance.titleFontFamily,
+    letterSpacing: Appearance.titleLetterSpacing,
+  },
   moreAction: { marginRight: 6 },
 });

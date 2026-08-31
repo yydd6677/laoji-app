@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AppState,
   PermissionsAndroid,
   StyleSheet,
   ToastAndroid,
@@ -21,35 +20,30 @@ import {
   assertNativeRecorderDeploymentPolicy,
   getNativeRecorderState,
   hasNativeRecorder,
+  nativeRecorderAsrPhase,
   pauseNativeRecorder,
   recoverNativeRecordings,
   resolveNativeRecorderInsecureDevelopment,
   resumeNativeRecorder,
-  startNativeRecorder,
+  startDeferredRealtimeMeetingNativeRecorder,
+  startLocalMeetingNativeRecorder,
   stopNativeRecorder,
   type NativeRecorderSnapshot,
+  type NativeRecorderAsrPhase,
   type NativeRecorderStopResult,
 } from 'laoji-native-platform';
 import { ScreenContainer } from '../components/ScreenContainer';
-import {
-  MeetingManualNoteConflictSheet,
-  type MeetingManualNoteConflictChoice,
-} from '../components/MeetingManualNoteConflictSheet';
 import { useAppDialog } from '../components/AppDialog';
-import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
-import { createMeetingBinding, getDeviceRealtimeAuth } from '../services/deviceApi';
 import { loadDeviceV2Capabilities } from '../services/deviceV2Api';
-import { startDeviceV2RealtimeRecording } from '../services/deviceV2Realtime';
+import { attachDeviceV2RealtimeRecording } from '../services/deviceV2Realtime';
 import { getApiConfig } from '../services/config';
-import { getFeatureFlags } from '../config/featureFlags';
 import { useNativeProjection } from '../native/useNativeProjection';
 import { fenceNativeProjectionAction } from '../native/projectionActionFence';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
 import {
   createMeetingRecordingFinalizer,
 } from '../services/meetingRecording';
-import { buildRealtimeAsrUrl } from '../services/realtimeAsr';
 import { readableErrorMessage, readableRecorderErrorMessage } from '../services/errors';
 import {
   buildNativeMinutesRecordingSnapshot,
@@ -61,7 +55,6 @@ import {
 import type { RootStackParamList } from '../types';
 import {
   canResumeMeetingRecording,
-  meetingRemoteIdentity,
   shouldCheckpointTranscript,
 } from '../utils/meetingMedia';
 import { defaultMeetingTitle } from '../utils/meetingTitle';
@@ -74,26 +67,19 @@ import {
 import { createMeetingMarker } from '../services/meetingMarkers';
 import {
   type FinalizeNativeMeetingRecordingResult,
-  MeetingManualNoteSyncConflictChangedError,
   RecordingSessionController,
-  ResolveMeetingManualNoteSyncConflictUseCase,
 } from '../application/meeting';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
 import {
   cancelMeetingPlannedEndReminder,
   reconcileMeetingPlannedEndReminder,
 } from '../services/notifications';
-import { pullMeetingManualNote } from '../services/meetingManualNotePull';
-import {
-  loadMeetingManualNoteSyncConflict,
-  type MeetingManualNoteSyncConflictView,
-} from '../services/meetingManualNoteConflicts';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';
 import { Colors as C } from '../theme/colors';
 import {
   findOwnedRecoveredMeetingRecording,
   nativeMeetingSnapshotFromRecovery,
 } from '../services/nativeMeetingRecordingRecovery';
+import { loadActiveMeetingTranscriptState } from '../services/meetingTranscriptState';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'MeetingLive'>;
@@ -106,10 +92,6 @@ interface ActiveNativeRecording {
   finalize: () => Promise<FinalizeNativeMeetingRecordingResult>;
 }
 
-const resolveMeetingManualNoteSyncConflictUseCase = new ResolveMeetingManualNoteSyncConflictUseCase(
-  sqliteMeetingNoteRepository,
-);
-
 function formatMeetingStart(value: Date): string {
   return `${value.getMonth() + 1}月${value.getDate()}日 ${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
 }
@@ -120,9 +102,12 @@ function formatStoredMeetingStart(date?: string, time?: string): string {
   return [dateLabel, time].filter(Boolean).join(' ');
 }
 
-function recordingPhase(state: NativeRecorderSnapshot['state'] | 'idle' | 'saving'): MinutesRecordingPhase {
-  if (state === 'localSaved' || state === 'saving') return 'saving';
-  return state;
+function recordingPhase(snapshot: NativeRecorderSnapshot): MinutesRecordingPhase {
+  if (snapshot.state === 'localSaved') return 'saving';
+  // Once Android has a durable WAV, a remote final-drain timeout is not a
+  // microphone/save failure. The background transcript lane owns recovery.
+  if (snapshot.state === 'failed' && snapshot.localUri) return 'saving';
+  return snapshot.state;
 }
 
 function statusLabel(phase: MinutesRecordingPhase): string {
@@ -147,11 +132,28 @@ function localUriFromStopError(
     : null;
 }
 
+function canStartLocalMeetingAfterRealtimeFailure(reason: unknown): boolean {
+  const record = reason && typeof reason === 'object'
+    ? reason as { code?: unknown; errorCode?: unknown; message?: unknown }
+    : null;
+  const code = String(record?.errorCode ?? record?.code ?? '').trim().toLowerCase();
+  if ([
+    'permission_denied',
+    'audio_unavailable',
+    'audio_read_failed',
+    'storage_failed',
+    'storage_limit',
+    'session_busy',
+    'session_mismatch',
+    'invalid_options',
+  ].includes(code)) return false;
+  const message = String(record?.message ?? (typeof reason === 'string' ? reason : '')).trim();
+  return !/(麦克风|microphone|audio input|permission|存储空间|storage|session busy|already active)/i.test(message);
+}
+
 /** MIN-REC-STATE-001: Android owns capture; this route only coordinates domain operations. */
 export function MeetingLiveScreen({ navigation, route }: Props) {
-  const projectionCandidateEnabled = getFeatureFlags().nativeProjectionEnvelopeCandidate;
   const currentProjectionRef = useRef<NativeProjectionEnvelope | null>(null);
-  const { accessToken, isGuest } = useAuth();
   const {
     meetings,
     loading: meetingsLoading,
@@ -181,16 +183,13 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const [phase, setPhase] = useState<MinutesRecordingPhase>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState('');
+  const [asrPhase, setAsrPhase] = useState<NativeRecorderAsrPhase>('connecting');
   const [activeSessionId, setActiveSessionId] = useState('');
   const [transcript, setTranscript] = useState<NativeMinutesTranscriptLine[]>(
     () => existing ? getCachedTranscript(existing.id) : [],
   );
   const [activeContent, setActiveContent] = useState<MinutesRecordingContent>('transcript');
   const [followingLatest, setFollowingLatest] = useState(true);
-  const [manualNoteConflict, setManualNoteConflict] = useState<MeetingManualNoteSyncConflictView | null>(null);
-  const [manualNoteConflictTarget, setManualNoteConflictTarget] = useState<MeetingManualNoteSyncConflictView | null>(null);
-  const [manualNoteConflictSaving, setManualNoteConflictSaving] = useState(false);
-  const [manualNoteConflictError, setManualNoteConflictError] = useState('');
   const mountedRef = useRef(true);
   const recordingControllerRef = useRef(
     new RecordingSessionController<FinalizeNativeMeetingRecordingResult, ActiveNativeRecording>(),
@@ -205,13 +204,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const locationRef = useRef(location);
   const finalizationUiRef = useRef<Promise<boolean> | null>(null);
   const markerCreateQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const manualNoteConflictRequestGenerationRef = useRef(0);
   const autoStartAttemptedRef = useRef(false);
   const startedAtRef = useRef(new Date());
   const checkpointRef = useRef({ lineCount: finalizedNativeMinutesTranscript(transcript).length, savedAtMs: Date.now() });
   const durableTranscriptQueueRef = useRef<Promise<void>>(Promise.resolve());
   const createRequestRef = useRef(createClientRequestState('meeting'));
-  const existingRemoteMeetingId = existing && !isGuest ? meetingRemoteIdentity(existing) : null;
   const manualNote = useMeetingManualNote(meetingScopeKey, meetingId || undefined);
 
   useEffect(() => {
@@ -231,121 +228,25 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     if (existing?.location == null) return;
     setLocation(existing.location);
   }, [existing?.location]);
-
-  const refreshManualNoteConflict = useCallback(async () => {
-    const requestedId = activeMeetingIdRef.current;
-    if (!requestedId || !meetingScopeKey || meetingScopeKey === 'guest') {
-      setManualNoteConflict(null);
-      setManualNoteConflictTarget(null);
-      return null;
-    }
-    const generation = manualNoteConflictRequestGenerationRef.current + 1;
-    manualNoteConflictRequestGenerationRef.current = generation;
-    try {
-      const conflict = await loadMeetingManualNoteSyncConflict(meetingScopeKey, requestedId);
-      if (
-        !mountedRef.current
-        || manualNoteConflictRequestGenerationRef.current !== generation
-        || activeMeetingIdRef.current !== requestedId
-      ) return null;
-      setManualNoteConflict(conflict);
-      setManualNoteConflictTarget(current => current && conflict?.id === current.id ? conflict : null);
-      return conflict;
-    } catch (reason) {
-      diagnosticWarn('load live meeting manual note conflict failed', reason);
-      return null;
-    }
-  }, [meetingScopeKey]);
-
   useEffect(() => {
-    manualNoteConflictRequestGenerationRef.current += 1;
-    setManualNoteConflict(null);
-    setManualNoteConflictTarget(null);
-    setManualNoteConflictSaving(false);
-    setManualNoteConflictError('');
-    void refreshManualNoteConflict();
-  }, [meetingId, meetingScopeKey, refreshManualNoteConflict]);
-
-  useEffect(() => {
-    if (!meetingId || !meetingScopeKey || meetingScopeKey === 'guest') return undefined;
+    if (!existing || !meetingScopeKey) return undefined;
     let active = true;
-    let unsubscribe: (() => void) | null = null;
-    void sqliteMeetingNoteRepository.findByNativeSessionId(meetingId, meetingScopeKey)
-      .then(aggregate => {
-        if (!active || !aggregate) return;
-        unsubscribe = sqliteMeetingNoteRepository.observeMeeting(
-          aggregate.note.id,
-          meetingScopeKey,
-          () => { void refreshManualNoteConflict(); },
-        );
+    void loadActiveMeetingTranscriptState(meetingScopeKey, existing.id)
+      .then(current => {
+        if (!active || !mountedRef.current || !current?.lines.length) return;
+        setTranscript(previous => {
+          if (previous.length > 0 || activeMeetingIdRef.current !== existing.id) return previous;
+          transcriptRef.current = current.lines;
+          checkpointRef.current = {
+            lineCount: finalizedNativeMinutesTranscript(current.lines).length,
+            savedAtMs: Date.now(),
+          };
+          return current.lines;
+        });
       })
-      .catch(reason => diagnosticWarn('observe live manual note conflict failed', reason));
-    return () => {
-      active = false;
-      unsubscribe?.();
-    };
-  }, [meetingId, meetingScopeKey, refreshManualNoteConflict]);
-
-  useEffect(() => {
-    if (
-      !accessToken
-      || !meetingId
-      || !meetingScopeKey
-      || meetingScopeKey === 'guest'
-      || !existingRemoteMeetingId
-    ) {
-      return undefined;
-    }
-    let active = true;
-    let running = false;
-    let requested = true;
-    let controller: AbortController | null = null;
-    const requestPull = () => {
-      if (!active) return;
-      requested = true;
-      if (running) return;
-      running = true;
-      void (async () => {
-        try {
-          while (active && requested) {
-            requested = false;
-            controller = new AbortController();
-            try {
-              await manualNote.flush();
-              const result = await pullMeetingManualNote({
-                scopeKey: meetingScopeKey,
-                meetingId,
-                meetingRemoteId: existingRemoteMeetingId,
-                accessToken,
-                signal: controller.signal,
-              });
-              if (result.outcome === 'updated' || result.outcome === 'attached') {
-                await manualNote.reload();
-              }
-              await refreshManualNoteConflict();
-            } finally {
-              controller = null;
-            }
-          }
-        } catch (reason) {
-          if (active) diagnosticWarn('pull live meeting manual note failed', reason);
-        } finally {
-          running = false;
-          if (active && requested) requestPull();
-        }
-      })();
-    };
-    const appStateSubscription = AppState.addEventListener('change', nextState => {
-      if (nextState === 'active') requestPull();
-    });
-    requestPull();
-    return () => {
-      active = false;
-      requested = false;
-      controller?.abort();
-      appStateSubscription.remove();
-    };
-  }, [accessToken, existingRemoteMeetingId, manualNote.flush, manualNote.reload, meetingId, meetingScopeKey, refreshManualNoteConflict]);
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [existing?.id, meetingScopeKey]);
 
   const applyRecorderSnapshot = useCallback((snapshot: NativeRecorderSnapshot) => {
     if (
@@ -353,13 +254,17 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       || snapshot.storageScope !== recordingStorageScope
     ) return;
     recorderSnapshotRef.current = snapshot;
+    if (snapshot.purpose === 'meeting') setAsrPhase(nativeRecorderAsrPhase(snapshot));
     if (snapshot.state === 'localSaved' || snapshot.state === 'failed') {
       void cancelMeetingPlannedEndReminder(snapshot.sessionId);
     }
     if (!mountedRef.current) return;
-    setPhase(recordingPhase(snapshot.state));
+    setPhase(recordingPhase(snapshot));
     setElapsedMs(snapshot.durationMs);
-    if (snapshot.state === 'recording' || snapshot.state === 'paused') {
+    if ((snapshot.state === 'failed' && snapshot.localUri) || snapshot.state === 'localSaved') {
+      recorderErrorVisibleRef.current = false;
+      setError('');
+    } else if (snapshot.state === 'recording' || snapshot.state === 'paused') {
       if (recorderErrorVisibleRef.current) {
         recorderErrorVisibleRef.current = false;
         setError('');
@@ -503,9 +408,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         if (stoppedWithLocalFile) {
           applyRecorderSnapshot(stoppedWithLocalFile.snapshot);
           nativeAudioBarsRef.current = stoppedWithLocalFile.audioBars;
-          if (mountedRef.current) {
-            setError('录音已保存在本机，但实时转写结束确认超时；可在详情中继续同步');
-          }
+          diagnosticAudit('meeting_recording_local_commit_with_transcript_recovery', {});
           localUri = stoppedWithLocalFile.localUri ?? undefined;
         } else {
           const recovery = await recoverNativeRecordings().catch(() => null);
@@ -560,9 +463,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         const warnings: string[] = [];
         if (completed.result.uploadFailed) {
           warnings.push(completed.result.retryQueued ? '录音将在联网后继续同步' : '录音上传状态未保存');
-        }
-        if (completed.result.statusSyncPending && !completed.result.statusSyncInBackground) {
-          warnings.push('会议状态稍后继续同步');
         }
         const warning = warnings.length > 0 ? `会议录音已保存；${warnings.join('；')}` : '';
         const pending = completed.result.transcriptCompletion === 'pending'
@@ -626,7 +526,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       applyRecorderSnapshot(current);
       const recoveredSession = createActiveRecording(
         existing.id,
-        isGuest ? null : meetingRemoteIdentity(existing),
+        null,
       );
       if (!recordingControllerRef.current.attachRecovered(recoveredSession)) return false;
       setActiveSessionId(existing.id);
@@ -648,11 +548,10 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     setElapsedMs(recovered.durationMs);
     setPhase('saving');
     recorderSnapshotRef.current = nativeMeetingSnapshotFromRecovery(recovered);
-    const remoteMeetingId = isGuest ? null : meetingRemoteIdentity(existing);
     await cancelMeetingPlannedEndReminder(existing.id);
     const finalized = await finalizeRecording(buildFinalizeRequest(
       existing.id,
-      remoteMeetingId,
+      null,
       async () => recovered.localUri,
     ));
     transcriptRef.current = finalized.transcriptLines;
@@ -660,7 +559,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     await manualNote.flush();
     if (mountedRef.current) navigation.replace('Transcription', { meetingId: existing.id });
     return true;
-  }, [applyRecorderSnapshot, buildFinalizeRequest, createActiveRecording, existing, finalizeRecording, getCachedTranscript, isGuest, manualNote.flush, meetingScopeKey, navigation, recordingStorageScope]);
+  }, [applyRecorderSnapshot, buildFinalizeRequest, createActiveRecording, existing, finalizeRecording, getCachedTranscript, manualNote.flush, meetingScopeKey, navigation, recordingStorageScope]);
 
   const startRecording = useCallback(async () => {
     if (!hasNativeRecorder()) {
@@ -671,6 +570,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     const startToken = recordingControllerRef.current.beginStart();
     if (startToken === null) return;
     setPhase('preparing');
+    setAsrPhase('connecting');
     recorderErrorVisibleRef.current = false;
     setError('');
     nativeAudioBarsRef.current = [];
@@ -696,9 +596,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         location: locationRef.current || null,
         entryPoint,
       });
-      // Guest mode is now a local-data mode, not an anonymous server session.
-      // Establish the device/epoch binding before opening the ASR socket so
-      // the server can scope the realtime meeting to this installation.
       const readyMeeting = meeting;
       const remoteMeetingId = null;
       startedMeetingId = readyMeeting.id;
@@ -714,50 +611,39 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         lineCount: finalizedNativeMinutesTranscript(initialTranscript).length,
         savedAtMs: Date.now(),
       };
-      await updateMeetingStatus(readyMeeting.id, 'recording');
       const config = getApiConfig();
-      const realtimeSecure = config.realtimeAsrBase.startsWith('wss://');
       const allowInsecureDevelopment = resolveNativeRecorderInsecureDevelopment(
         config.isProduction,
-        realtimeSecure,
+        config.realtimeAsrBase.startsWith('wss://'),
       );
       assertNativeRecorderDeploymentPolicy(config.isProduction, allowInsecureDevelopment);
-      const realtimeV2Candidate = getFeatureFlags().realtimeAsrV2Candidate;
-      const realtimeV2 = realtimeV2Candidate
-        ? await loadDeviceV2Capabilities().catch(reason => {
-          diagnosticWarn('vNext realtime capability unavailable; legacy fallback is disabled', reason);
-          return null;
-        })
-        : null;
-      if (realtimeV2Candidate && !realtimeV2?.realtimeAsrV2) {
-        throw new Error('新版实时转写服务暂时不可用，录音尚未开始，请稍后重试');
+      let snapshot: NativeRecorderSnapshot;
+      try {
+        snapshot = await startDeferredRealtimeMeetingNativeRecorder(
+          readyMeeting.id,
+          recordingStorageScope,
+          { levelIntervalMs: 100 },
+        );
+      } catch (realtimeReason) {
+        const alreadyRecording = await getNativeRecorderState(readyMeeting.id).catch(() => null);
+        if (
+          alreadyRecording
+          && alreadyRecording.storageScope === recordingStorageScope
+          && ['preparing', 'recording', 'paused'].includes(alreadyRecording.state)
+        ) {
+          snapshot = alreadyRecording;
+        } else {
+          if (!canStartLocalMeetingAfterRealtimeFailure(realtimeReason)) throw realtimeReason;
+          snapshot = await startLocalMeetingNativeRecorder(
+            readyMeeting.id,
+            recordingStorageScope,
+            { levelIntervalMs: 100 },
+          );
+          diagnosticAudit('meeting_realtime_fell_back_to_local_capture', {
+            scope: 'guest',
+          });
+        }
       }
-      const snapshot = realtimeV2Candidate
-        ? await startDeviceV2RealtimeRecording({
-          meetingId: readyMeeting.id,
-          sessionId: readyMeeting.id,
-          storageScope: recordingStorageScope,
-          allowInsecureDevelopment,
-        })
-        : await (async () => {
-          const deviceAuth = await getDeviceRealtimeAuth();
-          await createMeetingBinding(readyMeeting.id);
-          const websocketUrl = buildRealtimeAsrUrl({
-            meetingId: readyMeeting.id,
-            provider: config.realtimeAsrProvider,
-            purpose: 'meeting',
-            realtimeAsrBase: config.realtimeAsrBase,
-          });
-          return startNativeRecorder({
-            sessionId: readyMeeting.id,
-            purpose: 'meeting',
-            storageScope: recordingStorageScope,
-            websocketUrl,
-            allowInsecureDevelopment,
-            deviceToken: deviceAuth.deviceToken,
-            dataEpoch: deviceAuth.dataEpoch,
-          });
-        })();
       nativeCaptureStarted = true;
       applyRecorderSnapshot(snapshot);
       const active = createActiveRecording(readyMeeting.id, remoteMeetingId);
@@ -774,6 +660,26 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       }
       setActiveSessionId(readyMeeting.id);
       setPhase('recording');
+      void updateMeetingStatus(readyMeeting.id, 'recording').catch(reason => {
+        diagnosticWarn('persist meeting recording status after capture start failed', reason);
+      });
+      void (async () => {
+          const capabilities = await loadDeviceV2Capabilities();
+          if (!capabilities.realtimeAsrV2) throw new Error('realtime ASR capability is unavailable');
+          if (currentSessionIdRef.current !== readyMeeting.id) return;
+          const attachedSnapshot = await attachDeviceV2RealtimeRecording({
+            meetingId: readyMeeting.id,
+            sessionId: readyMeeting.id,
+            storageScope: recordingStorageScope,
+            allowInsecureDevelopment,
+          });
+          applyRecorderSnapshot(attachedSnapshot);
+      })().catch(reason => {
+          diagnosticWarn('attach realtime transcript after local capture start failed', reason);
+          if (currentSessionIdRef.current === readyMeeting.id && mountedRef.current) {
+            setAsrPhase('recoveryRequired');
+          }
+      });
       if (meetingScopeKey) {
         await reconcileMeetingPlannedEndReminder(readyMeeting.id, meetingScopeKey).catch(reason => {
           diagnosticWarn('reconcile planned meeting end reminder after recorder start failed', reason);
@@ -866,11 +772,11 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         setElapsedMs(0);
         if (existing.status === 'recording') {
           setPhase('failed');
-          setError('上次录音会话已中断，点击下方按钮可重新开始');
+          setError('上次录音已中断');
           await updateMeetingStatus(existing.id, 'failed').catch(() => {});
         } else {
           setPhase(existing.status === 'failed' ? 'failed' : 'idle');
-          setError(existing.status === 'failed' ? '上次录音未完成，点击下方按钮可重新开始' : '点击下方按钮开始录音');
+          setError(existing.status === 'failed' ? '上次录音未完成' : '');
         }
         return;
       }
@@ -882,7 +788,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     if (!recordingControllerRef.current.current()) return;
     showDialog({
       title: '结束录音？',
-      message: '结束后将先保存录音，再保存文字记录并安排后台同步。',
+      message: '录音将保存并继续处理。',
       tone: 'warning',
       actions: [
         { text: '结束录音', role: 'primary', onPress: async () => { await stopRecording(true); } },
@@ -954,61 +860,8 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     markerCreateQueueRef.current = task;
   }, [meetingScopeKey]);
 
-  const openManualNoteConflict = useCallback(async () => {
-    await manualNote.flush();
-    const conflict = manualNoteConflict ?? await refreshManualNoteConflict();
-    if (!conflict) {
-      ToastAndroid.show('笔记冲突已处理', ToastAndroid.SHORT);
-      return;
-    }
-    setManualNoteConflictError('');
-    setManualNoteConflictTarget(conflict);
-  }, [manualNote.flush, manualNoteConflict, refreshManualNoteConflict]);
-
-  const resolveManualNoteConflict = useCallback(async (
-    choice: MeetingManualNoteConflictChoice,
-  ) => {
-    if (!meetingScopeKey || !manualNoteConflictTarget || manualNoteConflictSaving) return;
-    setManualNoteConflictSaving(true);
-    setManualNoteConflictError('');
-    try {
-      await resolveMeetingManualNoteSyncConflictUseCase.execute({
-        conflictId: manualNoteConflictTarget.id,
-        meetingId: manualNoteConflictTarget.meetingId,
-        scopeKey: meetingScopeKey,
-        expectedLocalRevision: manualNoteConflictTarget.local.revision,
-        resolution: choice,
-      });
-      await manualNote.reload();
-      await refreshManualNoteConflict();
-      setManualNoteConflictTarget(null);
-      ToastAndroid.show(
-        choice === 'keep_local' ? '本机笔记将重新同步' : '已使用云端笔记',
-        ToastAndroid.SHORT,
-      );
-    } catch (reason) {
-      diagnosticAudit('live_manual_note_conflict_resolution_failed', {
-        operation: choice,
-        error_code: reason instanceof MeetingManualNoteSyncConflictChangedError
-          ? 'conflict_changed'
-          : 'resolution_failed',
-      });
-      setManualNoteConflictError(reason instanceof MeetingManualNoteSyncConflictChangedError
-        ? '这次冲突已发生变化，请关闭后重新打开。'
-        : choice === 'keep_local'
-          ? '本机笔记暂时无法重新同步，请稍后重试。'
-          : '云端笔记暂时无法应用，请稍后重试。');
-      if (reason instanceof MeetingManualNoteSyncConflictChangedError) {
-        await refreshManualNoteConflict().catch(() => null);
-      }
-    } finally {
-      if (mountedRef.current) setManualNoteConflictSaving(false);
-    }
-  }, [manualNote.reload, manualNoteConflictSaving, manualNoteConflictTarget, meetingScopeKey, refreshManualNoteConflict]);
-
   const handleAction = useCallback((action: MinutesSemanticAction) => {
     const projectionFence = fenceNativeProjectionAction(
-      projectionCandidateEnabled,
       currentProjectionRef.current,
       action.projection,
     );
@@ -1064,10 +917,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         if (action.meetingId !== activeMeetingIdRef.current) break;
         void manualNote.retry();
         break;
-      case 'openManualNoteConflict':
-        if (action.meetingId !== activeMeetingIdRef.current) break;
-        void openManualNoteConflict();
-        break;
       case 'saveTitle': {
         const nextTitle = action.title.trim();
         setTitle(nextTitle);
@@ -1083,7 +932,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
       default:
         break;
     }
-  }, [confirmStop, createMarkerAt, manualNote, navigation, openManualNoteConflict, phase, projectionCandidateEnabled, requestMeetingLocation, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
+  }, [confirmStop, createMarkerAt, manualNote, navigation, phase, requestMeetingLocation, retryTranscriptCache, startRecording, stopRecording, togglePause, updateMeetingTitle]);
 
   // Refs protect async recorder commands, but assigning a ref does not render
   // the native snapshot. Keep a small reactive identity so pause/stop become
@@ -1113,7 +962,15 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     canEditLocation: !['stopping', 'saving'].includes(phase),
     phase,
     elapsedMs,
-    statusLabel: statusLabel(phase),
+    statusLabel: phase === 'preparing'
+      ? '正在启动录音'
+      : phase === 'recording'
+        ? asrPhase === 'connected'
+          ? '实时转写中'
+          : asrPhase === 'recoveryRequired' || asrPhase === 'notRequired'
+            ? '录音中，文字稍后生成'
+            : '录音中'
+        : statusLabel(phase),
     errorMessage: error,
     canPause,
     canStop,
@@ -1127,11 +984,9 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     manualNoteEnabled: manualNote.enabled,
     manualNoteError: manualNote.error,
     manualNoteRetryable: manualNote.retryable,
-    manualNoteConflict: manualNoteConflict !== null,
     transcript,
-  }), [activeContent, canCreateMarker, canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.saving, manualNoteConflict, meetingId, phase, requestedMeetingId, title, transcript]);
+  }), [activeContent, asrPhase, canCreateMarker, canPause, canStart, canStop, elapsedMs, error, existing, followingLatest, location, locationLoading, manualNote.content, manualNote.enabled, manualNote.error, manualNote.loading, manualNote.retryable, manualNote.saving, meetingId, phase, requestedMeetingId, title, transcript]);
   const snapshot = useNativeProjection(snapshotBody, {
-    enabled: projectionCandidateEnabled,
     entityId: meetingId || requestedMeetingId || 'recording',
     surfaceKey: 'recording',
   });
@@ -1153,18 +1008,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           testID="meeting-live-native-surface"
         />
       </View>
-      <MeetingManualNoteConflictSheet
-        visible={manualNoteConflictTarget !== null}
-        conflict={manualNoteConflictTarget}
-        saving={manualNoteConflictSaving}
-        error={manualNoteConflictError}
-        onClose={() => {
-          if (manualNoteConflictSaving) return;
-          setManualNoteConflictTarget(null);
-          setManualNoteConflictError('');
-        }}
-        onResolve={choice => { void resolveManualNoteConflict(choice); }}
-      />
     </ScreenContainer>
   );
 }

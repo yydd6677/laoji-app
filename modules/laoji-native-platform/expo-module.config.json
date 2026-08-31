@@ -7,7 +7,6 @@
       "com.laoji.nativeplatform.LaojiCalendarModule",
       "com.laoji.nativeplatform.LaojiMinutesModule",
       "com.laoji.nativeplatform.LaojiMediaImportModule",
-      "com.laoji.nativeplatform.LaojiMediaClipModule",
       "com.laoji.nativeplatform.LaojiRecorderModule",
       "com.laoji.nativeplatform.LaojiLocationModule",
       "com.laoji.nativeplatform.calendarpages.LaojiCalendarDetailModule",
@@ -15,7 +14,8 @@
       "com.laoji.nativeplatform.LaojiSpeakerModule",
       "com.laoji.nativeplatform.LaojiDeviceAuthModule",
       "com.laoji.nativeplatform.LaojiSystemEntriesModule",
-      "com.laoji.nativeplatform.ui.LaojiUiModule"
+      "com.laoji.nativeplatform.ui.LaojiUiModule",
+      "com.laoji.nativeplatform.LaojiHardwareModule"
     ]
   }
 }

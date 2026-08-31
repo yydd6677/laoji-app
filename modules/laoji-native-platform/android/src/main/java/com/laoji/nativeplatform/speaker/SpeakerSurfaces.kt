@@ -92,14 +92,14 @@ internal class SpeakerManagerSurface(
     state.visibility = if (showState) View.VISIBLE else View.GONE
     progress.visibility = if (!value.guest && value.phase == "loading") View.VISIBLE else View.GONE
     message.text = when {
-      value.guest -> "当前设备可以建立和管理讲话人声纹"
+      value.guest -> "讲话人暂时无法加载"
       value.message.isNotBlank() -> value.message
       value.phase == "loading" -> "正在加载讲话人"
       value.phase == "error" -> "讲话人暂时无法加载"
       else -> "暂无讲话人"
     }
     stateAction.visibility = if (value.guest || value.phase == "error") View.VISIBLE else View.GONE
-    stateAction.text = if (value.guest) "重新加载" else "重试"
+    stateAction.text = "重试"
   }
 }
 
@@ -273,12 +273,11 @@ internal class SpeakerEnrollmentSurface(
     nameRow.addView(saveName, LayoutParams(context.speakerDp(64), context.speakerDp(44)).apply { leftMargin = context.speakerDp(8) })
     content.addView(nameRow, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.speakerDp(44)))
 
-    content.addView(context.speakerText("请在安静环境下朗读以下文字", 14, SpeakerPalette.secondary), LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.speakerDp(28) })
+    content.addView(context.speakerText("朗读以下文字", 14, SpeakerPalette.secondary), LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.speakerDp(28) })
     prompt.setLineSpacing(0f, 1.35f)
     prompt.setPadding(context.speakerDp(16), context.speakerDp(16), context.speakerDp(16), context.speakerDp(16))
     prompt.speakerBackground(SpeakerPalette.primarySoft, 6)
     content.addView(prompt, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.speakerDp(12) })
-    content.addView(context.speakerText("偶尔读错无需停顿，继续朗读即可", 12, SpeakerPalette.tertiary), LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.speakerDp(8) })
     content.addView(progressText, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.speakerDp(24)).apply { topMargin = context.speakerDp(28) })
     content.addView(waveform, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.speakerDp(58)).apply { topMargin = context.speakerDp(12) })
     error.minHeight = context.speakerDp(42)

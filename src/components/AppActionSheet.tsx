@@ -30,14 +30,11 @@ export type AppActionSheetItem = {
 };
 
 export function AppActionSheet({
-  feishuEvidence,
   visible,
   title,
   items,
   onClose,
 }: {
-  // CAL-REPEAT-RRULE-001: callers attach their source contract to the real modal root.
-  feishuEvidence?: string;
   visible: boolean;
   title?: string;
   items: AppActionSheetItem[];
@@ -127,7 +124,7 @@ export function AppActionSheet({
       statusBarTranslucent
       onRequestClose={requestClose}
     >
-      <View nativeID={feishuEvidence} style={s.root} accessibilityViewIsModal>
+      <View style={s.root} accessibilityViewIsModal>
         <Animated.View
           pointerEvents="auto"
           style={[s.backdrop, { opacity: progress }]}

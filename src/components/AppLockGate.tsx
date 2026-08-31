@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors as C } from '../theme/colors';
-import { useAuth } from '../store/AuthStore';
+import { useLocalProfile } from '../store/LocalProfileStore';
 import { Avatar } from './Common';
 import {
   authenticateWithSystem,
@@ -14,18 +14,10 @@ import {
 } from '../services/privacy';
 import { setNotificationNavigationUnlocked } from '../navigation/notificationNavigation';
 
-function scopeForAuth(mode: string, userId?: number): string {
-  if (mode === 'authenticated' && userId) return `user:${userId}`;
-  if (mode === 'guest') return 'guest';
-  return 'signed_out';
-}
-
 export function AppLockGate({ children }: { children: React.ReactNode }) {
-  const { mode, session, profile } = useAuth();
-  const scope = useMemo(() => scopeForAuth(mode, session?.user.id), [mode, session?.user.id]);
-  const identityName = profile?.nickname?.trim()
-    || session?.user.nickname?.trim()
-    || (mode === 'guest' ? '访客用户' : '老记用户');
+  const { profile } = useLocalProfile();
+  const scope = 'guest';
+  const identityName = profile.nickname.trim() || '老记用户';
   const [loadedPrefs, setLoadedPrefs] = useState<{ scope: string; prefs: PrivacyPrefs } | null>(null);
   const prefs = loadedPrefs?.scope === scope ? loadedPrefs.prefs : null;
   const [locked, setLocked] = useState(false);
@@ -50,7 +42,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
       if (!alive || receivedLiveUpdate) return;
       setLoadedPrefs({ scope, prefs: next });
       setLoadFailureScope(null);
-      setLocked(mode !== 'signed_out' && next.appLockEnabled);
+      setLocked(next.appLockEnabled);
       setError('');
     }).catch(() => {
       if (!alive || receivedLiveUpdate) return;
@@ -61,7 +53,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
       alive = false;
       unsubscribe();
     };
-  }, [mode, reloadKey, scope]);
+  }, [reloadKey, scope]);
 
   const unlock = useCallback(async () => {
     if (promptingRef.current) return;
@@ -111,27 +103,22 @@ export function AppLockGate({ children }: { children: React.ReactNode }) {
     const sub = AppState.addEventListener('change', state => {
       const previous = appStateRef.current;
       appStateRef.current = state;
-      if (state !== 'active' && previous === 'active' && prefs?.appLockEnabled && mode !== 'signed_out') {
+      if (state !== 'active' && previous === 'active' && prefs?.appLockEnabled) {
         setLocked(true);
       }
-      if (state === 'active' && previous !== 'active' && prefs?.appLockEnabled && mode !== 'signed_out') {
+      if (state === 'active' && previous !== 'active' && prefs?.appLockEnabled) {
         setLocked(true);
         void unlock();
       }
     });
     return () => sub.remove();
-  }, [mode, prefs?.appLockEnabled, unlock]);
+  }, [prefs?.appLockEnabled, unlock]);
 
-  const notificationNavigationUnlocked = mode === 'signed_out'
-    || Boolean(prefs && !(prefs.appLockEnabled && locked));
+  const notificationNavigationUnlocked = Boolean(prefs && !(prefs.appLockEnabled && locked));
   useEffect(() => {
     setNotificationNavigationUnlocked(notificationNavigationUnlocked);
     return () => setNotificationNavigationUnlocked(false);
   }, [notificationNavigationUnlocked]);
-
-  if (mode === 'signed_out') {
-    return <>{children}</>;
-  }
 
   if (!prefs) {
     if (loadFailureScope === scope) {

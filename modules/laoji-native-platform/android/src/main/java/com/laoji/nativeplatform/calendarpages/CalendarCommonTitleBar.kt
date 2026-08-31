@@ -20,8 +20,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.DrawableCompat
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import kotlin.math.max
 import kotlin.math.min
 
@@ -143,7 +141,6 @@ internal object CalendarTitleSaveContract {
   }
 }
 
-@FeishuEvidence("UI-TITLE-COMMON-001")
 internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) {
   private enum class TitlePlacement { CENTER, SECONDARY_LEFT }
 
@@ -201,15 +198,6 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     clipChildren = false
     clipToPadding = false
 
-    FeishuEvidenceRuntime.bind(this, "UI-TITLE-COMMON-001", "titlebar", "calendar-common-titlebar")
-    FeishuEvidenceRuntime.bind(leftAction, "UI-TITLE-COMMON-001", "leading-action", "calendar-title-leading")
-    FeishuEvidenceRuntime.bind(secondaryTitle, "UI-TITLE-COMMON-001", "secondary-title", "calendar-title-secondary")
-    FeishuEvidenceRuntime.bind(leftAuxLayout, "UI-TITLE-COMMON-001", "leading-container", "calendar-title-leading-container")
-    FeishuEvidenceRuntime.bind(centerLayout, "UI-TITLE-COMMON-001", "title-container", "calendar-title-center-container")
-    FeishuEvidenceRuntime.bind(centerTitle, "UI-TITLE-COMMON-001", "title", "calendar-title-center")
-    FeishuEvidenceRuntime.bind(subtitle, "UI-TITLE-COMMON-001", "subtitle", "calendar-title-subtitle")
-    FeishuEvidenceRuntime.bind(rightActions, "UI-TITLE-COMMON-001", "actions", "calendar-title-actions")
-    FeishuEvidenceRuntime.bind(divider, "UI-TITLE-COMMON-001", "divider", "calendar-title-divider")
 
     addView(leftAction)
     addView(secondaryTitle)
@@ -530,12 +518,6 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
 
   private fun bindRightAction(view: View, role: String) {
     val index = nextActionIndex++
-    FeishuEvidenceRuntime.bind(
-      view,
-      "UI-TITLE-COMMON-001",
-      role,
-      "calendar-title-action-$index",
-    )
   }
 
   private fun tintedDrawable(drawableRes: Int, tint: Int): Drawable {

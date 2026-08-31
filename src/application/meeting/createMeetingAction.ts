@@ -1,10 +1,6 @@
-import type {
-  ActionItemRecord,
-  MeetingNoteRepository,
-} from '../../data/repositories';
+import type { ActionItemRecord, MeetingNoteRepository } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey, secureClientIdFactory, type ClientIdFactory } from '../../domain/meeting';
-import { requestMeetingActionSync } from './actionSyncTrigger';
 
 const MAX_ACTION_CONTENT_LENGTH = 20_000;
 const MAX_ASSIGNEE_LENGTH = 200;
@@ -26,7 +22,6 @@ export interface CreateMeetingActionInput {
   reminderNotificationId?: string | null;
   sourceMarkerId?: string | null;
   actionId?: string;
-  operationId?: string;
 }
 
 export interface CreateMeetingActionResult {
@@ -156,8 +151,6 @@ export class CreateMeetingActionUseCase {
       const action: ActionItemRecord = {
         id: actionId,
         meetingId,
-        remoteId: null,
-        remoteRevision: null,
         content,
         status: 'pending',
         assigneeText,
@@ -176,53 +169,15 @@ export class CreateMeetingActionUseCase {
         createdAtMs: updatedAtMs,
         updatedAtMs,
       };
-      if (input.scopeKey !== 'guest') {
-        const operationId = input.operationId?.trim() || this.idFactory.create();
-        const insertedOperation = await transaction.insertOutbox({
-          operationId,
-          scopeKey: input.scopeKey,
-          aggregateType: 'action_item',
-          aggregateId: actionId,
-          operationType: 'action_item.upsert',
-          baseRevision: null,
-          payloadJson: JSON.stringify({
-            schema_version: 2,
-            meeting_id: meetingId,
-            action_id: actionId,
-            remote_id: null,
-            expected_remote_revision: null,
-            client_created_at_ms: updatedAtMs,
-            client_updated_at_ms: updatedAtMs,
-            user_edited_at_ms: updatedAtMs,
-            completed_at_ms: null,
-            content,
-            status: 'pending',
-            assignee: assigneeText,
-            due_at_ms: dueAtMs,
-            reminder_at_ms: reminderAtMs,
-            followup_event_source_id: null,
-            source_kind: sourceMarker === null ? 'manual' : 'marker',
-            source_summary_version_id: null,
-            source_segment_id: sourceSegmentId,
-            source_start_ms: sourceStartMs,
-            generation_fingerprint: null,
-          }),
-          createdAtMs: updatedAtMs,
-        });
-        if (!insertedOperation) throw new MeetingActionIdentityConflictError();
-      }
       const inserted = await transaction.insertMeetingAction(action, input.scopeKey);
       if (!inserted) throw new MeetingActionIdentityConflictError();
       await transaction.updateMeeting(meetingId, input.scopeKey, {
-        syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
         updatedAtMs,
       });
       result = { action, applied: true };
     });
 
     if (!result) throw new Error('meeting action transaction produced no result');
-    const committedResult = result as CreateMeetingActionResult;
-    if (committedResult.applied) requestMeetingActionSync(input.scopeKey);
-    return committedResult;
+    return result as CreateMeetingActionResult;
   }
 }

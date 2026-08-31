@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   AudioPlayer,
   AudioStatus,
@@ -17,13 +17,12 @@ import {
 } from 'expo-audio';
 import { Colors as C } from '../theme/colors';
 import { Meeting } from '../types';
-import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from '../services/api';
+import type { MeetingAudioInfo } from '../services/meetingAudioInfo';
 import { useAppDialog } from './AppDialog';
-import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from '../services/meetingAudioSecurity';
+import { meetingAudioUrlErrorMessage } from '../services/meetingAudioSecurity';
 import { readableErrorMessage } from '../services/errors';
 import {
   formatDuration,
-  meetingRemoteIdentity,
   nextMeetingPlaybackRate,
   shouldReplayAudio,
 } from '../utils/meetingMedia';
@@ -39,12 +38,10 @@ export const MEETING_AUDIO_PLAYER_GEOMETRY = Object.freeze({
 
 type Props = {
   meeting: Meeting;
-  accessToken: string | null;
-  isGuest: boolean;
   fallbackDurationSec?: number;
 };
 
-function localAudioInfo(uri: string | null | undefined): ApiMeetingAudioInfo | null {
+function localAudioInfo(uri: string | null | undefined): MeetingAudioInfo | null {
   return uri
     ? { url: uri, mime_type: 'audio/wav', file_name: uri.split('/').pop() ?? 'meeting.wav' }
     : null;
@@ -57,12 +54,10 @@ function durationLabel(seconds: number): string {
 
 export function MeetingAudioPlayerDock({
   meeting,
-  accessToken,
-  isGuest,
   fallbackDurationSec = 0,
 }: Props) {
   const { showDialog } = useAppDialog();
-  const [audioInfo, setAudioInfo] = useState<ApiMeetingAudioInfo | null>(null);
+  const [audioInfo, setAudioInfo] = useState<MeetingAudioInfo | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
@@ -83,7 +78,6 @@ export function MeetingAudioPlayerDock({
   };
 
   useEffect(() => {
-    let alive = true;
     const fallbackAudio = localAudioInfo(meeting.audioLocalUri);
     const knownDurationSec = meeting.audioDurationSec ?? fallbackDurationSec;
 
@@ -91,43 +85,10 @@ export function MeetingAudioPlayerDock({
     setPlaying(false);
     setPositionMs(0);
     setDurationMs(knownDurationSec > 0 ? Math.round(knownDurationSec * 1000) : 0);
-    setAudioInfo(null);
-    setAudioError('');
-    setAudioLoading(true);
-
-    if (isGuest || !accessToken) {
-      setAudioInfo(fallbackAudio);
-      setAudioLoading(false);
-      return () => { alive = false; };
-    }
-
-    const remoteMeetingId = meetingRemoteIdentity(meeting);
-    if (!remoteMeetingId) {
-      setAudioInfo(fallbackAudio);
-      setAudioError(fallbackAudio ? '' : '会议正在同步，请稍后重试。');
-      setAudioLoading(false);
-      return () => { alive = false; };
-    }
-
-    fetchMeetingAudioInfo(remoteMeetingId, accessToken)
-      .then(info => {
-        if (!alive) return;
-        const next = info ?? fallbackAudio;
-        setAudioInfo(next);
-        const durationSec = next?.duration_sec ?? knownDurationSec;
-        if (durationSec > 0) setDurationMs(Math.round(durationSec * 1000));
-      })
-      .catch(error => {
-        if (!alive) return;
-        setAudioInfo(fallbackAudio);
-        setAudioError(fallbackAudio ? '' : meetingAudioUrlErrorMessage(error) ?? '录音服务暂时不可用');
-      })
-      .finally(() => {
-        if (alive) setAudioLoading(false);
-      });
-
-    return () => { alive = false; };
-  }, [accessToken, fallbackDurationSec, isGuest, meeting.audioDurationSec, meeting.audioLocalUri, meeting.id, meeting.remoteId, meeting.source, reloadKey]);
+    setAudioInfo(fallbackAudio);
+    setAudioError(fallbackAudio ? '' : '本机录音不可用');
+    setAudioLoading(false);
+  }, [fallbackDurationSec, meeting.audioDurationSec, meeting.audioLocalUri, meeting.id, reloadKey]);
 
   useEffect(() => () => {
     disposePlayer();
@@ -149,18 +110,10 @@ export function MeetingAudioPlayerDock({
     setAudioLoading(true);
     setAudioError('');
     try {
-      const isLocalAudio = audioInfo.url.startsWith('file://') || audioInfo.url.startsWith('content://');
-      const sourceUrl = isLocalAudio
-        ? audioInfo.url
-        : validateMeetingAudioUrl(audioInfo.url, {
-          requiresAuth: audioInfo.requires_auth,
-          expiresAt: audioInfo.expires_at,
-        });
+      const sourceUrl = audioInfo.url;
       await setAudioModeAsync({ playsInSilentMode: true });
       const created = createAudioPlayer(
-        audioInfo.requires_auth && accessToken
-          ? { uri: sourceUrl, headers: { Authorization: `Bearer ${accessToken}` } }
-          : { uri: sourceUrl },
+        { uri: sourceUrl },
         { updateInterval: 200 },
       );
       created.setPlaybackRate(speed);

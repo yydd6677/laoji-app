@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSummaryAttachmentAuthorization } from '../domain/meeting';
-import type { MeetingAttachmentRecord } from '../data/repositories';
+import type { MeetingAttachmentRecord } from "../data/repositories/meetingNoteRepository";
 import { meetingSummaryImageAttachmentIsSelectable } from '../services/meetingSummaryAttachments';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
 const MOTION_MS = 300;
 const MAX_SELECTION = 12;
@@ -56,7 +56,7 @@ export function MeetingSummaryAttachmentSheet({
   onAuthorize: (attachmentIds: readonly string[]) => Promise<MeetingSummaryAttachmentAuthorization>;
   onCompleted: (authorization: MeetingSummaryAttachmentAuthorization) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { colors } = getUiTokens();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -146,9 +146,6 @@ export function MeetingSummaryAttachmentSheet({
   const canSubmit = !saving && !closing;
   const requestClose = () => {
     if (!saving) finishClose(true);
-  };
-  const requestSkip = () => {
-    if (!saving) finishClose(true, skipRef.current);
   };
   const toggle = (attachment: MeetingAttachmentRecord) => {
     if (!available(attachment) || saving || closing) return;

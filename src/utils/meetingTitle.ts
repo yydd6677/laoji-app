@@ -1,8 +1,8 @@
 const LEGACY_DEFAULT_RECORDING_TITLE = /^新录音 \d{1,2}月\d{1,2}日 \d{2}:\d{2}$/;
 
 /**
- * Feishu keeps the default recording name separate from its creation time.
- * LaoJi v96 and earlier persisted both in one title, so normalize that exact
+ * Keep the default recording name separate from its creation time. LaoJi v96
+ * and earlier persisted both in one title, so normalize that exact
  * legacy pattern at the presentation boundary. Empty user data also receives
  * a presentation-only label; neither fallback is written back to the title.
  */

@@ -1,7 +1,7 @@
 import type { MeetingDatabaseMigration } from './types';
 
 /**
- * Stage 4 schedule provenance. The event JSON remains the domain payload;
+ * Schedule graph provenance. The event JSON remains the domain payload;
  * these columns make the source/revision fence queryable without parsing JSON
  * and allow a future MentionGraph producer to replace a draft atomically.
  */
@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_local_schedule_deleted
 `;
 
 /**
- * Projection revisions share the Stage 4 migration but remain a separate SQL
+ * Projection revisions share this migration but remain a separate SQL
  * constant so their restart/fencing contract can be replayed independently.
  */
 export const NATIVE_PROJECTION_CHECKPOINTS_V45_SQL = `

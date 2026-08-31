@@ -4,12 +4,7 @@ import type {
   MeetingSummaryDocument,
   MeetingSummarySectionKind,
 } from '../domain/meeting';
-import type {
-  ActionItemRecord,
-  SummarySectionRecord,
-  SummaryVersionProjection,
-  TranscriptRevisionProjection,
-} from '../data/repositories';
+import type { ActionItemRecord, SummarySectionRecord, SummaryVersionProjection, TranscriptRevisionProjection } from "../data/repositories/meetingNoteRepository";
 import { meetingSummaryDocumentToLegacySummary } from './meetingSummaryFormat';
 
 function sectionText(section: SummarySectionRecord): string {
@@ -18,11 +13,11 @@ function sectionText(section: SummarySectionRecord): string {
 
 function sectionKind(value: string): MeetingSummarySectionKind {
   if (
-    value === 'paragraph' || value === 'bullets' || value === 'numbered'
-    || value === 'decisions' || value === 'topics' || value === 'risks'
-    || value === 'action_items'
+    value === 'paragraph' || value === 'bullet_group' || value === 'quote'
+    || value === 'timeline' || value === 'flow' || value === 'comparison'
+    || value === 'risk_card' || value === 'stat' || value === 'action_items'
   ) return value;
-  return 'legacy';
+  return 'paragraph';
 }
 
 export function transcriptProjectionToLegacyLines(
@@ -130,7 +125,7 @@ export function meetingActionRecordToCandidate(
   action: ActionItemRecord,
 ): MeetingSummaryActionCandidate {
   return {
-    id: action.remoteId ?? action.id,
+    id: action.id,
     canonicalId: action.id,
     content: action.content,
     assignee: action.assigneeText,

@@ -18,21 +18,18 @@ import com.laoji.nativeplatform.transfer.meetingUploadTag
 import com.laoji.nativeplatform.audio.RecorderServiceClient
 import com.laoji.nativeplatform.audio.RecordingRepository
 import com.laoji.nativeplatform.mediaimport.MediaIngestor
-import com.laoji.nativeplatform.mediaclip.MediaClipExporter
+import com.laoji.nativeplatform.legacy.LegacyMediaClipCleanup
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.functions.Coroutine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class LaojiTransferModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LaojiTransfer")
-
-    AsyncFunction("setCredentialLease") { scope: String, generation: Long, apiBaseUrl: String, accessToken: String ->
-      CredentialLeaseStore(requireContext()).put(
-        CredentialLease(scope, generation, apiBaseUrl.trim().trimEnd('/'), accessToken)
-      )
-    }
 
     AsyncFunction("setDeviceV2CredentialLease") {
         scope: String,
@@ -68,33 +65,24 @@ class LaojiTransferModule : Module() {
       val credentialScope = (input["credentialScope"] as? String)?.takeIf { it.isNotBlank() } ?: scope
       val generation = input.requiredLong("generation")
       val meetingId = input.requiredString("meetingId")
-      val remoteMeetingId = input.requiredString("remoteMeetingId")
       val operationId = input.requiredString("operationId")
       val fileUri = input.requiredString("fileUri")
       val mimeType = input.requiredString("mimeType")
-      val fileName = input.requiredString("fileName")
-      val protocol = input.requiredString("protocol")
-      val recordingAssetId = input["recordingAssetId"] as? String ?: ""
-      val recordingRole = input["recordingRole"] as? String ?: "primary"
-      val recordingOrigin = input["recordingOrigin"] as? String ?: "captured"
+      val recordingAssetId = input.requiredString("recordingAssetId")
       val expectedBytes = input.requiredLong("expectedBytes")
-      val durationMs = input.requiredLong("durationMs")
-      val checksumSha256 = input["checksumSha256"] as? String ?: ""
-      val deviceId = input["deviceId"] as? String ?: ""
-      val deviceEpochId = input["deviceEpochId"] as? String ?: ""
-      val bindingId = input["bindingId"] as? String ?: ""
-      val bindingGeneration = input["bindingGeneration"] as? String ?: ""
-      val bindingRevision = (input["bindingRevision"] as? Number)?.toLong() ?: -1L
-      val cancelRevision = (input["cancelRevision"] as? Number)?.toLong() ?: -1L
-      val assetGeneration = input["assetGeneration"] as? String ?: ""
-      if (protocol == MeetingUploadWorker.PROTOCOL_DEVICE_V2_R2) {
-        require(deviceId.isNotBlank() && deviceEpochId.isNotBlank()) { "device identity is required" }
-        require(bindingId.isNotBlank() && bindingGeneration.matches(Regex("^[0-9a-f]{32}$"))) {
-          "binding identity is required"
-        }
-        require(bindingRevision >= 1 && cancelRevision >= 0) { "binding revision is invalid" }
-        require(assetGeneration.matches(Regex("^[0-9a-f]{32}$"))) { "asset generation is invalid" }
+      val checksumSha256 = input.requiredString("checksumSha256")
+      val deviceId = input.requiredString("deviceId")
+      val deviceEpochId = input.requiredString("deviceEpochId")
+      val bindingId = input.requiredString("bindingId")
+      val bindingGeneration = input.requiredString("bindingGeneration")
+      val bindingRevision = input.requiredLong("bindingRevision")
+      val cancelRevision = input.requiredLong("cancelRevision")
+      val assetGeneration = input.requiredString("assetGeneration")
+      require(bindingGeneration.matches(Regex("^[0-9a-f]{32}$"))) {
+        "binding identity is required"
       }
+      require(bindingRevision >= 1 && cancelRevision >= 0) { "binding revision is invalid" }
+      require(assetGeneration.matches(Regex("^[0-9a-f]{32}$"))) { "asset generation is invalid" }
       if (MeetingDeletionStore(requireContext()).isDeleted(scope, meetingId)) {
         throw IllegalStateException("meeting has been deleted")
       }
@@ -107,17 +95,12 @@ class LaojiTransferModule : Module() {
             MeetingUploadWorker.KEY_CREDENTIAL_SCOPE to credentialScope,
             MeetingUploadWorker.KEY_GENERATION to generation,
             MeetingUploadWorker.KEY_MEETING_ID to meetingId,
-            MeetingUploadWorker.KEY_REMOTE_MEETING_ID to remoteMeetingId,
             MeetingUploadWorker.KEY_OPERATION_ID to operationId,
             MeetingUploadWorker.KEY_FILE_URI to fileUri,
             MeetingUploadWorker.KEY_MIME_TYPE to mimeType,
-            MeetingUploadWorker.KEY_FILE_NAME to fileName,
-            MeetingUploadWorker.KEY_PROTOCOL to protocol,
+            MeetingUploadWorker.KEY_PROTOCOL to MeetingUploadWorker.PROTOCOL_DEVICE_V2_R2,
             MeetingUploadWorker.KEY_RECORDING_ASSET_ID to recordingAssetId,
-            MeetingUploadWorker.KEY_RECORDING_ROLE to recordingRole,
-            MeetingUploadWorker.KEY_RECORDING_ORIGIN to recordingOrigin,
             MeetingUploadWorker.KEY_EXPECTED_BYTES to expectedBytes,
-            MeetingUploadWorker.KEY_DURATION_MS to durationMs,
             MeetingUploadWorker.KEY_CHECKSUM_SHA256 to checksumSha256,
             MeetingUploadWorker.KEY_DEVICE_ID to deviceId,
             MeetingUploadWorker.KEY_DEVICE_EPOCH_ID to deviceEpochId,
@@ -133,11 +116,7 @@ class LaojiTransferModule : Module() {
         .addTag(meetingUploadTag(scope, meetingId))
         .addTag(operationTag(operationId))
         .build()
-      val uniqueWorkName = if (protocol == MeetingUploadWorker.PROTOCOL_DEVICE_V2_R2) {
-        "laoji-device-v2-r2:$deviceEpochId:$recordingAssetId:$assetGeneration"
-      } else {
-        "laoji-meeting-upload:$scope:$operationId"
-      }
+      val uniqueWorkName = "laoji-device-v2-r2:$deviceEpochId:$recordingAssetId:$assetGeneration"
       val workManager = WorkManager.getInstance(requireContext())
       workManager.enqueueUniqueWork(
         uniqueWorkName,
@@ -156,11 +135,13 @@ class LaojiTransferModule : Module() {
       actual.id.toString()
     }
 
-    AsyncFunction("getUploadState") { workId: String ->
-      val info = WorkManager.getInstance(requireContext())
-        .getWorkInfoById(UUID.fromString(workId))
-        .get(5, TimeUnit.SECONDS)
-      workInfoMap(info)
+    AsyncFunction("getUploadState") Coroutine { workId: String ->
+      withContext(Dispatchers.IO) {
+        val info = WorkManager.getInstance(requireContext())
+          .getWorkInfoById(UUID.fromString(workId))
+          .get(5, TimeUnit.SECONDS)
+        workInfoMap(info)
+      }
     }
 
     AsyncFunction("cancelUpload") { workId: String ->
@@ -176,7 +157,7 @@ class LaojiTransferModule : Module() {
         RecorderServiceClient.currentSessionId(),
       )
       val deletedImportedFiles = MediaIngestor(context).deleteMeetingAssets(meetingId)
-      val deletedClipFiles = MediaClipExporter(context).deleteMeeting(meetingId)
+      val deletedClipFiles = LegacyMediaClipCleanup.deleteMeeting(context, meetingId)
       mapOf("deletedFiles" to deletedFiles + deletedImportedFiles + deletedClipFiles)
     }
   }

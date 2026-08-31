@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
 import { useAppDialog } from '../components/AppDialog';
-import { useAuth } from '../store/AuthStore';
 import {
   REMINDER_OPTIONS,
   ReminderMinutes,
@@ -17,9 +16,9 @@ import {
   scheduleTestNotification,
 } from '../services/notifications';
 import { RootStackParamList } from '../types';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { getUiTokens } from '../theme/uiTokens';
 
-const { colors: F } = getFeishuTokens();
+const { colors: F } = getUiTokens();
 
 // UI-FORM-001 / UI-TOKENS-001: notification actions retain fixed right-side status slots.
 
@@ -28,18 +27,13 @@ type Props = {
 };
 
 export function NotificationSettingsScreen({ navigation }: Props) {
-  const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
   const [defaultReminder, setDefaultReminder] = useState<ReminderMinutes>(15);
   const [permissionStatus, setPermissionStatus] = useState('unknown');
   const [reminderSaving, setReminderSaving] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState(false);
   const [notificationTestBusy, setNotificationTestBusy] = useState(false);
-  const notificationScope = mode === 'authenticated' && session
-    ? `user:${session.user.id}`
-    : mode === 'guest'
-      ? 'guest'
-      : 'signed_out';
+  const notificationScope = 'guest';
 
   useEffect(() => {
     let active = true;
@@ -85,7 +79,7 @@ export function NotificationSettingsScreen({ navigation }: Props) {
     } catch {
       showDialog({
         title: '无法打开系统设置',
-        message: '请在手机设置的应用管理中找到“老记”，再进入通知管理。',
+        message: '请在系统设置中打开老记通知。',
         tone: 'error',
       });
     }
@@ -102,20 +96,22 @@ export function NotificationSettingsScreen({ navigation }: Props) {
       const granted = await ensureNotificationPermission();
       const status = await getNotificationPermissionStatus().catch(() => granted ? 'granted' : 'denied');
       setPermissionStatus(status);
-      showDialog({
-        title: granted ? '通知已开启' : '通知未开启',
-        message: granted ? '老记可以为有提醒的日程创建系统通知。' : '未获得系统通知权限，日程提醒不会弹出系统通知。',
-        tone: granted ? 'success' : 'warning',
-        actions: granted ? undefined : [
+      if (!granted) {
+        showDialog({
+          title: '通知未开启',
+          message: '日程提醒不会发送。',
+          tone: 'warning',
+          actions: [
           { text: '打开系统设置', role: 'primary', onPress: openSettings },
           { text: '以后再说', role: 'cancel' },
-        ],
-      });
+          ],
+        });
+      }
     } catch {
       setPermissionStatus('unknown');
       showDialog({
         title: '无法检查通知权限',
-        message: '系统通知状态读取失败，请稍后重试或前往系统设置检查。',
+        message: '请稍后重试，或前往系统设置。',
         tone: 'error',
       });
     } finally {
@@ -129,15 +125,15 @@ export function NotificationSettingsScreen({ navigation }: Props) {
     try {
       await scheduleTestNotification();
       setPermissionStatus('granted');
-      showDialog({ title: '测试提醒已安排', message: '老记将在 3 秒后发送一条系统通知。', tone: 'success' });
+      showDialog({ title: '测试提醒已安排', message: '3 秒后发送。', tone: 'success' });
     } catch {
       const status = await getNotificationPermissionStatus().catch(() => 'unknown');
       setPermissionStatus(status);
       showDialog({
         title: '测试提醒未发送',
         message: status === 'granted'
-          ? '系统通知已开启，但提醒调度失败。请稍后重试。'
-          : '请先开启老记的系统通知，再发送测试提醒。',
+          ? '请稍后重试。'
+          : '请先开启老记通知。',
         tone: 'warning',
       });
     } finally {

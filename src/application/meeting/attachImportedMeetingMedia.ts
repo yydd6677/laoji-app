@@ -5,12 +5,8 @@ import {
   transitionProcessingStage,
   type ScopeKey,
 } from '../../domain/meeting';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-  RecordingAssetRecord,
-} from '../../data/repositories';
-import { canonicalRecordingSourceSha256 } from '../../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 
 export type AttachImportedMeetingMediaErrorCode =
   | 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE'
@@ -210,17 +206,7 @@ export class AttachImportedMeetingMediaUseCase {
           inputFingerprint: null,
         }, updatedAtMs), input.scopeKey);
       }
-      if (input.scopeKey === 'guest') {
-        if (upload.status !== 'not_required') {
-          await transaction.upsertStage(transitionProcessingStage(upload, {
-            stage: 'upload',
-            status: 'not_required',
-            progress: null,
-            jobId: null,
-            inputFingerprint: null,
-          }, updatedAtMs), input.scopeKey);
-        }
-      } else if (upload.status === 'not_required' || upload.status === 'uploaded') {
+      if (upload.status === 'not_required' || upload.status === 'uploaded') {
         await transaction.upsertStage(transitionProcessingStage(upload, {
           stage: 'upload',
           status: 'queued',

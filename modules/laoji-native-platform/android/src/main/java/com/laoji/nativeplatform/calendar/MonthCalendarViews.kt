@@ -40,8 +40,6 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.laoji.nativeplatform.NativeThemePreference
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -69,7 +67,6 @@ private data class MonthEventHit(
 )
 
 // CAL-MONTH-EXPAND-001: Weekday chrome stays outside the independently moving week rows.
-@FeishuEvidence("CAL-MONTH-EXPAND-001")
 private class MonthWeekdayHeaderView(context: Context) : View(context) {
   private val palette = CalendarUi.palette(context)
   private val weekdayPaint = CalendarUi.textPaint(context, palette.textPrimary, 12f, true)
@@ -115,7 +112,6 @@ private class MonthWeekdayHeaderView(context: Context) : View(context) {
 
 // CAL-MONTH-EXPAND-001: Each visible week is its own View and owns only that row's date/event drawing.
 // CAL-MONTH-SPAN-001: one MonthEventSegment maps to one continuous week-local hit/draw rectangle.
-@FeishuEvidence("CAL-MONTH-SPAN-001")
 private class MonthWeekRowView(context: Context) : View(context) {
   companion object {
     private const val DATE_VIRTUAL_ID_BASE = 1
@@ -132,7 +128,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
   )
   private val mutedDayPaint = CalendarUi.textPaint(
     context,
-    // Feishu re3/C153854f uses ud_N400 for dates outside the displayed month.
+    // [SOURCE] Feishu re3/C153854f uses ud_N400 for dates outside the displayed month.
     palette.textDisabled,
     MonthExpandedLayoutContract.DATE_TEXT_SIZE_SP,
   )
@@ -154,11 +150,12 @@ private class MonthWeekRowView(context: Context) : View(context) {
   private val eventPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.eventFill }
   private val eventTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.eventText
-    // Feishu's compact month canvas uses a dp-sized paint, independently from
+    // The compact month canvas uses a dp-sized paint, independently from
     // the 14sp title used by the expanded event list and day timeline.
     textSize = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_TEXT_SIZE_DP)
+    typeface = com.laoji.nativeplatform.ui.LaojiThemeTypography.typeface(context)
   }
-  // [PRODUCT] LaoJi replaces Feishu's one-sided calendar strip with one
+  // [PRODUCT] LaoJi uses one
   // continuous border around the full event entry.
   private val eventBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = palette.eventBorder
@@ -231,12 +228,6 @@ private class MonthWeekRowView(context: Context) : View(context) {
     segments: List<MonthEventSegment>,
     listener: MonthWeekRowListener?,
   ) {
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-MONTH-SPAN-001",
-      "month-week-row",
-      "calendar-month-week-row-$monthEpochDay-$rowIndex",
-    )
     this.monthEpochDay = monthEpochDay
     this.rowStartEpochDay = rowStartEpochDay
     this.rowIndex = rowIndex
@@ -732,7 +723,6 @@ private class MonthWeekRowView(context: Context) : View(context) {
 }
 
 // CAL-MONTH-EXPAND-001: Each day page owns its ScrollView so same-week column changes preserve scroll state.
-@FeishuEvidence("CAL-MONTH-EXPAND-001")
 private class SelectedDayPageView(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
   private val timeFormatter = CalendarTimeFormatter()
@@ -778,12 +768,12 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
   }
   private val emptyCreateText = TextView(context).apply {
-    text = "点击创建"
+    text = "新建日程"
     setTextColor(palette.accent)
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
     isClickable = true
     isFocusable = true
-    contentDescription = "点击创建日程"
+    contentDescription = "新建日程"
   }
   private var boundEpochDay: Int? = null
   private var bindGeneration = 0
@@ -851,12 +841,6 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
     listener: MonthCalendarListener?,
   ): View = LinearLayout(context).apply {
     val visual = CalendarUi.eventVisual(context, event.category)
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-MONTH-EXPAND-001",
-      "selected-event-row",
-      "calendar-selected-event-${event.identity}",
-    )
     orientation = LinearLayout.VERTICAL
     gravity = Gravity.TOP
     minimumHeight = CalendarUi.dp(context, MonthExpandedLayoutContract.EVENT_ROW_HEIGHT_DP).roundToInt()
@@ -932,7 +916,6 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
 }
 
 // CAL-MONTH-EXPAND-001: The middle owner is a fixed seven-page pager, matching one page per weekday.
-@FeishuEvidence("CAL-MONTH-EXPAND-001")
 private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
   private val pager = ViewPager2(context)
@@ -998,12 +981,15 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
   ) {
     val weekStartEpochDay = selection.epochDay - selection.column
     val sameWeek = boundWeekStartEpochDay == weekStartEpochDay
+    val nextColumn = selection.column.coerceIn(0, MonthExpandedLayoutContract.DAY_PAGE_COUNT - 1)
+    val selectionChanged = !sameWeek || boundRow != selection.row || selectedColumn != nextColumn
+    val concealPreviousPage = !smoothColumn && selectionChanged
     boundWeekStartEpochDay = weekStartEpochDay
     boundRow = selection.row
     this.pageListener = pageListener
     suppressPageCallbacks = true
     val generation = ++selectionGeneration
-    if (!smoothColumn) {
+    if (concealPreviousPage) {
       // ViewPager2 can draw the previously attached page for one frame after a
       // non-animated setCurrentItem/adapter rebind. Hide only its content until
       // RecyclerView has completed two frame passes so a date tap cannot look
@@ -1011,8 +997,13 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
       pager.visibility = INVISIBLE
     }
     adapter.bindWeek(weekStartEpochDay, sourceEvents, calendarListener, sameWeek)
-    selectedColumn = selection.column.coerceIn(0, MonthExpandedLayoutContract.DAY_PAGE_COUNT - 1)
+    selectedColumn = nextColumn
     pager.setCurrentItem(selectedColumn, smoothColumn && sameWeek)
+    if (!concealPreviousPage) {
+      suppressPageCallbacks = false
+      pager.visibility = VISIBLE
+      return
+    }
     pager.postOnAnimation {
       pager.postOnAnimation {
         if (generation == selectionGeneration) {
@@ -1094,7 +1085,6 @@ private class SelectedDayEventsOwner(context: Context) : FrameLayout(context) {
 }
 
 // CAL-MONTH-EXPAND-001: A month page composes 4-6 week Views plus one selected-day events owner.
-@FeishuEvidence("CAL-MONTH-EXPAND-001", "CAL-MONTH-EXPAND-HOST-001", "CAL-MONTH-SPAN-001")
 private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekRowListener, SelectedDayPageListener {
   private val palette = CalendarUi.palette(context)
   private val weekdayHeight = CalendarUi.dp(context, 34f).roundToInt()
@@ -1321,7 +1311,7 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
     expandedSelection = selection
     displayedSelectedEpochDay = selection.epochDay
     bindWeekRows()
-    // Feishu's month click path updates the selected column and data in place;
+    // The month click path updates the selected column and data in place;
     // it does not run the MonthDayViewPager's horizontal gesture animation.
     // Keep horizontal motion reserved for an actual user swipe so a date tap
     // cannot make the event list appear to slide in from the right.
@@ -1641,7 +1631,6 @@ private class MonthPageView(context: Context) : FrameLayout(context), MonthWeekR
 
 // CAL-MONTH-EXPAND-HOST-001: snapshot refresh rebinds existing pages in place;
 // it must not destroy MonthPageView-owned expandedSelection or active motion.
-@FeishuEvidence("CAL-MONTH-EXPAND-HOST-001")
 class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalendarListener {
   private val pager = ViewPager2(context)
   private val adapter = MonthPageAdapter()
@@ -1664,7 +1653,6 @@ class ThreePageMonthPager(context: Context) : FrameLayout(context), MonthCalenda
   }
 
   init {
-    FeishuEvidenceRuntime.bind(this, "CAL-MONTH-EXPAND-HOST-001", "month-pager", "calendar-month-pager")
     pager.apply {
       orientation = ViewPager2.ORIENTATION_HORIZONTAL
       setSourceOffscreenPageLimit(this)

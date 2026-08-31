@@ -1,4 +1,3 @@
-import { notifyUnauthorized } from './authInvalidation';
 import { readJsonWithTimeout, readTextWithTimeout } from './http';
 
 const ERROR_RESPONSE_BODY_TIMEOUT_MS = 10_000;
@@ -174,15 +173,11 @@ export async function readResponseData(
 export async function readResponseError(
   prefix: string,
   res: Response,
-  options: { unauthorizedToken?: string } = {},
+  _options: { unauthorizedToken?: string } = {},
 ): Promise<HttpResponseError> {
   const data = await readResponseData(res);
   const record = data && typeof data === 'object' ? data as Record<string, unknown> : null;
   const detail = stringifyErrorDetail(record?.detail ?? record?.message ?? record?.error ?? data);
-
-  if (res.status === 401 && options.unauthorizedToken) {
-    notifyUnauthorized(options.unauthorizedToken);
-  }
 
   return new HttpResponseError(
     detail ? `${prefix}: ${res.status} ${detail}` : `${prefix}: ${res.status}`,
@@ -205,7 +200,7 @@ export function readableErrorMessage(err: unknown, fallback: string): string {
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : stringifyErrorDetail(err) ?? '';
   const message = raw.trim();
   if (!message || message === '[object Object]') return fallback;
-  if (isUnauthorizedResponseError(err)) return '登录已过期，请重新登录。';
+  if (isUnauthorizedResponseError(err)) return '设备凭据已失效，请重新打开老记。';
   const cleaned = message.replace(/^[^:]+:\s*\d{3}\s*/, '').trim();
   if (/Network request failed|Failed to fetch|connection refused/i.test(cleaned)) {
     return '暂时无法连接老记服务，请检查网络后重试。';
@@ -214,7 +209,7 @@ export function readableErrorMessage(err: unknown, fallback: string): string {
     return '实时转写服务暂时未就绪，录音仍会保存在本机，请稍后重试。';
   }
   if (/timeout|timed out/i.test(cleaned)) return '请求超时，请稍后重试。';
-  if (/401|unauthorized|token expired/i.test(cleaned)) return '登录已过期，请重新登录。';
+  if (/401|unauthorized|token expired/i.test(cleaned)) return '设备凭据已失效，请重新打开老记。';
   if (/microphone|permission|recording|audio input/i.test(cleaned)) {
     return '录音暂时不可用，请稍后重试。';
   }

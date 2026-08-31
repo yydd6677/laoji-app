@@ -311,7 +311,7 @@ class MinutesPlayerView(
     if (state.isPlaying) {
       playPause.setPadding(context.dp(29), context.dp(13), context.dp(29), context.dp(13))
     } else {
-      // Feishu offsets the asymmetric play glyph 1dp to the right.
+      // Offset the asymmetric play glyph 1dp to the right.
       playPause.setPadding(context.dp(30), context.dp(13), context.dp(28), context.dp(13))
     }
     playPause.contentDescription = if (state.isPlaying) "暂停会议录音" else "播放会议录音"

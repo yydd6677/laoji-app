@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://laoji.cloud/contracts/hardware/laoji-hardware-control-v1.schema.json",
+  "title": "LaoJi hardware control payload v1",
+  "type": "object",
+  "required": ["schema_version", "op"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "op": {
+      "type": "string",
+      "enum": [
+        "hello", "status.get", "time.sync", "capture.start", "capture.pause",
+        "capture.resume", "capture.stop", "marker.add", "recording.list",
+        "recording.pull", "recording.ack", "recording.rename", "recording.delete",
+        "transport.wifi.offer", "transport.wifi.close", "diagnostics.ping",
+        "power.shutdown", "capture.started", "capture.finished",
+        "capture.paused", "capture.resumed", "capture.interrupted",
+        "recording.changed", "device.status", "button.pressed"
+      ]
+    },
+    "command_id": { "$ref": "#/$defs/id" },
+    "session_id": { "$ref": "#/$defs/id" },
+    "recording_id": { "$ref": "#/$defs/id" },
+    "stream_id": { "$ref": "#/$defs/uint32NonZero" },
+    "ok": { "type": "boolean" },
+    "protocol": { "$ref": "#/$defs/protocol" },
+    "error": { "$ref": "#/$defs/error" },
+    "device": { "$ref": "#/$defs/device" },
+    "security": { "$ref": "#/$defs/security" },
+    "capabilities": { "$ref": "#/$defs/capabilities" },
+    "status": { "$ref": "#/$defs/status" },
+    "audio": { "$ref": "#/$defs/audio" },
+    "recordings": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": { "$ref": "#/$defs/recording" }
+    },
+    "samples": { "$ref": "#/$defs/uint32" },
+    "byte_size": { "type": "integer", "minimum": 0 },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "checksum_sha256": { "$ref": "#/$defs/sha256" },
+    "checksum_scope": { "enum": ["whole_file", "audio_payload"] },
+    "generation": { "$ref": "#/$defs/id" },
+    "expected_generation": { "$ref": "#/$defs/id" },
+    "title": { "type": "string", "maxLength": 120 },
+    "cursor": { "type": ["string", "null"], "maxLength": 128 },
+    "next_cursor": { "type": ["string", "null"], "maxLength": 128 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 128 },
+    "wifi_offer": { "$ref": "#/$defs/wifiOffer" },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["error"] },
+      "then": { "required": ["ok"], "properties": { "ok": { "const": false } } }
+    },
+    {
+      "if": {
+        "properties": { "op": { "const": "hello" }, "ok": { "const": true } },
+        "required": ["op", "ok"]
+      },
+      "then": { "required": ["protocol", "device", "security", "capabilities"] }
+    },
+    {
+      "if": { "properties": { "op": { "const": "capture.started" } }, "required": ["op"] },
+      "then": { "required": ["session_id", "recording_id", "stream_id", "audio"] }
+    },
+    {
+      "if": { "properties": { "op": { "const": "capture.finished" } }, "required": ["op"] },
+      "then": {
+        "required": ["session_id", "recording_id", "stream_id", "samples", "byte_size", "duration_ms"]
+      }
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "uint32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "uint32NonZero": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+    "sha256": { "type": "string", "pattern": "^(sha256:)?[0-9a-f]{64}$" },
+    "protocol": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": { "const": 1 },
+        "minor": { "type": "integer", "minimum": 0, "maximum": 255 }
+      },
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "retryable"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "unsupported_protocol", "unsupported_operation", "invalid_request",
+            "invalid_state", "busy", "capture_unavailable", "storage_full",
+            "permission_denied", "device_untrusted", "transport_lost",
+            "checksum_mismatch", "resume_mismatch", "internal_error"
+          ]
+        },
+        "retryable": { "type": "boolean" },
+        "detail_code": { "type": "string", "maxLength": 80 }
+      },
+      "additionalProperties": true
+    },
+    "device": {
+      "type": "object",
+      "required": ["device_id", "model", "firmware_revision", "hardware_revision"],
+      "properties": {
+        "device_id": { "$ref": "#/$defs/id" },
+        "model": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "firmware_revision": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "hardware_revision": { "type": "string", "minLength": 1, "maxLength": 120 }
+      },
+      "additionalProperties": true
+    },
+    "security": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["development_usb", "development_ble", "paired", "production_attested"] },
+        "attestation_revision": { "type": "string", "maxLength": 120 }
+      },
+      "additionalProperties": true
+    },
+    "audio": {
+      "type": "object",
+      "required": ["codec", "sample_rate_hz", "channels"],
+      "properties": {
+        "codec": { "enum": ["pcm_s16le", "opus"] },
+        "sample_rate_hz": { "type": "integer", "minimum": 8000, "maximum": 96000 },
+        "bits_per_sample": { "type": "integer", "enum": [16] },
+        "channels": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "local_storage": { "type": "boolean" },
+        "device_monotonic_start_ms": { "type": "integer", "minimum": 0 },
+        "estimated_epoch_start_ms": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["transports", "capture", "power", "storage"],
+      "properties": {
+        "transports": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "enum": ["usb", "ble", "wifi"] }
+        },
+        "control": {
+          "type": "array", "uniqueItems": true,
+          "items": { "enum": ["record_toggle", "record_pause_resume", "marker", "soft_shutdown"] }
+        },
+        "capture": {
+          "type": "object",
+          "required": ["live_stream", "local_storage", "codecs", "sample_rates_hz", "channels"],
+          "properties": {
+            "live_stream": { "type": "boolean" },
+            "local_storage": { "type": "boolean" },
+            "codecs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["pcm_s16le", "opus"] } },
+            "sample_rates_hz": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 8000, "maximum": 96000 } },
+            "channels": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1, "maximum": 2 } }
+          },
+          "additionalProperties": true
+        },
+        "power": {
+          "type": "object",
+          "required": ["battery_status", "soft_shutdown"],
+          "properties": {
+            "battery_status": { "type": "boolean" },
+            "soft_shutdown": { "type": "boolean" }
+          },
+          "additionalProperties": true
+        },
+        "storage": {
+          "type": "object",
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "range_resume": { "type": "boolean" },
+            "file_management": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "enum": ["list", "rename", "delete", "acknowledge"] }
+            },
+            "capacity_bytes": { "type": ["integer", "null"], "minimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "wifi": {
+          "type": "object",
+          "properties": {
+            "bulk_transfer": { "type": "boolean" },
+            "security_modes": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "enum": ["development_http", "tls_pinned"] }
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "status": {
+      "type": "object",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["ready", "recording", "paused", "finalizing", "transferring", "storage_full", "low_battery", "error"] },
+        "session_id": { "anyOf": [{ "$ref": "#/$defs/id" }, { "type": "null" }] },
+        "battery_percent": { "type": ["integer", "null"], "minimum": 0, "maximum": 100 },
+        "storage_free_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "pending_recordings": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "recording": {
+      "type": "object",
+      "required": ["recording_id", "generation", "audio", "byte_size", "duration_ms"],
+      "properties": {
+        "recording_id": { "$ref": "#/$defs/id" },
+        "generation": { "$ref": "#/$defs/id" },
+        "audio": { "$ref": "#/$defs/audio" },
+        "byte_size": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "checksum_sha256": { "$ref": "#/$defs/sha256" },
+        "checksum_scope": { "enum": ["whole_file", "audio_payload"] },
+        "created_epoch_ms": { "type": ["integer", "null"], "minimum": 0 },
+        "acknowledged": { "type": "boolean" },
+        "title": { "type": "string", "maxLength": 120 },
+        "recovered": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "wifiOffer": {
+      "type": "object",
+      "required": ["recording_id", "generation", "ssid", "password", "base_url", "path", "bearer_token", "security_mode", "expires_epoch_ms"],
+      "properties": {
+        "recording_id": { "$ref": "#/$defs/id" },
+        "generation": { "$ref": "#/$defs/id" },
+        "ssid": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "password": { "type": "string", "minLength": 8, "maxLength": 63 },
+        "base_url": { "type": "string", "format": "uri", "maxLength": 256 },
+        "path": { "type": "string", "pattern": "^/", "maxLength": 256 },
+        "bearer_token": { "type": "string", "minLength": 24, "maxLength": 192 },
+        "security_mode": { "enum": ["development_http", "tls_pinned"] },
+        "certificate_sha256": {
+          "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }]
+        },
+        "expires_epoch_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

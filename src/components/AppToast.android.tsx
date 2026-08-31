@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   addNativeWindowOverlayDismissListener,
   createNativeOverlayOwnerId,
@@ -7,8 +7,8 @@ import {
   type NativeToastSnapshot,
   type NativeWindowOverlayEvent,
 } from 'laoji-native-platform';
-import type { FeishuHostLifecycle } from './FeishuOverlay';
-import type { FeishuColorScheme } from '../theme/feishuTokens';
+import type { AppHostLifecycle } from './AppOverlay';
+import type { UiColorScheme } from '../theme/uiTokens';
 
 // UI-OVERLAY-WINDOW-001: Android transient feedback shares the Activity owner.
 export type AppToastProps = {
@@ -16,10 +16,10 @@ export type AppToastProps = {
   message: string;
   onDismiss: () => void;
   hostVisible?: boolean;
-  lifecycleState?: FeishuHostLifecycle;
+  lifecycleState?: AppHostLifecycle;
   autoHideDurationMs?: number | null;
   bottom?: number;
-  scheme?: FeishuColorScheme;
+  scheme?: UiColorScheme;
   testID?: string;
   presentationKey?: number | string;
 };

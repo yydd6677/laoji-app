@@ -27,12 +27,12 @@ import {
 } from '../data/repositories/vnext/deviceOperationsRepository';
 import { getMeetingServiceBinding } from '../data/repositories/vnext/deviceAuthorityRepository';
 import {
-  buildQ2CandidateSources,
-  executeQ2Candidate,
-} from './questionQ2Candidate';
+  buildQ2Sources,
+  executeQ2,
+} from './questionQ2Execution';
 import {
   bindQ2DurableTransport,
-  createDeviceQ2CandidateProvider,
+  createDeviceQ2Provider,
   q2TransportHandles,
 } from './questionQ2DeviceProvider';
 import { cancelDeviceV2Task, getDeviceV2Task } from './deviceV2SourceStream';
@@ -152,7 +152,6 @@ function q2SourceText(evidence: MeetingQuestionEvidence): Map<string, {
 
 async function citationFromQ2(
   citation: Q2CitationInput,
-  evidence: MeetingQuestionEvidence,
   sources: ReturnType<typeof q2SourceText>,
 ): Promise<MeetingQuestionCitation> {
   const source = sources.get(citation.sourceId);
@@ -205,7 +204,7 @@ async function projectThread(
       for (const citation of clause.citations) {
         if (seen.has(citation.citationId)) continue;
         seen.add(citation.citationId);
-        citations.push(await citationFromQ2(citation, evidence, sources));
+        citations.push(await citationFromQ2(citation, sources));
       }
     }
     turns.push({
@@ -387,11 +386,11 @@ async function recoverCompletedPendingQ2Turn(
   // resume their existing lease/attempt; successful Tasks return their stored
   // artifact. A 404 recreates the not-yet-created Task with the same ID.
   try {
-    await executeQ2Candidate({
+    await executeQ2({
       meetingId: evidence.meetingId,
       evidence,
       question: pending.question,
-      provider: createDeviceQ2CandidateProvider(),
+      provider: createDeviceQ2Provider(),
       snapshotId: q2Thread.snapshotId,
       threadId: q2Thread.threadId,
       turnId: pending.turnId,
@@ -481,7 +480,7 @@ export async function prepareQ2MeetingQuestionSession(input: {
   if (existing) {
     return { thread: await projectThread(existing, input.evidence), evidence: input.evidence };
   }
-  const sources = await buildQ2CandidateSources(input.evidence);
+  const sources = await buildQ2Sources(input.evidence);
   const suffix = input.evidence.sourceFingerprint.slice(-20);
   const snapshotId = existingForSources?.snapshotId
     ?? `q2-snapshot:${input.evidence.meetingId}:${suffix}:${secureClientIdFactory.create()}`;
@@ -619,11 +618,11 @@ export async function askQ2MeetingQuestion(input: {
         snapshotId: q2Thread.snapshotId,
         sourceFingerprint: input.evidence.sourceFingerprint,
       });
-      await executeQ2Candidate({
+      await executeQ2({
         meetingId: input.evidence.meetingId,
         evidence: input.evidence,
         question,
-        provider: createDeviceQ2CandidateProvider(),
+        provider: createDeviceQ2Provider(),
         snapshotId: q2Thread.snapshotId,
         threadId: q2Thread.threadId,
         turnId,

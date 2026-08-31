@@ -72,7 +72,7 @@ export interface LocalWavRecordingSession {
 
 export interface StartRealtimeAsrOptions {
   meetingId?: string;
-  storageScope?: string;
+  storageScope?: 'guest';
   provider?: RealtimeAsrProvider;
   purpose?: RealtimeAsrPurpose;
   realtimeAsrBase?: string;

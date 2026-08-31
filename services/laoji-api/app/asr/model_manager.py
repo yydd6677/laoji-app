@@ -498,7 +498,7 @@ class SpeakerEmbeddingExtractor:
             # Speaker overlays are inference-only. Without this guard every
             # long meeting builds autograd metadata for each CAM++ window;
             # the tensors are short-lived but the CPU allocator retains the
-            # resulting anonymous pages, causing candidate API RSS to grow
+            # resulting anonymous pages, causing the API process RSS to grow
             # across hundreds of segments.
             with torch.inference_mode():
                 audio_tensor = torch.from_numpy(audio_data).float()

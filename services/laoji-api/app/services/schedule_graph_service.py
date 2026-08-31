@@ -1,10 +1,9 @@
-"""Isolated vNext MentionGraph producer for schedule drafts.
+"""MentionGraph producer for current schedule drafts.
 
-This module is deliberately not mounted by the production router yet.  It is
-the Stage 4 vertical slice that gives the future schedule route one owner for
-intent, source spans, graph state and clarification revisions.  Parsing is
-injected in tests and callers may supply an already observed parser result;
-the compatibility parser is only used when no result is supplied.
+The device-v2 schedule route uses this module as the owner for intent, source
+spans, graph state and clarification revisions. Parsing is injected in tests
+and callers may supply an already observed parser result; the compatibility
+parser is used only when no result is supplied.
 """
 
 from __future__ import annotations

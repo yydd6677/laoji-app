@@ -33,7 +33,7 @@ import android.widget.TextView
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
-import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -43,12 +43,6 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence(
-  "CAL-DETAIL-EDIT-001",
-  "CAL-PICKER-WHEEL-TAP-001",
-  "CAL-REPEAT-RRULE-001",
-  "UI-TITLE-COMMON-001",
-)
 class CalendarEditPageView(
   context: Context,
   appContext: AppContext,
@@ -75,7 +69,7 @@ class CalendarEditPageView(
     setHintTextColor(CalendarPagePalette.placeholder)
     setTextColor(CalendarPagePalette.text)
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
     background = null
     minHeight = context.pageDp(52)
     maxLines = 4

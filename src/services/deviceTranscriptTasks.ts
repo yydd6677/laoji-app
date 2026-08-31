@@ -1,11 +1,12 @@
-import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
 import { getOrCreateDeviceIdentity } from './deviceIdentity';
 import { ensureLocalMeetingServiceBinding } from './deviceAuthority';
 import { ensureDeviceEpoch } from '../data/repositories/vnext/deviceAuthorityRepository';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
+import { createDeviceTranscription } from './deviceApi';
+import { waitForBackgroundNetworkTurn } from './deviceNetworkPriority';
 import {
   mirrorDeviceTranscriptTaskProgress,
-  mirrorLegacyTranscriptProcessingFailure,
+  recordTranscriptProcessingFailure,
 } from './meetingStageMirror';
 import {
   createDeviceOperation,
@@ -14,15 +15,6 @@ import {
   updateDeviceOperation,
   type DeviceOperationRecord,
 } from '../data/repositories/vnext/deviceOperationsRepository';
-
-/**
- * Compatibility facade for the old transcript-task callers.
- *
- * The durable owner is now SQLite `device_operations`. AsyncStorage is read
- * once only to promote records created by the previous build; it is never
- * written again and can therefore not become a second task owner.
- */
-const LEGACY_STORAGE_KEY = '@laoji:deviceTranscriptTasks:v1';
 
 export type DeviceTranscriptTaskState = 'pending' | 'failed';
 export type DeviceTranscriptTaskPhase = 'queued' | 'running';
@@ -38,8 +30,6 @@ export interface DeviceTranscriptTaskRecord {
   updatedAt: string;
 }
 
-type LegacyRecord = DeviceTranscriptTaskRecord;
-type LegacyRegistry = Record<string, LegacyRecord>;
 const listeners = new Set<(meetingId: string) => void>();
 
 function notifyChanged(meetingId: string): void {
@@ -98,93 +88,11 @@ function toRecord(operation: DeviceOperationRecord): DeviceTranscriptTaskRecord 
   };
 }
 
-async function readLegacyRegistry(): Promise<LegacyRegistry> {
-  const raw = await getAppStorageItem(LEGACY_STORAGE_KEY);
-  if (!raw) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const registry: LegacyRegistry = {};
-    Object.entries(parsed).forEach(([key, value]) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
-      const item = value as Partial<LegacyRecord>;
-      try {
-        const meetingId = normalizedMeetingId(typeof item.meetingId === 'string' ? item.meetingId : key);
-        const taskId = normalizedTaskId(typeof item.taskId === 'string' ? item.taskId : '');
-        const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : '';
-        if (!Number.isFinite(Date.parse(updatedAt))) return;
-        registry[meetingId] = {
-          meetingId,
-          taskId,
-          state: item.state === 'failed' ? 'failed' : 'pending',
-          phase: item.phase === 'running' ? 'running' : 'queued',
-          errorCode: typeof item.errorCode === 'string' ? item.errorCode.slice(0, 80) : undefined,
-          eventCursor: Number.isSafeInteger(item.eventCursor) && Number(item.eventCursor) >= 0
-            ? Number(item.eventCursor)
-            : 0,
-          eventTotal: Number.isSafeInteger(item.eventTotal) && Number(item.eventTotal) >= 0
-            ? Number(item.eventTotal)
-            : null,
-          updatedAt,
-        };
-      } catch {
-        // Malformed compatibility data must never block the local meeting UI.
-      }
-    });
-    return registry;
-  } catch {
-    return {};
-  }
-}
-
-async function removeLegacyRecord(meetingId: string): Promise<void> {
-  const registry = await readLegacyRegistry();
-  if (!registry[meetingId]) return;
-  delete registry[meetingId];
-  if (Object.keys(registry).length === 0) {
-    await removeAppStorageItem(LEGACY_STORAGE_KEY);
-    return;
-  }
-  await setAppStorageItem(LEGACY_STORAGE_KEY, JSON.stringify(registry));
-}
-
-async function promoteLegacy(meetingId: string): Promise<DeviceTranscriptTaskRecord | null> {
-  const registry = await readLegacyRegistry();
-  const legacy = registry[meetingId];
-  if (!legacy) return null;
-  await rememberDeviceTranscriptTask(legacy.meetingId, legacy.taskId);
-  const entityId = await operationMeetingId(meetingId);
-  const current = await getLatestDeviceOperation('transcript', entityId);
-  if (legacy.state === 'failed' && current && current.remoteState !== 'failure') {
-    await updateDeviceOperation({
-      operationId: current.operationId,
-      expectedRevision: current.operationRevision,
-      state: 'failure',
-      errorCode: legacy.errorCode ?? null,
-      nowMs: Date.parse(legacy.updatedAt) || Date.now(),
-    });
-  } else if (legacy.state === 'pending' && legacy.phase === 'running' && current && current.remoteState === 'queued') {
-    await updateDeviceOperation({
-      operationId: current.operationId,
-      expectedRevision: current.operationRevision,
-      state: 'running',
-      nowMs: Date.parse(legacy.updatedAt) || Date.now(),
-    });
-  }
-  await removeLegacyRecord(meetingId).catch(() => undefined);
-  const promoted = await getLatestDeviceOperation('transcript', entityId);
-  const record = promoted ? toRecord(promoted) : null;
-  return record ? { ...record, meetingId } : null;
-}
-
 export async function getDeviceTranscriptTask(meetingId: string): Promise<DeviceTranscriptTaskRecord | null> {
   const normalized = normalizedMeetingId(meetingId);
   const operation = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
-  if (operation) {
-    const record = toRecord(operation);
-    return record ? { ...record, meetingId: normalized } : null;
-  }
-  return promoteLegacy(normalized);
+  const record = operation ? toRecord(operation) : null;
+  return record ? { ...record, meetingId: normalized } : null;
 }
 
 /**
@@ -240,6 +148,41 @@ export async function rememberDeviceTranscriptTask(meetingId: string, taskId: st
     normalizedTaskIdValue,
   );
   notifyChanged(normalizedMeetingIdValue);
+}
+
+/** Starts a new server transcription attempt for the current local recording. */
+export async function retryDeviceTranscriptTask(meetingId: string): Promise<string> {
+  const normalized = normalizedMeetingId(meetingId);
+  const canonicalMeetingId = await operationMeetingId(normalized);
+  const aggregate = await sqliteMeetingNoteRepository.get(canonicalMeetingId, 'guest');
+  if (!aggregate || aggregate.note.lifecycle === 'deleted') {
+    throw new Error('会议记录已不存在');
+  }
+  const asset = [...aggregate.recordingAssets]
+    .filter(item => Boolean(item.remoteAssetId?.trim()))
+    .sort((left, right) => (
+      Number(right.role === 'primary') - Number(left.role === 'primary')
+      || right.updatedAtMs - left.updatedAtMs
+      || left.id.localeCompare(right.id)
+    ))[0];
+  const remoteAssetId = asset?.remoteAssetId?.trim();
+  if (!asset || !remoteAssetId) {
+    throw new Error('录音尚未上传完成');
+  }
+  await waitForBackgroundNetworkTurn();
+  const attemptId = `${Date.now()}`;
+  const requestKey = `device-transcript-retry:${asset.id}:${attemptId}`;
+  const response = await createDeviceTranscription(
+    remoteAssetId,
+    { clientRequestId: requestKey, language: 'zh' },
+    requestKey,
+  );
+  const taskId = [response?.job_id, response?.task_id, response?.transcription_task_id]
+    .find(value => typeof value === 'string' && value.trim())
+    ?.trim();
+  if (!taskId) throw new Error('转写服务未返回任务标识');
+  await rememberDeviceTranscriptTask(normalized, taskId);
+  return taskId;
 }
 
 export async function markDeviceTranscriptTaskProgress(
@@ -312,7 +255,7 @@ export async function markDeviceTranscriptTaskFailed(meetingId: string, errorCod
     errorCode: errorCode?.trim().slice(0, 80) || null,
   });
   if (!updated) return false;
-  await mirrorLegacyTranscriptProcessingFailure(
+  await recordTranscriptProcessingFailure(
     'guest',
     normalized,
     errorCode === 'no_speech' ? 'no_speech' : 'remote_processing',
@@ -338,10 +281,7 @@ export async function cancelDeviceTranscriptTask(meetingId: string): Promise<voi
 export async function clearDeviceTranscriptTask(meetingId: string): Promise<void> {
   const normalized = normalizedMeetingId(meetingId);
   const existing = await getLatestDeviceOperation('transcript', await operationMeetingId(normalized));
-  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') {
-    await removeLegacyRecord(normalized).catch(() => undefined);
-    return;
-  }
+  if (!existing || existing.remoteState === 'success' || existing.remoteState === 'cancelled') return;
   const updated = await updateDeviceOperation({
     operationId: existing.operationId,
     expectedRevision: existing.operationRevision,

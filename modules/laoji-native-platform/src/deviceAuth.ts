@@ -26,7 +26,6 @@ interface DeviceAuthNativeModule {
   getOrCreateKey(keyVersion: number): Promise<DeviceKeyInfo>;
   sign(keyVersion: number, payloadBase64: string): string;
   findProofOfWork(nonceBase64: string, difficultyBits: number): Promise<number>;
-  rotateKey(nextKeyVersion: number): Promise<DeviceKeyInfo>;
   deleteKey(keyVersion: number): void;
   hasKey(keyVersion: number): boolean;
   preparePurgeCapability(
@@ -38,7 +37,6 @@ interface DeviceAuthNativeModule {
   ): Promise<PurgeCapabilityRegistration>;
   markPurgeCapabilityArmed(capabilityId: string): void;
   beginPurgeOnlyErase(): PurgeOnlyJournalStatus;
-  getPurgeOnlyJournalStatus(): PurgeOnlyJournalStatus;
   resumePurgeOnlyJournal(apiBase: string): Promise<PurgeOnlyJournalStatus>;
 }
 
@@ -79,10 +77,6 @@ export function findDeviceProofOfWork(nonceBase64: string, difficultyBits: numbe
   return requireModule().findProofOfWork(nonceBase64.trim(), difficultyBits);
 }
 
-export function rotateDeviceKey(nextKeyVersion: number): Promise<DeviceKeyInfo> {
-  return requireModule().rotateKey(validVersion(nextKeyVersion));
-}
-
 export function deleteDeviceKey(keyVersion: number): void {
   if (!nativeModule) return;
   nativeModule.deleteKey(validVersion(keyVersion));
@@ -109,10 +103,6 @@ export function markPurgeCapabilityArmed(capabilityId: string): void {
 
 export function beginPurgeOnlyErase(): PurgeOnlyJournalStatus {
   return requireModule().beginPurgeOnlyErase();
-}
-
-export function getPurgeOnlyJournalStatus(): PurgeOnlyJournalStatus {
-  return requireModule().getPurgeOnlyJournalStatus();
 }
 
 export function resumePurgeOnlyJournal(apiBase: string): Promise<PurgeOnlyJournalStatus> {

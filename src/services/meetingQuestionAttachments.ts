@@ -36,8 +36,8 @@ function normalizedContent(value: string | null): string {
 
 /**
  * Create a generation-scoped authorization from device-primary text
- * attachments. Q2 uploads the selected immutable text through source.stream.v2
- * and therefore must not depend on the legacy account attachment capability.
+ * attachments. Q2 uploads the selected immutable text through source.stream.v2;
+ * the immutable authorization below is the only attachment contract it needs.
  */
 export async function authorizeMeetingQuestionAttachments(input: {
   scopeKey: ScopeKey;

@@ -20,7 +20,6 @@ export class AppStartupError extends Error {
 
 type BoundaryProps = {
   children: React.ReactNode;
-  feishuEvidence?: string;
   resetKey: number;
   onRetry: () => void;
 };
@@ -52,7 +51,6 @@ export class AppStartupBoundary extends React.Component<BoundaryProps, BoundaryS
     if (error) {
       return (
         <AppStartupStateView
-          feishuEvidence="feishu:UI-BOOT-READINESS-001:boundary-error-surface"
           phase="error"
           failureStage={error instanceof AppStartupError ? error.stage : 'runtime'}
           onRetry={this.props.onRetry}

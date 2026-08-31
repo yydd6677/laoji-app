@@ -234,7 +234,7 @@ class LaojiNativeDialogHostView(
       text = title
       textSize = 17f
       setTextColor(palette.textPrimary)
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
       gravity = Gravity.CENTER
       setPadding(
         NativeUiTokens.dp(context, 18f).toInt(),
@@ -322,7 +322,7 @@ class LaojiNativeDialogHostView(
       text = action.text
       textSize = 17f
       setTextColor(color)
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+      typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
       gravity = Gravity.CENTER
       minHeight = NativeUiTokens.dp(context, NativeUiTokens.DIALOG_ACTION_HEIGHT_DP).toInt()
       isClickable = true
@@ -510,7 +510,7 @@ class LaojiNativeActionSheetHostView(
       textSize = 17f
       setTextColor(palette.textPrimary)
       gravity = Gravity.CENTER
-      // The cancel action is a separate Feishu-style rounded surface. Without
+      // The cancel action is a separate rounded surface. Without
       // an explicit drawable TextView defaults to transparent and the overlay
       // mask shows through, which makes the button look missing.
       background = NativeUiTokens.roundedBackground(context, palette.body, 8f)

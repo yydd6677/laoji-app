@@ -53,7 +53,7 @@ export type NativeRecorderErrorCode =
 interface NativeRecorderStartBase {
   sessionId: string;
   purpose: NativeRealtimeRecorderPurpose;
-  storageScope?: string;
+  storageScope?: 'guest';
   websocketUrl: string;
   allowInsecureDevelopment?: boolean;
   connectionTimeoutMs?: number;
@@ -69,7 +69,7 @@ export type NativeRecorderStartOptions = NativeRecorderStartBase & (
 
 export interface NativeDeviceV2RecorderStartOptions {
   sessionId: string;
-  storageScope?: string;
+  storageScope?: 'guest';
   websocketUrl: string;
   credentialScope: string;
   credentialGeneration: number;
@@ -144,6 +144,12 @@ export interface NativeRealtimeRecorderSnapshot extends NativeRecorderSnapshot {
 
 export interface NativeLocalRecorderSnapshot extends NativeRecorderSnapshot {
   purpose: 'speaker';
+  mode: 'localOnly';
+  asrRequired: false;
+}
+
+export interface NativeLocalMeetingRecorderSnapshot extends NativeRecorderSnapshot {
+  purpose: 'meeting';
   mode: 'localOnly';
   asrRequired: false;
 }
@@ -251,9 +257,20 @@ declare class LaojiRecorderNativeModule extends NativeModule<NativeRecorderEvent
   };
   start(options: NativeRecorderStartOptions): Promise<NativeRealtimeRecorderSnapshot>;
   startDeviceV2(options: NativeDeviceV2RecorderStartOptions): Promise<NativeRealtimeRecorderSnapshot>;
+  attachDeviceV2(options: NativeDeviceV2RecorderStartOptions): Promise<NativeRealtimeRecorderSnapshot>;
   prewarmRealtime(options: NativeRecorderStartOptions): Promise<boolean>;
   discardRealtimePrewarm(sessionId: string): void;
   startLocal(sessionId: string, levelIntervalMs: number | null): Promise<NativeLocalRecorderSnapshot>;
+  startLocalMeeting(
+    sessionId: string,
+    storageScope: string,
+    levelIntervalMs: number | null,
+  ): Promise<NativeLocalMeetingRecorderSnapshot>;
+  startDeferredRealtimeMeeting(
+    sessionId: string,
+    storageScope: string,
+    levelIntervalMs: number | null,
+  ): Promise<NativeRealtimeRecorderSnapshot>;
   pause(sessionId: string): Promise<NativeRecorderSnapshot>;
   resume(sessionId: string): Promise<NativeRecorderSnapshot>;
   stop(sessionId: string): Promise<NativeRecorderStopResult>;
@@ -344,14 +361,10 @@ export function normalizeNativeRecorderStartOptions(
   return { ...normalizedBase, deviceToken: deviceToken!, dataEpoch: dataEpoch! };
 }
 
-function normalizeStorageScope(value: string | undefined): string | undefined {
+function normalizeStorageScope(value: string | undefined): 'guest' | undefined {
   if (value === undefined) return undefined;
   const scope = value.trim();
-  if (
-    scope.length > 256 ||
-    /[\u0000-\u001f\u007f]/.test(scope) ||
-    (scope !== 'guest' && (!scope.startsWith('user:') || !scope.slice('user:'.length).trim()))
-  ) {
+  if (scope !== 'guest') {
     throw new TypeError('invalid storageScope');
   }
   return scope;
@@ -366,6 +379,18 @@ export async function startNativeRecorder(
 export async function startNativeDeviceV2Recorder(
   options: NativeDeviceV2RecorderStartOptions,
 ): Promise<NativeRealtimeRecorderSnapshot> {
+  return requireNativeRecorder().startDeviceV2(normalizeNativeDeviceV2RecorderOptions(options));
+}
+
+export async function attachNativeDeviceV2Recorder(
+  options: NativeDeviceV2RecorderStartOptions,
+): Promise<NativeRealtimeRecorderSnapshot> {
+  return requireNativeRecorder().attachDeviceV2(normalizeNativeDeviceV2RecorderOptions(options));
+}
+
+function normalizeNativeDeviceV2RecorderOptions(
+  options: NativeDeviceV2RecorderStartOptions,
+): NativeDeviceV2RecorderStartOptions {
   const allowInsecureDevelopment = options.allowInsecureDevelopment === true;
   const expiresAtEpoch = positiveSafeInteger(options.expiresAtEpoch, 'expiresAtEpoch');
   const nowEpoch = Math.floor(Date.now() / 1_000);
@@ -404,7 +429,7 @@ export async function startNativeDeviceV2Recorder(
     stopTimeoutMs: boundedInteger(options.stopTimeoutMs, 1_000, 120_000, 'stopTimeoutMs'),
     levelIntervalMs: boundedInteger(options.levelIntervalMs, 50, 1_000, 'levelIntervalMs'),
   };
-  return requireNativeRecorder().startDeviceV2(normalized);
+  return normalized;
 }
 
 export async function prewarmNativeRecorder(
@@ -435,6 +460,36 @@ export async function startLocalNativeRecorder(
   return requireNativeRecorder().startLocal(
     normalized.sessionId,
     normalized.levelIntervalMs ?? null,
+  );
+}
+
+export async function startLocalMeetingNativeRecorder(
+  sessionId: string,
+  storageScope: 'guest',
+  options: NativeLocalRecorderOptions = {},
+): Promise<NativeLocalMeetingRecorderSnapshot> {
+  const normalizedSessionId = validateSessionId(sessionId);
+  const normalizedStorageScope = storageScope.trim();
+  if (normalizedStorageScope !== 'guest') throw new TypeError('storageScope must be guest');
+  return requireNativeRecorder().startLocalMeeting(
+    normalizedSessionId,
+    normalizedStorageScope,
+    boundedInteger(options.levelIntervalMs, 50, 1_000, 'levelIntervalMs') ?? null,
+  );
+}
+
+export async function startDeferredRealtimeMeetingNativeRecorder(
+  sessionId: string,
+  storageScope: 'guest',
+  options: NativeLocalRecorderOptions = {},
+): Promise<NativeRealtimeRecorderSnapshot> {
+  const normalizedSessionId = validateSessionId(sessionId);
+  const normalizedStorageScope = storageScope.trim();
+  if (normalizedStorageScope !== 'guest') throw new TypeError('storageScope must be guest');
+  return requireNativeRecorder().startDeferredRealtimeMeeting(
+    normalizedSessionId,
+    normalizedStorageScope,
+    boundedInteger(options.levelIntervalMs, 50, 1_000, 'levelIntervalMs') ?? null,
   );
 }
 

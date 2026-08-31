@@ -19,7 +19,6 @@ interface ApiConfigSource {
   deviceBootstrapKey?: string;
   privacyPolicyUrl?: string;
   termsOfServiceUrl?: string;
-  accountDeletionUrl?: string;
 }
 
 export interface ApiConfig {
@@ -31,7 +30,6 @@ export interface ApiConfig {
   reverseGeocoderUrl: string;
   privacyPolicyUrl: string;
   termsOfServiceUrl: string;
-  accountDeletionUrl: string;
   isProduction: boolean;
 }
 
@@ -93,7 +91,6 @@ function runtimeSource(): ApiConfigSource {
     deviceBootstrapKey: runtimeEnv?.EXPO_PUBLIC_DEVICE_BOOTSTRAP_KEY || extra.deviceBootstrapKey,
     privacyPolicyUrl: runtimeEnv?.EXPO_PUBLIC_PRIVACY_POLICY_URL || extra.privacyPolicyUrl,
     termsOfServiceUrl: runtimeEnv?.EXPO_PUBLIC_TERMS_OF_SERVICE_URL || extra.termsOfServiceUrl,
-    accountDeletionUrl: runtimeEnv?.EXPO_PUBLIC_ACCOUNT_DELETION_URL || extra.accountDeletionUrl,
   };
 }
 
@@ -109,14 +106,13 @@ export function getApiConfig(source: ApiConfigSource = runtimeSource()): ApiConf
     reverseGeocoderUrl: apiBase ? `${apiBase}/api/location/reverse` : '',
     privacyPolicyUrl: normalizeBaseUrl(String(source.privacyPolicyUrl ?? (apiBase ? `${apiBase}/privacy` : ''))),
     termsOfServiceUrl: normalizeBaseUrl(String(source.termsOfServiceUrl ?? (apiBase ? `${apiBase}/terms` : ''))),
-    accountDeletionUrl: normalizeBaseUrl(String(source.accountDeletionUrl ?? (apiBase ? `${apiBase}/account-deletion` : ''))),
     isProduction: isSecureDeploymentMode(appEnv),
   };
 }
 
 export function assertProductionApiConfig(config: ApiConfig = getApiConfig()): void {
   if (!config.apiBase || !config.realtimeAsrBase
-      || !config.privacyPolicyUrl || !config.termsOfServiceUrl || !config.accountDeletionUrl) {
+      || !config.privacyPolicyUrl || !config.termsOfServiceUrl) {
     throw new Error('API endpoint configuration is missing. Rebuild LaoJi with EXPO_PUBLIC_API_BASE.');
   }
   if (!config.isProduction) return;
@@ -126,7 +122,6 @@ export function assertProductionApiConfig(config: ApiConfig = getApiConfig()): v
     config.reverseGeocoderUrl,
     config.privacyPolicyUrl,
     config.termsOfServiceUrl,
-    config.accountDeletionUrl,
   ];
   const hasInvalidUrl = urls.some(url => !validServiceUrl(url, true));
   if (hasInvalidUrl || !config.realtimeAsrBase.startsWith('wss://')) {

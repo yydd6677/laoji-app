@@ -1,5 +1,0 @@
-command: npx expo prebuild --platform android --no-install && ./android/gradlew :app:compileDebugKotlin --no-daemon
-scope: isolated worktree /home/yydd/LaoJi-worktrees/vnext-implementation
-result: BUILD SUCCESSFUL
-verified: laoji-native-platform, LaojiDeviceAuthModule, app compileDebugKotlin
-not_verified: APK install, emulator, USB device, v2 network flow

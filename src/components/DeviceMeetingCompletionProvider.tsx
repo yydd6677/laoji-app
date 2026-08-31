@@ -1,9 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { DeviceApiError, getDeviceTask, getDeviceTranscript } from '../services/deviceApi';
 import { diagnosticWarn } from '../services/diagnostics';
 import { getLocalDeviceSpeakerName } from '../services/speakers';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import {
   advanceDeviceTranscriptEventCursor,
   cancelDeviceTranscriptTask,
@@ -23,9 +23,9 @@ import {
 import { applyDeviceV2ImportSpeakerOverlay } from '../services/deviceV2SpeakerOverlay';
 import {
   mirrorDeviceTranscriptTaskTerminal,
-  mirrorLegacyTranscriptProcessingFailure,
+  recordTranscriptProcessingFailure,
 } from '../services/meetingStageMirror';
-import { useAuth } from '../store/AuthStore';
+import { loadActiveMeetingTranscriptState } from '../services/meetingTranscriptState';
 import { useMeetings } from '../store/MeetingsStore';
 import type { TranscriptLine } from '../types';
 
@@ -57,7 +57,6 @@ async function needsDeviceTranscriptCompletion(meeting: {
 
 /** Pull generated transcript bodies for phone-owned recordings only. */
 export function DeviceMeetingCompletionProvider(): null {
-  const { mode } = useAuth();
   const {
     meetings,
     loading,
@@ -72,10 +71,14 @@ export function DeviceMeetingCompletionProvider(): null {
   const terminalProjectionAuditRef = useRef(new Set<string>());
 
   useEffect(() => {
-    if (mode !== 'guest' || loading) return undefined;
+    if (loading) return undefined;
     let active = true;
     let running = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const currentTranscriptLines = async (meetingId: string): Promise<TranscriptLine[]> => {
+      const canonical = await loadActiveMeetingTranscriptState('guest', meetingId).catch(() => null);
+      return canonical?.lines ?? getCachedTranscript(meetingId);
+    };
     const run = async () => {
       if (!active || running) return;
       running = true;
@@ -196,7 +199,7 @@ export function DeviceMeetingCompletionProvider(): null {
                   });
                   const finalEvent = newEvents.find(event => event.event_kind === 'final') ?? null;
                   const stableEvents = newEvents.filter(event => event.event_kind === 'stable' && event.outcome === 'text');
-                  const previous = getCachedTranscript(meeting.id).filter(line => (
+                  const previous = (await currentTranscriptLines(meeting.id)).filter(line => (
                     (line.transcription_job_id ?? line.transcriptionJobId) === task.taskId
                   ));
                   const byStableKey = new Map(previous.map(line => [line.id, line]));
@@ -283,7 +286,7 @@ export function DeviceMeetingCompletionProvider(): null {
                   );
                   if (finalEvent) {
                     if (finalEvent.outcome === 'no_speech') {
-                      await mirrorLegacyTranscriptProcessingFailure(
+                      await recordTranscriptProcessingFailure(
                         'guest',
                         meeting.id,
                         'no_speech',
@@ -299,7 +302,6 @@ export function DeviceMeetingCompletionProvider(): null {
                       meeting.id,
                       'ended',
                       { hasTranscript: finalEvent.outcome === 'text' || Boolean(meeting.hasTranscript) },
-                      { remoteSync: 'background' },
                     );
                     // Retire the durable operation only after both terminal
                     // content and its list projection are committed.
@@ -327,7 +329,7 @@ export function DeviceMeetingCompletionProvider(): null {
                   && ['succeeded', 'no_content'].includes(snapshot.state)
                 ) {
                   if (snapshot.state === 'no_content') {
-                    await mirrorLegacyTranscriptProcessingFailure(
+                    await recordTranscriptProcessingFailure(
                       'guest',
                       meeting.id,
                       'no_speech',
@@ -391,7 +393,7 @@ export function DeviceMeetingCompletionProvider(): null {
                 // no-speech result.  Do not surface it as a transcription
                 // failure; transport/API failures are handled above and keep
                 // their retryable error state.
-                await mirrorLegacyTranscriptProcessingFailure(
+                await recordTranscriptProcessingFailure(
                   'guest',
                   meeting.id,
                   'no_speech',
@@ -402,7 +404,6 @@ export function DeviceMeetingCompletionProvider(): null {
                   meeting.id,
                   'ended',
                   { hasTranscript: Boolean(meeting.hasTranscript) },
-                  { remoteSync: 'background' },
                 ).catch(() => undefined);
               }
               continue;
@@ -425,7 +426,7 @@ export function DeviceMeetingCompletionProvider(): null {
               script: 'zh-Hans',
             }))).then(items => items.filter((line: TranscriptLine) => line.text.trim()));
             if (lines.length === 0) continue;
-            const existing = getCachedTranscript(meeting.id);
+            const existing = await currentTranscriptLines(meeting.id);
             const sameVisibleLines = existing.length === lines.length
               && existing.every((line, index) => (
                 line.id === lines[index]?.id
@@ -436,7 +437,7 @@ export function DeviceMeetingCompletionProvider(): null {
             if (sameVisibleLines) {
               if (payloadComplete) {
                 await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
-                await updateMeetingStatus(meeting.id, 'ended', { hasTranscript: true }, { remoteSync: 'background' });
+                await updateMeetingStatus(meeting.id, 'ended', { hasTranscript: true });
               }
               continue;
             }
@@ -447,7 +448,7 @@ export function DeviceMeetingCompletionProvider(): null {
             });
             if (payloadComplete) {
               await clearDeviceTranscriptTask(meeting.id).catch(() => undefined);
-              await updateMeetingStatus(meeting.id, 'ended', { hasTranscript: true }, { remoteSync: 'background' });
+              await updateMeetingStatus(meeting.id, 'ended', { hasTranscript: true });
             }
           } catch (error) {
             const previous = retryRef.current[meeting.id] ?? { attempts: 0, nextAt: 0 };
@@ -500,7 +501,7 @@ export function DeviceMeetingCompletionProvider(): null {
       unsubscribeTask();
       subscription.remove();
     };
-  }, [getCachedTranscript, loading, mode, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
+  }, [getCachedTranscript, loading, refreshMeetings, saveCachedTranscript, updateMeetingStatus]);
 
   return null;
 }

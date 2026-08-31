@@ -1,6 +1,5 @@
-"""Durable single-concurrency worker for vNext source-stream summaries.
+"""Durable single-concurrency worker for source-stream summaries.
 
-This worker is deliberately behind ``LAOJI_VNEXT_SUMMARY_SOURCE_STREAM_ENABLED``.
 It owns no domain data and processes at most one immutable chapter per turn,
 so realtime ASR and interactive requests can be given priority by deployment
 policy.  Every turn claims a generic task lease and can be reconstructed from
@@ -18,7 +17,6 @@ import socket
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from app.runtime_policy import env_enabled
 from app.services.llm_provider import LlmProviderPreempted
 from app.services import (
     vnext_source_stream_store,
@@ -62,10 +60,6 @@ def _safe_generation_failure(error: Exception) -> tuple[str, dict[str, Any]] | N
     return code, json.loads(encoded)
 
 
-def summary_source_stream_enabled() -> bool:
-    return env_enabled("LAOJI_VNEXT_SUMMARY_SOURCE_STREAM_ENABLED", False)
-
-
 @dataclass(frozen=True)
 class SummaryTaskOwner:
     device_id: str
@@ -89,8 +83,6 @@ class VNextSummarySourceStreamWorker:
         self._lease_owner = f"summary-source:{socket.gethostname()}:{os.getpid()}"
 
     def start(self) -> None:
-        if not summary_source_stream_enabled():
-            return
         if self._task is None or self._task.done():
             self._closed = False
             self._task = asyncio.create_task(self._run(), name="vnext-summary-source-stream")
@@ -288,14 +280,11 @@ def get_summary_source_stream_worker() -> VNextSummarySourceStreamWorker:
 
 
 def start_summary_source_stream_worker() -> None:
-    if summary_source_stream_enabled():
-        # A freshly adopted production database has the generic task kernel but
-        # may never have received a source-stream request.  Bootstrap the
-        # dependent tables before the maintenance scan starts; otherwise the
-        # worker loops on a hidden ``no such table`` OperationalError until the
-        # first API request happens to create the schema.
-        vnext_source_stream_store.ensure_vnext_source_stream_schema()
-        get_summary_source_stream_worker().start()
+    # A fresh database has the generic task kernel but may not yet have
+    # received a source-stream request. Bootstrap the dependent tables before
+    # the maintenance scan starts so recovery never waits for an API call.
+    vnext_source_stream_store.ensure_vnext_source_stream_schema()
+    get_summary_source_stream_worker().start()
 
 
 async def stop_summary_source_stream_worker() -> None:

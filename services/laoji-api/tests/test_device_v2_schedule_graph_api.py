@@ -26,16 +26,7 @@ def request_body(text: str = "明天下午三点半开会") -> dict:
     }
 
 
-def test_device_schedule_graph_is_closed_by_default(monkeypatch) -> None:
-    monkeypatch.delenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", raising=False)
-    response = client().post("/api/device/v2/schedule/graph", json=request_body())
-    assert response.status_code == 404
-    assert response.json()["detail"]["code"] == "SCHEDULE_GRAPH_V2_DISABLED"
-
-
 def test_device_schedule_graph_returns_source_bound_revision(monkeypatch) -> None:
-    monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
-
     observed: dict[str, object] = {}
 
     async def parse(*_args, **kwargs):
@@ -61,8 +52,6 @@ def test_device_schedule_graph_returns_source_bound_revision(monkeypatch) -> Non
 
 
 def test_device_schedule_graph_operation_does_not_call_model(monkeypatch) -> None:
-    monkeypatch.setenv("LAOJI_VNEXT_SCHEDULE_GRAPH_ENABLED", "1")
-
     async def unexpected_model(*_args, **_kwargs):
         raise AssertionError("operation graph must not call model")
 

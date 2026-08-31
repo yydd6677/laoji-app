@@ -1,4 +1,5 @@
-export type ScopeKey = 'guest' | `user:${string}`;
+/** Stable SQLite wire value for the installation-local data owner. */
+export type ScopeKey = 'guest';
 
 export type MeetingOrigin = 'calendar' | 'ad_hoc' | 'file_import' | 'share_intent';
 
@@ -10,17 +11,15 @@ export type MeetingEntryPoint =
   | 'quick_tile'
   | 'document_picker'
   | 'share_intent'
-  | 'legacy_store'
   | 'recorder_recovery';
 
 export type MeetingLifecycle = 'draft' | 'active' | 'ended' | 'deleted';
 
-export type MeetingCaptureMode = 'realtime' | 'offline' | 'whisper' | 'qwen';
+export type MeetingCaptureMode = 'realtime' | 'offline';
 
 export interface MeetingNote {
   id: string;
   scopeKey: ScopeKey;
-  remoteId: string | null;
   legacySourceId: string | null;
   origin: MeetingOrigin;
   entryPoint: MeetingEntryPoint | null;
@@ -35,8 +34,6 @@ export interface MeetingNote {
   startedAtMs: number | null;
   endedAtMs: number | null;
   currentSummaryVersionId: string | null;
-  remoteRevision: number | null;
-  syncState: 'local' | 'pending' | 'synced' | 'conflicted' | 'deleted';
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs: number | null;
@@ -63,9 +60,7 @@ export interface ScheduleSnapshot {
 }
 
 export function isScopeKey(value: string): value is ScopeKey {
-  if (value === 'guest') return true;
-  if (!value.startsWith('user:')) return false;
-  return value.slice('user:'.length).trim().length > 0;
+  return value === 'guest';
 }
 
 export function assertScopeKey(value: string): asserts value is ScopeKey {

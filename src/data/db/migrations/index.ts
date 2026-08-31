@@ -48,6 +48,7 @@ import { transcriptStableIdentityV47 } from './0047TranscriptStableIdentity';
 import { summaryFactsGenerationsV48 } from './0048SummaryFactsGenerations';
 import { questionQ2ActivationFenceV49 } from './0049QuestionQ2ActivationFence';
 import { questionQ2AttachmentFenceV50 } from './0050QuestionQ2AttachmentFence';
+import { retireCutoverAndSummaryUpgradeV51 } from './0051RetireCutoverAndSummaryUpgrade';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -101,6 +102,7 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   summaryFactsGenerationsV48,
   questionQ2ActivationFenceV49,
   questionQ2AttachmentFenceV50,
+  retireCutoverAndSummaryUpgradeV51,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -156,4 +158,8 @@ export { TRANSCRIPT_STABLE_IDENTITY_V47_SQL } from './0047TranscriptStableIdenti
 export { SUMMARY_FACTS_GENERATIONS_V48_SQL } from './0048SummaryFactsGenerations';
 export { questionQ2ActivationFenceV49 } from './0049QuestionQ2ActivationFence';
 export { questionQ2AttachmentFenceV50 } from './0050QuestionQ2AttachmentFence';
+export {
+  RETIRE_CUTOVER_AND_SUMMARY_UPGRADE_V51_SQL,
+  retireCutoverAndSummaryUpgradeV51,
+} from './0051RetireCutoverAndSummaryUpgrade';
 export type { MeetingDatabaseMigration } from './types';

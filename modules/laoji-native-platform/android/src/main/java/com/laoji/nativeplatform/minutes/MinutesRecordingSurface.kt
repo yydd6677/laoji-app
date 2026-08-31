@@ -28,6 +28,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.audio.RecorderLevelFrame
 import com.laoji.nativeplatform.audio.RecorderLevelHub
 import com.laoji.nativeplatform.ui.installImeOverlapBottomPadding
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -151,7 +152,7 @@ internal class MinutesRecordingSurface(
     titleEditor.apply {
       setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 24f)
       setTextColor(MinutesPalette.text)
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
       includeFontPadding = false
       background = null
       gravity = Gravity.CENTER_VERTICAL
@@ -411,7 +412,7 @@ internal class MinutesRecordingSurface(
     timer.gravity = Gravity.CENTER
     timer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
     timer.setTextColor(MinutesPalette.secondary)
-    timer.typeface = Typeface.MONOSPACE
+    timer.typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
     bottomPanel.addView(
       timer,
       LayoutParams(0, context.dp(MinutesRecordingV3Contract.DURATION_HEIGHT_DP)).apply {
@@ -524,11 +525,7 @@ internal class MinutesRecordingSurface(
       if (manualNoteStatus.isEnabled) {
         onAction(
           mapOf(
-            "type" to if (renderedState.manualNoteConflict) {
-              "openManualNoteConflict"
-            } else {
-              "retryManualNote"
-            },
+            "type" to "retryManualNote",
             "meetingId" to renderedState.meetingId,
           ),
         )
@@ -638,20 +635,12 @@ internal class MinutesRecordingSurface(
     manualNoteEditor.isEnabled = enabled
     manualNoteEditor.isFocusableInTouchMode = enabled
     manualNoteEditor.alpha = if (enabled) 1f else 0.72f
-    val statusText = when {
-      state.manualNoteConflict -> "笔记同步冲突，点击处理"
-      state.manualNoteError.isNotBlank() -> state.manualNoteError +
-        if (state.manualNoteRetryable) " 点击重试" else ""
-      state.manualNoteLoading -> "正在读取我的笔记"
-      state.manualNoteSaving -> "正在保存"
-      else -> ""
-    }
+    val statusText = state.manualNoteError
     manualNoteStatus.text = statusText
-    manualNoteStatus.visibility = if (statusText.isBlank()) View.INVISIBLE else View.VISIBLE
-    manualNoteStatus.isEnabled = state.manualNoteConflict ||
-      (state.manualNoteError.isNotBlank() && state.manualNoteRetryable)
+    manualNoteStatus.visibility = if (statusText.isBlank()) View.GONE else View.VISIBLE
+    manualNoteStatus.isEnabled = state.manualNoteError.isNotBlank() && state.manualNoteRetryable
     manualNoteStatus.setTextColor(
-      if (state.manualNoteConflict || state.manualNoteError.isNotBlank()) {
+      if (state.manualNoteError.isNotBlank()) {
         MinutesPalette.danger
       } else {
         MinutesPalette.secondary
@@ -667,9 +656,9 @@ internal class MinutesRecordingSurface(
     manualNoteRoot.visibility = if (showNotes) View.VISIBLE else View.INVISIBLE
     transcript.visibility = if (showNotes) View.INVISIBLE else View.VISIBLE
     notesTab.setTextColor(if (showNotes) MinutesPalette.primary else MinutesPalette.secondary)
-    notesTab.typeface = Typeface.create(Typeface.DEFAULT, if (showNotes) Typeface.BOLD else Typeface.NORMAL)
+    notesTab.typeface = LaojiThemeTypography.typeface(context, if (showNotes) Typeface.BOLD else Typeface.NORMAL)
     transcriptTab.setTextColor(if (showNotes) MinutesPalette.secondary else MinutesPalette.primary)
-    transcriptTab.typeface = Typeface.create(Typeface.DEFAULT, if (showNotes) Typeface.NORMAL else Typeface.BOLD)
+    transcriptTab.typeface = LaojiThemeTypography.typeface(context, if (showNotes) Typeface.NORMAL else Typeface.BOLD)
     latestButton.visibility = if (
       !showNotes && !followingLatest && transcriptAdapter.itemCount > 0
     ) View.VISIBLE else View.GONE

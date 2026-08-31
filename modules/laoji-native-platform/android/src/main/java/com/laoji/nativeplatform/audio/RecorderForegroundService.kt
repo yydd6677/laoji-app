@@ -37,6 +37,12 @@ internal sealed class RecorderServiceCommand(open val requestId: String) {
     val future: CompletableFuture<RecorderSnapshot>,
   ) : RecorderServiceCommand(requestId)
 
+  data class AttachRealtime(
+    override val requestId: String,
+    val config: RecorderStartConfig,
+    val future: CompletableFuture<RecorderSnapshot>,
+  ) : RecorderServiceCommand(requestId)
+
   data class Resume(
     override val requestId: String,
     val sessionId: String,
@@ -98,6 +104,22 @@ object RecorderServiceClient {
     if (!owns(sessionId, future)) return future
     val requestId = requestId()
     val command = RecorderServiceCommand.Pause(requestId, sessionId, future)
+    if (!dispatch(context, command, foreground = false)) {
+      future.completeExceptionally(
+        RecorderRuntimeException(RecorderErrorCode.SERVICE_UNAVAILABLE, "unable to contact recording service"),
+      )
+    }
+    return future
+  }
+
+  fun attachRealtime(
+    context: Context,
+    config: RecorderStartConfig,
+  ): CompletableFuture<RecorderSnapshot> {
+    val future = CompletableFuture<RecorderSnapshot>()
+    if (!owns(config.sessionId, future)) return future
+    val requestId = requestId()
+    val command = RecorderServiceCommand.AttachRealtime(requestId, config, future)
     if (!dispatch(context, command, foreground = false)) {
       future.completeExceptionally(
         RecorderRuntimeException(RecorderErrorCode.SERVICE_UNAVAILABLE, "unable to contact recording service"),
@@ -236,6 +258,7 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
     }
     when (command) {
       is RecorderServiceCommand.Start -> handleStart(command, startId)
+      is RecorderServiceCommand.AttachRealtime -> handleAttachRealtime(command)
       is RecorderServiceCommand.Pause -> handlePause(command)
       is RecorderServiceCommand.Resume -> handleResume(command)
       is RecorderServiceCommand.Stop -> handleStop(command)
@@ -318,6 +341,14 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
   private fun handlePause(command: RecorderServiceCommand.Pause) {
     val current = matchingEngine(command.sessionId, command.future) ?: return
     current.pause().whenComplete { snapshot, error ->
+      if (error != null) command.future.completeExceptionally(publicFailure(error))
+      else command.future.complete(snapshot)
+    }
+  }
+
+  private fun handleAttachRealtime(command: RecorderServiceCommand.AttachRealtime) {
+    val current = matchingEngine(command.config.sessionId, command.future) ?: return
+    current.attachRealtime(command.config).whenComplete { snapshot, error ->
       if (error != null) command.future.completeExceptionally(publicFailure(error))
       else command.future.complete(snapshot)
     }

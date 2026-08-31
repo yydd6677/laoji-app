@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { ensureDeviceReady } from '../services/deviceApi';
 import { diagnosticAudit, diagnosticWarn } from '../services/diagnostics';

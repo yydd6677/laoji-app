@@ -22,8 +22,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
 import android.widget.FrameLayout
 import android.widget.OverScroller
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -72,7 +70,6 @@ internal interface DayTimelinePageListener {
   fun onTimelineScrollChanged(binding: DayPageBinding, scrollOffset: Float)
 }
 
-@FeishuEvidence("CAL-DAY-COMPOSE-001", "CAL-DRAG-OWNER-001")
 internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
   val timelineCanvas = DayTimelineCanvasView(context)
   val gestureLayer = DayTimelineGestureLayer(context)
@@ -178,7 +175,6 @@ internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
   private fun accepts(callbackBinding: DayPageBinding): Boolean = binding == callbackBinding
 }
 
-@FeishuEvidence("CAL-DAY-COMPOSE-001")
 internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   private val palette = CalendarUi.palette(context)
   private val hourHeight = CalendarUi.dp(context, DayPagerContract.HOUR_HEIGHT_DP)
@@ -264,12 +260,6 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   }
 
   fun bind(binding: DayPageBinding, snapshot: CalendarSnapshot?) {
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-DAY-COMPOSE-001",
-      "day-timed-event-layer",
-      "calendar-day-timed-event-layer-${binding.epochDay}",
-    )
     val changedOwner = this.binding != binding
     this.binding = binding
     this.snapshot = snapshot
@@ -364,7 +354,6 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     canvas.restoreToCount(save)
   }
 
-  @FeishuEvidence("CAL-RULER-001")
   private fun drawHourRuler(canvas: Canvas) {
     DayPagerContract.hourLines().forEach { hour ->
       val y = timelinePaddingTop + hour * hourHeight
@@ -768,7 +757,6 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   }
 }
 
-@FeishuEvidence("CAL-DRAG-OWNER-001", "CAL-DRAG-HANDLES-001")
 internal class DayTimelineGestureLayer(context: Context) : View(context) {
   private val palette = CalendarUi.palette(context)
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
@@ -864,12 +852,6 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
   }
 
   fun bind(binding: DayPageBinding, snapshot: CalendarSnapshot?) {
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-DRAG-OWNER-001",
-      "day-gesture-owner",
-      "calendar-day-gesture-owner-${binding.epochDay}",
-    )
     val changedOwner = this.binding != binding
     if (changedOwner) clearTransientState("page-rebound", emitDraft = false)
     this.binding = binding

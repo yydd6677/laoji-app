@@ -28,7 +28,7 @@ class CalendarSettingsRecord : Record {
 }
 
 // CAL-DAY-COMPOSE-001: the bridge accepts the same percentage rectangle that
-// Feishu's Rust-backed InstanceLayout adapter produces.
+// [SOURCE] Feishu's Rust-backed InstanceLayout adapter produces.
 class CalendarInstanceLayoutRecord : Record {
   @Field
   var xOffsetPercent: Double = 0.0

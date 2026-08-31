@@ -1,10 +1,6 @@
 import type { MeetingCaptureMode, ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-  MeetingRootPatch,
-} from '../../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository, MeetingRootPatch } from "../../data/repositories/meetingNoteRepository";
 
 export interface UpdateMeetingNoteChanges {
   title?: string | null;
@@ -88,7 +84,7 @@ function normalizeChanges(changes: UpdateMeetingNoteChanges): Omit<MeetingRootPa
   }
   if (hasOwn(changes, 'mode')) {
     const mode = changes.mode ?? null;
-    if (mode !== null && !['realtime', 'offline', 'whisper', 'qwen'].includes(mode)) {
+    if (mode !== null && !['realtime', 'offline'].includes(mode)) {
       throw new Error('meeting mode is invalid');
     }
     normalized.mode = mode;
@@ -106,19 +102,6 @@ function normalizeChanges(changes: UpdateMeetingNoteChanges): Omit<MeetingRootPa
   return normalized;
 }
 
-function normalizeSyncOperation(
-  scopeKey: ScopeKey,
-  operation: MeetingRootSyncOperation | null | undefined,
-): MeetingRootSyncOperation | null {
-  if (scopeKey === 'guest') return null;
-  const operationId = operation?.operationId.trim() ?? '';
-  const operationType = operation?.operationType.trim() ?? '';
-  if (!operationId || operationType !== 'meeting.update') {
-    throw new Error('account meeting update requires an atomic sync operation');
-  }
-  return { operationId, operationType };
-}
-
 export class UpdateMeetingNoteUseCase {
   private readonly repository: MeetingNoteRepository;
   private readonly now: () => number;
@@ -133,7 +116,6 @@ export class UpdateMeetingNoteUseCase {
     const meetingId = input.meetingId.trim();
     if (!meetingId) throw new Error('meeting ID is invalid');
     const changes = normalizeChanges(input.changes);
-    const syncOperation = normalizeSyncOperation(input.scopeKey, input.syncOperation);
     let applied = false;
     let canonicalRevision: number | null = null;
 
@@ -144,33 +126,11 @@ export class UpdateMeetingNoteUseCase {
       const clockMs = this.now();
       if (!Number.isSafeInteger(clockMs) || clockMs < 0) throw new Error('meeting clock is invalid');
       const updatedAtMs = Math.max(clockMs, meeting.updatedAtMs);
-      if (syncOperation) {
-        const inserted = await transaction.insertOutbox({
-          operationId: syncOperation.operationId,
-          scopeKey: input.scopeKey,
-          aggregateType: 'meeting_note',
-          aggregateId: meetingId,
-          operationType: syncOperation.operationType,
-          baseRevision: meeting.remoteRevision,
-          payloadJson: JSON.stringify({
-            schema_version: 1,
-            meeting_id: meetingId,
-            base_revision: meeting.remoteRevision,
-            changes,
-          }),
-          createdAtMs: updatedAtMs,
-        });
-        // The outbox and root patch commit in the same SQLite transaction. An
-        // identical existing operation therefore proves this mutation already
-        // committed; do not advance timestamps or reapply it after an ACK.
-        if (!inserted) return;
-      }
       if (input.canonicalWrite) {
         canonicalRevision = await transaction.advanceCanonicalWrite(input.scopeKey, updatedAtMs);
       }
       await transaction.updateMeeting(meetingId, input.scopeKey, {
         ...changes,
-        syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
         updatedAtMs,
       });
       applied = true;

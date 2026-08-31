@@ -204,7 +204,6 @@ export function expandEventForMonth(base: CalEvent, year: number, month: number)
   for (let cursor = first; cursor <= last; cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)) {
     if (cursor < seriesStart) continue;
     if (recurrenceMatches(base, cursor)) {
-      const occurrenceDate = formatDate(cursor);
       const occurrence = occurrenceFromBase(base, cursor);
       if (overlapsMonth(occurrence, monthStart, monthEnd)) results.push(occurrence);
     }

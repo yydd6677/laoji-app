@@ -1,8 +1,8 @@
-"""Isolated v2 device identity and short-lived bearer implementation.
+"""Device-v2 identity and short-lived bearer implementation.
 
-The existing v1 device secret remains untouched until the mobile keystore
-client and the v2 route set pass their own cutover gate.  This module owns
-only challenge, key, epoch and token state; it never stores meeting content.
+This module owns challenge, key, epoch and token state; it never stores
+meeting content. Device-v1 ownership projection remains an explicit
+compatibility boundary until its current mobile callers move to v2 tokens.
 """
 
 from __future__ import annotations

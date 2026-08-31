@@ -6,36 +6,36 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as SplashScreen from 'expo-splash-screen';
 import {
-  FEISHU_DIMENSIONS,
-  FEISHU_FONT_SIZES,
-  FEISHU_LIGHT_COLORS,
-  FEISHU_RADII,
-} from '../theme/feishuTokens';
+  UI_DIMENSIONS,
+  UI_FONT_SIZES,
+  NEUTRAL_LIGHT_COLORS,
+  UI_RADII,
+} from '../theme/uiTokens';
 
 export type AppStartupFailureStage =
-  | 'authentication'
+  | 'storage'
   | 'configuration'
   | 'navigation'
   | 'runtime';
 
 export const UI_BOOT_READINESS_GEOMETRY = Object.freeze({
-  visualSize: FEISHU_DIMENSIONS.startupStateVisualSize,
+  visualSize: UI_DIMENSIONS.startupStateVisualSize,
   copyMarginTop: 10,
   retryMarginTop: 16,
-  retryWidth: FEISHU_DIMENSIONS.retryButtonWidth,
-  retryHeight: FEISHU_DIMENSIONS.retryButtonHeight,
+  retryWidth: UI_DIMENSIONS.retryButtonWidth,
+  retryHeight: UI_DIMENSIONS.retryButtonHeight,
 } as const);
 
 const FAILURE_COPY: Record<AppStartupFailureStage, {
   description: string;
   code: string;
 }> = {
-  authentication: {
-    description: '本机账号状态恢复超时，请重试。',
-    code: 'LAOJI-START-AUTH',
+  storage: {
+    description: '本机状态恢复超时，请重试。',
+    code: 'LAOJI-START-STORAGE',
   },
   configuration: {
     description: '应用配置不可用，请更新应用后重试。',
@@ -65,7 +65,6 @@ export function AppStartupStateView({
   onRetry,
 }: {
   phase: 'loading' | 'error';
-  feishuEvidence?: string;
   failureStage?: AppStartupFailureStage;
   onRetry?: () => void;
 }) {
@@ -81,7 +80,7 @@ export function AppStartupStateView({
           accessibilityElementsHidden
           testID="app-startup-visual"
         >
-          <ActivityIndicator size="large" color={FEISHU_LIGHT_COLORS.primary} />
+          <ActivityIndicator size="large" color={NEUTRAL_LIGHT_COLORS.primary} />
         </View>
         <Text style={styles.loadingText}>正在打开老记</Text>
       </View>
@@ -103,7 +102,7 @@ export function AppStartupStateView({
         <Ionicons
           name="alert-circle-outline"
           size={56}
-          color={FEISHU_LIGHT_COLORS.iconTertiary}
+          color={NEUTRAL_LIGHT_COLORS.iconTertiary}
         />
       </View>
       <Text style={styles.errorTitle}>启动未完成</Text>
@@ -111,7 +110,6 @@ export function AppStartupStateView({
       <Text style={styles.errorCode}>{`错误代码：${copy.code}`}</Text>
       {onRetry ? (
         <Pressable
-          nativeID="feishu:UI-BOOT-READINESS-001:startup-retry"
           accessibilityRole="button"
           accessibilityLabel="重试"
           onPress={onRetry}
@@ -135,7 +133,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
-    backgroundColor: FEISHU_LIGHT_COLORS.backgroundBody,
+    backgroundColor: NEUTRAL_LIGHT_COLORS.backgroundBody,
   },
   visualSlot: {
     width: UI_BOOT_READINESS_GEOMETRY.visualSize,
@@ -144,51 +142,51 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loadingText: {
-    fontSize: FEISHU_FONT_SIZES.body1,
+    fontSize: UI_FONT_SIZES.body1,
     lineHeight: 20,
-    color: FEISHU_LIGHT_COLORS.textCaption,
+    color: NEUTRAL_LIGHT_COLORS.textCaption,
     textAlign: 'center',
   },
   errorTitle: {
     marginTop: UI_BOOT_READINESS_GEOMETRY.copyMarginTop,
-    fontSize: FEISHU_FONT_SIZES.body0,
+    fontSize: UI_FONT_SIZES.body0,
     lineHeight: 22,
     fontWeight: '500',
-    color: FEISHU_LIGHT_COLORS.textTitle,
+    color: NEUTRAL_LIGHT_COLORS.textTitle,
     textAlign: 'center',
   },
   errorDescription: {
     maxWidth: 280,
     marginTop: 4,
-    fontSize: FEISHU_FONT_SIZES.body1,
+    fontSize: UI_FONT_SIZES.body1,
     lineHeight: 20,
-    color: FEISHU_LIGHT_COLORS.textCaption,
+    color: NEUTRAL_LIGHT_COLORS.textCaption,
     textAlign: 'center',
   },
   errorCode: {
     marginTop: 4,
-    fontSize: FEISHU_FONT_SIZES.caption1,
+    fontSize: UI_FONT_SIZES.caption1,
     lineHeight: 18,
-    color: FEISHU_LIGHT_COLORS.textPlaceholder,
+    color: NEUTRAL_LIGHT_COLORS.textPlaceholder,
     textAlign: 'center',
   },
   retryButton: {
     width: UI_BOOT_READINESS_GEOMETRY.retryWidth,
     height: UI_BOOT_READINESS_GEOMETRY.retryHeight,
     marginTop: UI_BOOT_READINESS_GEOMETRY.retryMarginTop,
-    borderRadius: FEISHU_RADII.s,
+    borderRadius: UI_RADII.s,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: FEISHU_LIGHT_COLORS.primary,
+    backgroundColor: NEUTRAL_LIGHT_COLORS.primary,
   },
   retryButtonPressed: {
-    backgroundColor: FEISHU_LIGHT_COLORS.primaryPressed,
+    backgroundColor: NEUTRAL_LIGHT_COLORS.primaryPressed,
   },
   retryText: {
-    fontSize: FEISHU_FONT_SIZES.body0,
+    fontSize: UI_FONT_SIZES.body0,
     lineHeight: 22,
     fontWeight: '500',
-    color: FEISHU_LIGHT_COLORS.onPrimary,
+    color: NEUTRAL_LIGHT_COLORS.onPrimary,
     textAlign: 'center',
   },
 });

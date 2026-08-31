@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image, View, Text, StyleSheet, TouchableOpacity, type LayoutChangeEvent } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Colors as C } from '../theme/colors';
 import { UserProfile } from '../services/profile';

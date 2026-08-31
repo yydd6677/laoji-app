@@ -24,7 +24,7 @@ data class CalendarSettings(
   )
 }
 
-// CAL-DAY-COMPOSE-001: mirrors Feishu's InstanceLayout payload. Percentages are
+// CAL-DAY-COMPOSE-001: stable timed-event layout payload. Percentages are
 // relative to the timed-event surface; a null value means the local fallback
 // allocator is used until the source supplies the rectangle.
 data class CalendarInstanceLayout(
@@ -213,7 +213,7 @@ data class CalendarDraft(
   fun endAbsoluteMinute(): Long = CalendarDateMath.absoluteMinute(endEpochDay, endMinutes)
 }
 
-// CAL-PICKER-HOST-001: QuickChoose exposes the same four expansion states as Feishu's panel.
+// CAL-PICKER-HOST-001: QuickChoose exposes the panel's four expansion states.
 enum class CalendarPickerExpandState {
   CLOSING,
   OPENING,

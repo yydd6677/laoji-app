@@ -1,7 +1,6 @@
 """Device v2 authentication surface.
 
-Only the identity contract is exposed here initially.  Domain routers remain
-on v1 until the mobile Keystore client and the v2 capability gate are ready.
+The v2 identity and domain contracts are the current device service surface.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.services import (
     device_v2_identity,
     schedule_graph_service,
-    vnext_capability_cutover,
     vnext_purge_store,
     vnext_import_transcript_store,
     vnext_import_transcription_pipeline,
@@ -144,7 +142,7 @@ class Q2ReaderSource(BaseModel):
 
 
 class Q2ReaderRequest(BaseModel):
-    """Typed wire boundary for the candidate reader.
+    """Typed wire boundary for the source-attributed Q2 reader.
 
     Keeping binding fences in the same request prevents a caller from
     validating an immutable source snapshot against one binding and then
@@ -401,13 +399,8 @@ async def rotate_key(
 
 @router.get("/capabilities")
 async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(require_device_v2)) -> dict[str, Any]:
-    media_upload_v2 = vnext_capability_cutover.media_upload_cutover_enabled(
-        prerequisites_ready=(
-            vnext_upload_store.upload_enabled()
-            and vnext_import_transcription_pipeline.import_transcription_enabled()
-        ),
-    )
-    source_stream_v2 = vnext_capability_cutover.source_stream_v2_enabled()
+    media_upload_v2 = vnext_upload_store.upload_enabled()
+    summary_runtime = vnext_summary_runtime.current_summary_runtime_revision()
     result = {
         "schema_version": 2,
         "device_api": True,
@@ -420,18 +413,14 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "purge_only_capability": True,
         "upload_sessions_v2": media_upload_v2,
         "import_transcript_events_v2": media_upload_v2,
-        "realtime_asr_v2": vnext_capability_cutover.realtime_asr_v2_enabled(),
-        "schedule_graph_v2": vnext_capability_cutover.schedule_graph_v2_enabled(),
-        "source_stream_v2": source_stream_v2,
-        "question_reader_v2": vnext_capability_cutover.question_reader_v2_enabled(),
+        "realtime_asr_v2": True,
+        "schedule_graph_v2": True,
+        "source_stream_v2": True,
+        "question_reader_v2": True,
+        "summary_handler_revision": summary_runtime.handler_revision,
+        "summary_prompt_revision": summary_runtime.prompt_revision,
+        "summary_model_revision": summary_runtime.model_revision,
     }
-    if source_stream_v2:
-        summary_runtime = vnext_summary_runtime.current_summary_runtime_revision()
-        result.update({
-            "summary_handler_revision": summary_runtime.handler_revision,
-            "summary_prompt_revision": summary_runtime.prompt_revision,
-            "summary_model_revision": summary_runtime.model_revision,
-        })
     return result
 
 
@@ -440,36 +429,11 @@ async def ready(context: device_v2_identity.DeviceV2Context = Depends(require_de
     return {"schema_version": 2, "ready": True, "device_id": context.device_id, "epoch_id": context.epoch_id}
 
 
-def _require_schedule_graph_v2() -> None:
-    if not vnext_capability_cutover.schedule_graph_v2_enabled():
-        raise HTTPException(status_code=404, detail={
-            "code": "SCHEDULE_GRAPH_V2_DISABLED",
-            "message": "日程图候选接口尚未启用",
-        })
-
-
-def _require_source_stream_v2() -> None:
-    if not vnext_capability_cutover.source_stream_v2_enabled():
-        raise HTTPException(status_code=404, detail={
-            "code": "SOURCE_STREAM_V2_DISABLED",
-            "message": "会议来源流候选接口尚未启用",
-        })
-
-
-def _require_question_reader_v2() -> None:
-    if not vnext_capability_cutover.question_reader_v2_enabled():
-        raise HTTPException(status_code=404, detail={
-            "code": "QUESTION_READER_V2_DISABLED",
-            "message": "新版会议问答候选接口尚未启用",
-        })
-
-
 @router.post("/schedule/graph", response_model=ScheduleMentionGraph)
 async def create_schedule_graph(
     payload: ScheduleGraphRequestV1,
     _context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> ScheduleMentionGraph:
-    _require_schedule_graph_v2()
     try:
         if payload.client_intent in {"query", "delete", "reject"}:
             parsed = {"intent": payload.client_intent, "parse_source": "recognizers"}
@@ -510,7 +474,6 @@ async def clarify_schedule_graph(
     payload: ScheduleGraphClarificationRequestV1,
     _context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> ScheduleMentionGraph:
-    _require_schedule_graph_v2()
     try:
         combined_text = f"{payload.graph.source.text}；补充：{payload.answer.strip()}"
         parsed = await parse_schedule_text(
@@ -593,6 +556,14 @@ async def register_binding(
         raise _task_error(error) from error
 
 
+@router.get("/bindings/cursor")
+async def binding_cursor(
+    context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> dict[str, Any]:
+    cursor = await asyncio.to_thread(vnext_task_store.get_binding_cursor, context)
+    return {"schema_version": 2, "cursor": cursor}
+
+
 @router.get("/meetings/{binding_id}")
 async def get_binding(
     binding_id: str,
@@ -617,7 +588,6 @@ async def create_source_stream(
     payload: V2SourceStreamCreate,
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
-    _require_source_stream_v2()
     summary_runtime = vnext_summary_runtime.current_summary_runtime_revision()
     if payload.capability == "summary" and (
         payload.summary_handler_revision != summary_runtime.handler_revision
@@ -669,7 +639,6 @@ async def get_source_stream(
     stream_id: str,
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
-    _require_source_stream_v2()
     try:
         stream = await asyncio.to_thread(
             vnext_source_stream_store.get_source_stream,
@@ -696,7 +665,6 @@ async def append_source_manifest_page(
     payload: V2SourceManifestPage,
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
-    _require_source_stream_v2()
     try:
         return await asyncio.to_thread(
             vnext_source_stream_store.append_manifest_page,
@@ -718,7 +686,6 @@ async def create_source_bundle_group(
     payload: V2SourceBundleGroupCreate,
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
-    _require_source_stream_v2()
     try:
         group, reused = await asyncio.to_thread(
             vnext_source_stream_store.create_bundle_group,
@@ -743,7 +710,6 @@ async def append_source_bundle(
     payload: V2SourceBundleCreate,
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
-    _require_source_stream_v2()
     try:
         group = await asyncio.to_thread(
             vnext_source_stream_store.append_bundle,
@@ -764,7 +730,6 @@ async def commit_source_bundle_group(
     group_id: str,
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
-    _require_source_stream_v2()
     try:
         group = await asyncio.to_thread(
             vnext_source_stream_store.commit_bundle_group,
@@ -781,7 +746,6 @@ async def delete_source_stream(
     stream_id: str,
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
-    _require_source_stream_v2()
     try:
         cancelled = await asyncio.to_thread(
             vnext_source_stream_store.cancel_source_stream,
@@ -884,22 +848,21 @@ async def complete_upload(
         # The worker still owns execution, but the phone can immediately poll
         # a queued run instead of observing a transient 404 between the upload
         # commit and the worker's next maintenance scan.
-        if vnext_import_transcription_pipeline.import_transcription_enabled():
-            try:
-                await asyncio.to_thread(
-                    vnext_import_transcript_store.ensure_run_for_task,
-                    context,
-                    str(result["task"]["task_id"]),
-                )
-            except Exception as error:
-                # Upload verification is already durable.  The GET path has
-                # the same idempotent self-healing hook and the worker will
-                # retry the handoff, so do not turn a committed upload into a
-                # false upload failure.
-                _logger.warning(
-                    "vnext import run handoff deferred: %s",
-                    type(error).__name__,
-                )
+        try:
+            await asyncio.to_thread(
+                vnext_import_transcript_store.ensure_run_for_task,
+                context,
+                str(result["task"]["task_id"]),
+            )
+        except Exception as error:
+            # Upload verification is already durable.  The GET path has the
+            # same idempotent self-healing hook and the worker will retry the
+            # handoff, so do not turn a committed upload into a false upload
+            # failure.
+            _logger.warning(
+                "vnext import run handoff deferred: %s",
+                type(error).__name__,
+            )
         return result
     except vnext_upload_store.VNextUploadError as error:
         raise _upload_error(error) from error
@@ -956,7 +919,6 @@ async def read_question_v2(
     context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
 ) -> dict[str, Any]:
     """Run one source-attributed Q2 reader call behind the device fence."""
-    _require_question_reader_v2()
     stream_id = payload.source_stream_id
     task_id: str | None = payload.task_id
     attempt_id: str | None = None

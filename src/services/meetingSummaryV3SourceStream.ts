@@ -34,9 +34,93 @@ const MAX_CHAPTER_BYTES = 48 * 1024;
 const POLL_LIMIT = 10 * 60 * 1_000;
 const SOURCE_ADMISSION_POLL_MS = 1_000;
 const SOURCE_ADMISSION_LIMIT = 10 * 60 * 1_000;
+const SOURCE_READ_RECOVERY_LIMIT = 60 * 1_000;
+const SOURCE_READ_RETRY_MAX_MS = 2_000;
 // Keep manifest pages comfortably below the server's 4 MiB byte limit while
 // allowing long meetings to resume one page at a time.
 const MANIFEST_PAGE_DESCRIPTORS = 512;
+
+function sourceAbortError(): Error {
+  const error = new Error('meeting summary cancelled');
+  error.name = 'AbortError';
+  return error;
+}
+
+function sourceTaskPendingError(): Error {
+  const error = new Error('正在整理会议记录');
+  error.name = 'MeetingSummaryTaskPendingError';
+  return error;
+}
+
+function requireActiveSourceOperation(signal?: AbortSignal): void {
+  if (signal?.aborted) throw sourceAbortError();
+}
+
+function sourceDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(sourceAbortError());
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(sourceAbortError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Source-stream task reads are recovery reads, not generation ownership.
+ * A short mobile-network interruption must leave the durable server task
+ * running and reconnect to that same task instead of presenting a false
+ * terminal failure or creating another generation.
+ */
+export function isRetryableSummarySourceReadError(error: unknown): boolean {
+  if (error instanceof DeviceV2ApiError) {
+    if (error.code?.endsWith('_INVALID')) return false;
+    return error.status === 408
+      || error.status === 425
+      || error.status === 429
+      || error.status >= 500;
+  }
+  const name = error && typeof error === 'object' && typeof (error as { name?: unknown }).name === 'string'
+    ? (error as { name: string }).name
+    : '';
+  if (name === 'AbortError') return false;
+  if (name === 'RequestTimeoutError' || name === 'TypeError') return true;
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  return /network|failed to fetch|connection|socket|timeout|timed out/.test(message);
+}
+
+async function readSummarySourceWithRecovery<T>(
+  read: () => Promise<T>,
+  options: {
+    signal?: AbortSignal;
+    deadline?: number;
+    onRetry?: () => void;
+  } = {},
+): Promise<T> {
+  const deadline = options.deadline ?? Date.now() + SOURCE_READ_RECOVERY_LIMIT;
+  let attempt = 0;
+  while (true) {
+    requireActiveSourceOperation(options.signal);
+    try {
+      return await read();
+    } catch (error) {
+      requireActiveSourceOperation(options.signal);
+      if (!isRetryableSummarySourceReadError(error) || Date.now() >= deadline) throw error;
+      options.onRetry?.();
+      const delayMs = Math.min(SOURCE_READ_RETRY_MAX_MS, 300 * (2 ** Math.min(attempt, 3)));
+      attempt += 1;
+      await sourceDelay(delayMs, options.signal);
+    }
+  }
+}
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -137,13 +221,16 @@ async function waitForSourceChapterSlot(
   const requiredCursor = Math.max(0, chapterOrdinal - 1);
   const deadline = Date.now() + SOURCE_ADMISSION_LIMIT;
   while (Date.now() < deadline) {
-    if (signal?.aborted) throw new Error('meeting summary cancelled');
-    const snapshot = await getDeviceV2SourceStream(streamId);
+    requireActiveSourceOperation(signal);
+    const snapshot = await readSummarySourceWithRecovery(
+      () => getDeviceV2SourceStream(streamId),
+      { signal, deadline },
+    );
     if (snapshot.state === 'cancelled' || snapshot.state === 'expired') {
       throw new Error('新版整理来源流已结束');
     }
     if (snapshot.next_consumable_chapter >= requiredCursor) return;
-    await new Promise(resolve => setTimeout(resolve, SOURCE_ADMISSION_POLL_MS));
+    await sourceDelay(SOURCE_ADMISSION_POLL_MS, signal);
   }
   throw new Error('新版整理来源上传等待超时');
 }
@@ -162,7 +249,7 @@ async function uploadSourceChapterWithBackpressure(input: {
   const groupId = `summary-source:${input.taskId}:chapter:${input.ordinal}`.slice(0, 180);
   const declaredBytes = input.chapter.reduce((sum, item) => sum + utf8Length(item.content), 0);
   while (Date.now() < deadline) {
-    if (input.signal?.aborted) throw new Error('meeting summary cancelled');
+    requireActiveSourceOperation(input.signal);
     await waitForSourceChapterSlot(input.streamId, input.ordinal, input.signal);
     try {
       const group = await createDeviceV2SourceBundleGroup({
@@ -194,12 +281,13 @@ async function uploadSourceChapterWithBackpressure(input: {
       // Creation, append, and commit are idempotent by their stable IDs. A
       // concurrent consumer may temporarily close the admission window;
       // refresh the cursor and retry only bounded capacity/order responses.
-      if (!(error instanceof DeviceV2ApiError)
-        || (error.status !== 409 && error.status !== 429)
-        || (error.code && !['SOURCE_GROUP_ORDER', 'SOURCE_GROUP_CAPACITY', 'SOURCE_BYTES_CAPACITY'].includes(error.code))) {
+      const capacityRetry = error instanceof DeviceV2ApiError
+        && (error.status === 409 || error.status === 429)
+        && (!error.code || ['SOURCE_GROUP_ORDER', 'SOURCE_GROUP_CAPACITY', 'SOURCE_BYTES_CAPACITY'].includes(error.code));
+      if (!capacityRetry && !isRetryableSummarySourceReadError(error)) {
         throw error;
       }
-      await new Promise(resolve => setTimeout(resolve, SOURCE_ADMISSION_POLL_MS));
+      await sourceDelay(SOURCE_ADMISSION_POLL_MS, input.signal);
     }
   }
   throw new Error('新版整理来源上传等待超时');
@@ -224,7 +312,7 @@ async function appendSummaryManifestPages(
   }
   let current = stream;
   while (current.next_manifest_chapter < descriptors.length) {
-    if (signal?.aborted) throw new Error('meeting summary cancelled');
+    requireActiveSourceOperation(signal);
     const firstChapterOrdinal = current.next_manifest_chapter;
     const pageDescriptors = descriptors.slice(
       firstChapterOrdinal,
@@ -237,7 +325,7 @@ async function appendSummaryManifestPages(
     const pageSha256 = await digest(canonical(pageDescriptors));
     const deadline = Date.now() + SOURCE_ADMISSION_LIMIT;
     while (Date.now() < deadline) {
-      if (signal?.aborted) throw new Error('meeting summary cancelled');
+      requireActiveSourceOperation(signal);
       try {
         current = await appendDeviceV2SourceManifestPage({
           streamId: current.stream_id,
@@ -252,12 +340,13 @@ async function appendSummaryManifestPages(
         // A page may be accepted before its response is lost; repeating the
         // same page is idempotent. Capacity/order responses are transient
         // while the single source consumer releases an earlier page.
-        if (!(error instanceof DeviceV2ApiError)
-          || (error.status !== 409 && error.status !== 429)
-          || (error.code && !['MANIFEST_CAPACITY', 'MANIFEST_BYTES_CAPACITY'].includes(error.code))) {
+        const capacityRetry = error instanceof DeviceV2ApiError
+          && (error.status === 409 || error.status === 429)
+          && (!error.code || ['MANIFEST_CAPACITY', 'MANIFEST_BYTES_CAPACITY'].includes(error.code));
+        if (!capacityRetry && !isRetryableSummarySourceReadError(error)) {
           throw error;
         }
-        await new Promise(resolve => setTimeout(resolve, SOURCE_ADMISSION_POLL_MS));
+        await sourceDelay(SOURCE_ADMISSION_POLL_MS, signal);
       }
     }
     if (current.next_manifest_chapter <= firstChapterOrdinal) {
@@ -395,6 +484,7 @@ export async function generateMeetingSummaryViaSourceStream(options: {
   resumeTaskId?: string;
   signal?: AbortSignal;
   onProgress?: (stage: 'queued' | 'preparing' | 'generating' | 'verifying' | 'persisting') => void;
+  onTaskPrepared?: (taskId: string) => void | Promise<void>;
   onTaskSubmitted?: (taskId: string) => void | Promise<void>;
 }): Promise<MeetingSummary> {
   // Refresh at task creation so a model/prompt deployment cannot reuse the
@@ -434,6 +524,49 @@ export async function generateMeetingSummaryViaSourceStream(options: {
   }));
   let taskId = options.resumeTaskId?.trim() || '';
   let stream: Awaited<ReturnType<typeof getDeviceV2SourceStream>> | null = null;
+  const createStreamForPreparedTask = async (
+    preparedTaskId: string,
+    generationId: string,
+  ): Promise<Awaited<ReturnType<typeof createDeviceV2SourceStream>>> => {
+    // The local recovery pointer must commit before the remote create. Both a
+    // fresh submission and a post-crash 404 replay use the exact same task,
+    // generation and derived stream identities.
+    await options.onTaskPrepared?.(preparedTaskId);
+    const binding = await ensureRemoteMeetingServiceBinding(options.meetingId);
+    const streamId = `summary-stream:${hex(await digest(preparedTaskId))}`;
+    const created = await createDeviceV2SourceStream({
+      streamId,
+      bindingId: binding.bindingId,
+      bindingGeneration: binding.bindingGeneration,
+      bindingRevision: binding.bindingRevision,
+      cancelRevision: binding.cancelRevision,
+      taskId: preparedTaskId,
+      clientOperationId: `summary-source:${preparedTaskId}`.slice(0, 180),
+      generationId,
+      requestSha256: requestSha,
+      capability: 'summary',
+      entityId: options.meetingId,
+      entityRevision: Math.max(1, options.transcriptLines.length),
+      taskInputSha256: requestSha,
+      summaryRevisions: {
+        handlerRevision: summaryRevisions.handlerRevision!,
+        promptRevision: summaryRevisions.promptRevision!,
+        modelRevision: summaryRevisions.modelRevision!,
+      },
+    });
+    await options.onTaskSubmitted?.(preparedTaskId);
+    return created;
+  };
+  const generationFromPreparedTaskId = (preparedTaskId: string): string => {
+    const prefix = `vnext-summary:${options.meetingId}:`;
+    const generationId = preparedTaskId.startsWith(prefix)
+      ? preparedTaskId.slice(prefix.length)
+      : '';
+    if (!/^[a-f0-9]{16,128}$/i.test(generationId)) {
+      throw new Error('本机整理恢复标识无效，请重新整理。');
+    }
+    return generationId;
+  };
   if (!taskId) {
     let generationId = options.force
       ? hex(await digest(`${requestSha}:${Date.now()}:${Crypto.randomUUID()}`))
@@ -441,12 +574,23 @@ export async function generateMeetingSummaryViaSourceStream(options: {
     taskId = `vnext-summary:${options.meetingId}:${generationId}`.slice(0, 480);
     if (!options.force) {
       try {
-        const existingTask = await getDeviceV2Task(taskId);
+        const existingTask = await readSummarySourceWithRecovery(
+          () => getDeviceV2Task(taskId),
+          { signal: options.signal },
+        );
         if (existingTask.task.input_sha256 !== requestSha) {
           throw createMeetingSummaryInputChangedError();
         }
         if (existingTask.task.state === 'success') {
-          const artifact = await getDeviceV2TaskArtifact(taskId);
+          const resultDeadline = Date.now() + SOURCE_READ_RECOVERY_LIMIT;
+          const artifact = await readSummarySourceWithRecovery(
+            () => getDeviceV2TaskArtifact(taskId),
+            {
+              signal: options.signal,
+              deadline: resultDeadline,
+              onRetry: () => options.onProgress?.('persisting'),
+            },
+          );
           const parsed = parseMeetingFactsResultV3(artifact.output);
           if (!parsed) throw new Error('新版整理结果格式无效');
           if (
@@ -455,7 +599,14 @@ export async function generateMeetingSummaryViaSourceStream(options: {
           ) throw new Error('会议整理结果版本已变化，请重新整理');
           const sourceStreamId = existingTask.task.source_stream_id;
           if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
-          const completedStream = await getDeviceV2SourceStream(sourceStreamId);
+          const completedStream = await readSummarySourceWithRecovery(
+            () => getDeviceV2SourceStream(sourceStreamId),
+            {
+              signal: options.signal,
+              deadline: resultDeadline,
+              onRetry: () => options.onProgress?.('persisting'),
+            },
+          );
           return {
             ...meetingFactsV3ToSummary(
               parsed,
@@ -472,7 +623,10 @@ export async function generateMeetingSummaryViaSourceStream(options: {
           };
         }
         if (existingTask.task.state === 'active' && existingTask.task.source_stream_id) {
-          stream = await getDeviceV2SourceStream(existingTask.task.source_stream_id);
+          stream = await readSummarySourceWithRecovery(
+            () => getDeviceV2SourceStream(existingTask.task.source_stream_id!),
+            { signal: options.signal },
+          );
           await options.onTaskSubmitted?.(taskId);
         } else if (existingTask.task.state !== 'active') {
           // A deterministic generation that reached a terminal failure cannot
@@ -485,43 +639,38 @@ export async function generateMeetingSummaryViaSourceStream(options: {
       }
     }
     if (!stream) {
-      const binding = await ensureRemoteMeetingServiceBinding(options.meetingId);
-      // Source stream identity must survive process death and a lost local
-      // pending pointer. A fresh random UUID made a replay of the same
-      // task/generation conflict with the server's idempotency fence.
-      const streamId = `summary-stream:${hex(await digest(taskId))}`;
-      stream = await createDeviceV2SourceStream({
-        streamId,
-        bindingId: binding.bindingId,
-        bindingGeneration: binding.bindingGeneration,
-        bindingRevision: binding.bindingRevision,
-        cancelRevision: binding.cancelRevision,
-        taskId,
-        clientOperationId: `summary-source:${taskId}`.slice(0, 180),
-        generationId,
-        requestSha256: requestSha,
-        capability: 'summary',
-        entityId: options.meetingId,
-        entityRevision: Math.max(1, options.transcriptLines.length),
-        taskInputSha256: requestSha,
-        summaryRevisions: {
-          handlerRevision: summaryRevisions.handlerRevision,
-          promptRevision: summaryRevisions.promptRevision,
-          modelRevision: summaryRevisions.modelRevision,
-        },
-      });
-      await options.onTaskSubmitted?.(taskId);
+      stream = await createStreamForPreparedTask(taskId, generationId);
     }
     options.onProgress?.('preparing');
   } else {
-    const resumedTask = await getDeviceV2Task(taskId);
-    if (resumedTask.task.input_sha256 !== requestSha) {
+    let resumedTask: Awaited<ReturnType<typeof getDeviceV2Task>> | null = null;
+    try {
+      resumedTask = await readSummarySourceWithRecovery(
+        () => getDeviceV2Task(taskId),
+        { signal: options.signal },
+      );
+    } catch (reason) {
+      if (!(reason instanceof DeviceV2ApiError && reason.status === 404)) throw reason;
+      // The process stopped after persisting the intent but before remote
+      // creation committed. Recreate the exact prepared generation. Falling
+      // back to the ordinary deterministic ID here can return an older success
+      // and falsely complete a user-requested regeneration.
+      stream = await createStreamForPreparedTask(
+        taskId,
+        generationFromPreparedTaskId(taskId),
+      );
+      options.onProgress?.('preparing');
+    }
+    if (resumedTask && resumedTask.task.input_sha256 !== requestSha) {
       throw createMeetingSummaryInputChangedError();
     }
-    if (resumedTask.task.state === 'active') {
+    if (resumedTask?.task.state === 'active') {
       const sourceStreamId = resumedTask.task.source_stream_id;
       if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
-      stream = await getDeviceV2SourceStream(sourceStreamId);
+      stream = await readSummarySourceWithRecovery(
+        () => getDeviceV2SourceStream(sourceStreamId),
+        { signal: options.signal },
+      );
       if (stream.task_id !== taskId) throw new Error('新版整理任务与来源流不一致。');
     }
   }
@@ -551,13 +700,28 @@ export async function generateMeetingSummaryViaSourceStream(options: {
   const started = Date.now();
   let attempt = 0;
   while (Date.now() - started <= POLL_LIMIT) {
-    if (options.signal?.aborted) throw new Error('meeting summary cancelled');
-    const task = await getDeviceV2Task(taskId);
+    requireActiveSourceOperation(options.signal);
+    const task = await readSummarySourceWithRecovery(
+      () => getDeviceV2Task(taskId),
+      {
+        signal: options.signal,
+        deadline: started + POLL_LIMIT,
+        onRetry: () => options.onProgress?.('generating'),
+      },
+    );
     const state = task.task.state;
     options.onProgress?.(state === 'active' ? 'generating' : state === 'success' ? 'persisting' : 'verifying');
     if (state === 'failure' || state === 'cancelled') throw new Error(task.task.error_code || '新版整理任务失败');
     if (state === 'success') {
-      const artifact = await getDeviceV2TaskArtifact(taskId);
+      const resultDeadline = Date.now() + SOURCE_READ_RECOVERY_LIMIT;
+      const artifact = await readSummarySourceWithRecovery(
+        () => getDeviceV2TaskArtifact(taskId),
+        {
+          signal: options.signal,
+          deadline: resultDeadline,
+          onRetry: () => options.onProgress?.('persisting'),
+        },
+      );
       const parsed = parseMeetingFactsResultV3(artifact.output);
       if (!parsed) throw new Error('新版整理结果格式无效');
       if (
@@ -566,7 +730,14 @@ export async function generateMeetingSummaryViaSourceStream(options: {
       ) throw new Error('会议整理结果版本已变化，请重新整理');
       const sourceStreamId = task.task.source_stream_id;
       if (!sourceStreamId) throw new Error('新版整理任务缺少可恢复的来源流。');
-      const completedStream = await getDeviceV2SourceStream(sourceStreamId);
+      const completedStream = await readSummarySourceWithRecovery(
+        () => getDeviceV2SourceStream(sourceStreamId),
+        {
+          signal: options.signal,
+          deadline: resultDeadline,
+          onRetry: () => options.onProgress?.('persisting'),
+        },
+      );
       return {
         ...meetingFactsV3ToSummary(
           parsed,
@@ -582,7 +753,7 @@ export async function generateMeetingSummaryViaSourceStream(options: {
         ),
       };
     }
-    await new Promise(resolve => setTimeout(resolve, attempt++ < 4 ? 300 : 1_000));
+    await sourceDelay(attempt++ < 4 ? 300 : 1_000, options.signal);
   }
-  throw new Error('新版整理任务仍在后台进行');
+  throw sourceTaskPendingError();
 }

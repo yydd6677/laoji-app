@@ -1,6 +1,6 @@
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
-import type { MeetingNoteAggregate, MeetingNoteRepository } from '../../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository } from "../../data/repositories/meetingNoteRepository";
 import type { MeetingRootSyncOperation } from './updateMeetingNote';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -31,15 +31,6 @@ function normalizeRetentionDays(value: number): number {
   return value;
 }
 
-function normalizeSyncOperation(operation: MeetingRootSyncOperation): MeetingRootSyncOperation {
-  const operationId = operation.operationId.trim();
-  const operationType = operation.operationType.trim();
-  if (!operationId || operationType !== 'meeting.restore') {
-    throw new Error('meeting restoration requires an atomic sync operation');
-  }
-  return { operationId, operationType };
-}
-
 export class RestoreMeetingNoteUseCase {
   private readonly repository: MeetingNoteRepository;
   private readonly now: () => number;
@@ -54,9 +45,6 @@ export class RestoreMeetingNoteUseCase {
     const meetingId = input.meetingId.trim();
     if (!meetingId) throw new Error('meeting ID is invalid');
     const retentionDays = normalizeRetentionDays(input.retentionDays);
-    const syncOperation = input.scopeKey === 'guest'
-      ? null
-      : normalizeSyncOperation(input.syncOperation);
     let restored = false;
     let canonicalRevision: number | null = null;
 
@@ -64,12 +52,6 @@ export class RestoreMeetingNoteUseCase {
       const meeting = await transaction.getMeeting(meetingId, input.scopeKey);
       if (!meeting) throw new Error('meeting does not exist in active scope');
       if (meeting.lifecycle !== 'deleted') throw new Error('meeting is not in the recycle bin');
-      if (meeting.syncState === 'conflicted') {
-        throw new Error('meeting sync conflict must be resolved before restoration');
-      }
-      if (input.scopeKey !== 'guest' && (!meeting.remoteId || meeting.remoteRevision === null)) {
-        throw new Error('meeting remote identity is unavailable');
-      }
       if (!meeting.deletedFromLifecycle || meeting.deletedAtMs === null) {
         throw new Error('meeting deletion history cannot be restored safely');
       }
@@ -81,24 +63,6 @@ export class RestoreMeetingNoteUseCase {
       }
       const restoredAtMs = Math.max(clockMs, meeting.updatedAtMs + 1);
       if (!Number.isSafeInteger(restoredAtMs)) throw new Error('meeting clock is invalid');
-      if (input.scopeKey !== 'guest') {
-        if (!syncOperation) throw new Error('meeting restoration requires an atomic sync operation');
-        const inserted = await transaction.insertOutbox({
-          operationId: syncOperation.operationId,
-          scopeKey: input.scopeKey,
-          aggregateType: 'meeting_note',
-          aggregateId: meetingId,
-          operationType: syncOperation.operationType,
-          baseRevision: meeting.remoteRevision,
-          payloadJson: JSON.stringify({
-            schema_version: 1,
-            meeting_id: meetingId,
-            base_revision: meeting.remoteRevision,
-          }),
-          createdAtMs: restoredAtMs,
-        });
-        if (!inserted) return;
-      }
       if (input.canonicalWrite) {
         canonicalRevision = await transaction.advanceCanonicalWrite(input.scopeKey, restoredAtMs);
       }
@@ -106,7 +70,6 @@ export class RestoreMeetingNoteUseCase {
         lifecycle: meeting.deletedFromLifecycle,
         deletedFromLifecycle: null,
         deletedAtMs: null,
-        syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
         updatedAtMs: restoredAtMs,
       });
       restored = true;

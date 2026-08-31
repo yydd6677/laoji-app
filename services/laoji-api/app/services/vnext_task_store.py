@@ -1,9 +1,8 @@
 """Durable vNext task/attempt owner.
 
-This store is deliberately separate from ``summary_tasks_v2`` while Stage 1
-is behind its capability barrier. It owns only task execution identity,
-leases, cancellation and terminal replay; domain payloads remain in their
-domain services and are referenced by an opaque result locator/body.
+It owns source-stream/Q2 execution identity, leases, cancellation and terminal
+replay; domain payloads remain in their domain services and are referenced by
+an opaque result locator/body.
 """
 
 from __future__ import annotations
@@ -334,6 +333,44 @@ def _binding_row(connection: Any, context: TaskOwnerContext, binding_id: str) ->
            WHERE device_id = ? AND epoch_id = ? AND binding_id = ?""",
         (context.device_id, context.epoch_id, binding_id),
     ).fetchone()
+
+
+def get_binding_cursor(context: TaskOwnerContext) -> dict[str, Any]:
+    """Return the server-owned contiguous registration cursor for one epoch.
+
+    Binding sequence numbers are accepted only without gaps, so the greatest
+    stored sequence is also proof that every preceding sequence was registered
+    at least once.  Mobile clients use this cursor to avoid replaying every
+    historical binding before opening a realtime transcript.
+    """
+    ensure_vnext_task_schema()
+    with control_connection() as connection:
+        row = connection.execute(
+            """SELECT binding_id, binding_generation, binding_epoch_seq,
+                      binding_revision, cancel_revision, state
+                 FROM vnext_bindings
+                WHERE device_id = ? AND epoch_id = ?
+                ORDER BY binding_epoch_seq DESC
+                LIMIT 1""",
+            (context.device_id, context.epoch_id),
+        ).fetchone()
+    if row is None:
+        return {
+            "binding_epoch_seq": 0,
+            "binding_id": None,
+            "binding_generation": None,
+            "binding_revision": None,
+            "cancel_revision": None,
+            "state": None,
+        }
+    return {
+        "binding_epoch_seq": int(row["binding_epoch_seq"]),
+        "binding_id": str(row["binding_id"]),
+        "binding_generation": str(row["binding_generation"]),
+        "binding_revision": int(row["binding_revision"]),
+        "cancel_revision": int(row["cancel_revision"]),
+        "state": str(row["state"]),
+    }
 
 
 def register_binding(
@@ -978,6 +1015,48 @@ def recoverable_tasks(context: TaskOwnerContext) -> list[dict[str, Any]]:
             )
         connection.commit()
     return [decoded for row in rows if (decoded := _decode_task(row)) is not None]
+
+
+def task_counts() -> dict[str, int]:
+    """Readiness projection for the sole generic task kernel."""
+    ensure_vnext_task_schema()
+    counts = {"queued": 0, "running": 0, "success": 0, "failure": 0, "cancelled": 0}
+    with control_connection() as connection:
+        rows = connection.execute(
+            """SELECT task.state AS task_state, attempt.state AS attempt_state, COUNT(*) AS total
+                 FROM vnext_tasks task
+                 LEFT JOIN vnext_task_attempts attempt
+                   ON attempt.attempt_id = task.current_attempt_id
+                GROUP BY task.state, attempt.state"""
+        ).fetchall()
+    for row in rows:
+        task_state = str(row["task_state"])
+        attempt_state = str(row["attempt_state"] or "")
+        total = max(0, int(row["total"] or 0))
+        if task_state == "active":
+            counts["running" if attempt_state == "running" else "queued"] += total
+        elif task_state in counts:
+            counts[task_state] += total
+    return counts
+
+
+def task_worker_state() -> dict[str, Any]:
+    """Report expired leases without reviving the retired summary worker."""
+    ensure_vnext_task_schema()
+    now = _now_epoch()
+    with control_connection() as connection:
+        row = connection.execute(
+            """SELECT COUNT(*) AS expired_leases,
+                      MIN(lease_expires_at_epoch) AS oldest_lease_expiry
+                 FROM vnext_task_attempts
+                WHERE state = 'running' AND lease_expires_at_epoch <= ?""",
+            (now,),
+        ).fetchone()
+    return {
+        "expired_leases": max(0, int(row["expired_leases"] or 0)) if row else 0,
+        "oldest_lease_expiry": float(row["oldest_lease_expiry"])
+        if row and row["oldest_lease_expiry"] is not None else None,
+    }
 
 
 def pending_source_stream_tasks(limit: int = 32) -> list[dict[str, str]]:

@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { NavigationAction, RouteProp } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { ResponsiveContentFrame } from '../components/ResponsiveContentFrame';
@@ -23,7 +23,6 @@ import { useAppDialog } from '../components/AppDialog';
 import { CalEvent, EventRecurrenceScope, EventRef, RootStackParamList } from '../types';
 import type { ScopeKey } from '../domain/meeting';
 import { useEvents } from '../store/EventsStore';
-import { useAuth } from '../store/AuthStore';
 import {
   DEFAULT_REMINDER_MINUTES,
   REMINDER_OPTIONS,
@@ -157,7 +156,6 @@ function formatEditorDate(d: Date): string {
 
 export function AddEventScreen({ navigation, route }: Props) {
   const { events, searchableEvents, addEvent, updateEvent, deleteEvent } = useEvents();
-  const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
   const editingRef = route.params?.eventRef;
   const editingEvent = editingRef
@@ -223,10 +221,8 @@ export function AddEventScreen({ navigation, route }: Props) {
       ? (editingEvent?.reminderMinutes ?? routeDraft?.reminderMinutes ?? null)
       : defaultReminderForEvent(false, initStartTime),
   );
-  const notificationScope = mode === 'authenticated' && session ? `user:${session.user.id}` : mode === 'guest' ? 'guest' : 'signed_out';
-  const meetingScopeKey: ScopeKey | null = mode === 'authenticated' && session
-    ? `user:${session.user.id}`
-    : mode === 'guest' ? 'guest' : null;
+  const notificationScope = 'guest';
+  const meetingScopeKey: ScopeKey = 'guest';
 
   const [showTimeEditor, setShowTimeEditor] = useState(false);
   const [timeEditorTarget, setTimeEditorTarget] = useState<'start' | 'end'>('start');
@@ -433,11 +429,10 @@ export function AddEventScreen({ navigation, route }: Props) {
     recurrenceScope: EventRecurrenceScope,
   ) => {
     let reminderDelivery: Awaited<ReturnType<typeof addEvent>>['reminderDelivery'] | undefined;
-    let syncStatus: Awaited<ReturnType<typeof addEvent>>['syncStatus'] | undefined;
     let followupEventSaved = false;
     try {
       if (editingEvent) {
-        ({ reminderDelivery, syncStatus } = await updateEvent(
+        ({ reminderDelivery } = await updateEvent(
           eventRefForEvent(editingEvent),
           payload,
           recurrenceScope,
@@ -452,13 +447,12 @@ export function AddEventScreen({ navigation, route }: Props) {
             ...payload,
             clientRequestId: createRequestRef.current.id,
           });
-          ({ reminderDelivery, syncStatus } = created);
+          ({ reminderDelivery } = created);
           createdEventRef = created.eventRef;
           if (followup) createdFollowupEventRef.current = createdEventRef;
         }
         if (followup) {
           followupEventSaved = true;
-          if (!meetingScopeKey) throw new Error('当前登录状态无法关联后续日程');
           await linkMeetingActionFollowup(followup, meetingScopeKey, createdEventRef.sourceEventId);
         }
       }
@@ -472,9 +466,9 @@ export function AddEventScreen({ navigation, route }: Props) {
             ? '日程已发生变化'
             : '保存失败',
         message: followupEventSaved
-          ? '再次点击保存可重试关联，不会重复创建日程。'
+          ? '日程已保存，但未能关联到会议。'
           : error instanceof HttpResponseError && error.status === 409
-            ? '该日程可能已在其他设备修改，请返回后重新打开再编辑。'
+            ? '该日程内容已发生变化，请返回后重新打开再编辑。'
             : readableErrorMessage(error, '请检查网络后重试'),
         tone: followupEventSaved || (error instanceof HttpResponseError && error.status === 409)
           ? 'warning'
@@ -485,9 +479,7 @@ export function AddEventScreen({ navigation, route }: Props) {
 
     if (!isSaveRunActive(runId)) return;
     let reminderWarning: string | undefined;
-    if (syncStatus === 'pending') {
-      reminderWarning = '保存请求已记录，将在网络恢复后自动确认。';
-    } else if (reminderDelivery === 'unavailable') {
+    if (reminderDelivery === 'unavailable') {
       try {
         reminderWarning = await reminderUnavailableMessage();
       } catch {
@@ -511,7 +503,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     }
     if (reminderWarning) {
       showDialog({
-        title: syncStatus === 'pending' ? '日程等待同步' : '日程已保存',
+        title: '日程已保存',
         message: reminderWarning,
         tone: 'warning',
       });

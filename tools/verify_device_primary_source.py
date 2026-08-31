@@ -1,237 +1,213 @@
 #!/usr/bin/env python3
-"""Small source contract check for the device-primary cutover.
-
-This is intentionally a static check, not a claim that all runtime services
-have been validated.  It catches accidental reintroduction of account/sync
-providers and speaker-name uploads in a candidate APK.
-"""
+"""Static source gate for LaoJi's accountless, device-primary runtime."""
 
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import sys
+
+
+FORBIDDEN_RUNTIME_MARKERS = (
+    "/api/auth",
+    "/api/laoji",
+    "/api/guest",
+    "AuthStore",
+    "getFeatureFlags",
+    "featureFlags",
+)
+
+REMOVED_SYNC_PROVIDERS = (
+    "MeetingRootSyncProvider",
+    "MeetingActionSyncProvider",
+    "MeetingManualNoteSyncProvider",
+    "MeetingOccurrenceSyncProvider",
+    "MeetingSummarySyncProvider",
+    "MeetingTranscriptCompletionProvider",
+    "MeetingAttachmentSyncProvider",
+    "MeetingMarkerSyncProvider",
+    "MeetingSpeakerCorrectionSyncProvider",
+    "MeetingTagCatalogSyncProvider",
+)
+
+
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    app = (root / "App.tsx").read_text(encoding="utf-8")
-    auth_store = (root / "src/store/AuthStore.tsx").read_text(encoding="utf-8")
-    device_api = (root / "src/services/deviceApi.ts").read_text(encoding="utf-8")
-    media_import_provider = (root / "src/components/MeetingMediaImportProvider.tsx").read_text(encoding="utf-8")
-    schedule_client = (root / "src/services/api.ts").read_text(encoding="utf-8")
-    capabilities = (root / "src/data/api/v2/capabilities.ts").read_text(encoding="utf-8")
-    speakers = (root / "src/services/speakers.ts").read_text(encoding="utf-8")
-    summary = (root / "src/services/meetingSummary.ts").read_text(encoding="utf-8")
-    questions = (root / "src/services/meetingQuestions.ts").read_text(encoding="utf-8")
-    profile = (root / "src/native/profileEntrySnapshot.ts").read_text(encoding="utf-8")
-    meeting_live_android = (root / "src/screens/MeetingLiveScreen.android.tsx").read_text(encoding="utf-8")
-    transcription_android = (root / "src/screens/TranscriptionScreen.android.tsx").read_text(encoding="utf-8")
-    scope_telemetry = (root / "src/domain/meeting/scopeTelemetry.ts").read_text(encoding="utf-8")
-    meetings_store = (root / "src/store/MeetingsStore.tsx").read_text(encoding="utf-8")
-    recording_reconciliation = (root / "src/services/meetingRecordingReconciliation.ts").read_text(encoding="utf-8")
-    native_finalize = (root / "src/application/meeting/finalizeNativeMeetingRecording.ts").read_text(encoding="utf-8")
-    native_finalize_hook = (root / "src/hooks/useNativeMeetingRecordingFinalizer.ts").read_text(encoding="utf-8")
-    transfer_module = (root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/LaojiTransferModule.kt").read_text(encoding="utf-8")
-    upload_worker = (root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/MeetingUploadWorker.kt").read_text(encoding="utf-8")
-    device_v2_uploader = (root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/DeviceV2R2Uploader.kt").read_text(encoding="utf-8")
-    navigation = (root / "src/navigation/index.tsx").read_text(encoding="utf-8")
+    required = {
+        "app": root / "App.tsx",
+        "local_profile": root / "src/store/LocalProfileStore.tsx",
+        "events": root / "src/store/EventsStore.tsx",
+        "meetings": root / "src/store/MeetingsStore.tsx",
+        "device_identity": root / "src/services/deviceIdentity.ts",
+        "device_api": root / "src/services/deviceApi.ts",
+        "device_v2_api": root / "src/services/deviceV2Api.ts",
+        "current_address": root / "src/services/currentAddress.ts",
+        "reverse_geocoder": root / "src/services/reverseGeocoder.ts",
+        "schedule": root / "src/services/scheduleParsing.ts",
+        "speakers": root / "src/services/speakers.ts",
+        "summary": root / "src/services/meetingSummary.ts",
+        "questions": root / "src/services/meetingQuestions.ts",
+        "meeting_repository": root / "src/data/repositories/sqliteMeetingNoteRepository.ts",
+        "upload_reconcile": root / "src/application/meeting/reconcileMeetingAudioUpload.ts",
+        "navigation": root / "src/navigation/index.tsx",
+        "transfer": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/LaojiTransferModule.kt",
+        "worker": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/MeetingUploadWorker.kt",
+        "uploader": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/transfer/DeviceV2R2Uploader.kt",
+        "media_picker_module": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/LaojiMediaImportModule.kt",
+        "media_picker_bridge": root / "modules/laoji-native-platform/src/mediaImport.ts",
+        "media_picker_contract": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/mediaimport/MeetingMediaPicker.kt",
+        "media_import_support": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/mediaimport/MediaImportSupport.kt",
+        "voice_host": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceHostView.kt",
+    }
     failures: list[str] = []
+    for name, path in required.items():
+        if not path.is_file():
+            failures.append(f"缺少设备主链文件 {name}: {path.relative_to(root)}")
+    if failures:
+        return report(failures)
 
-    removed_providers = (
-        "MeetingRootSyncProvider",
-        "MeetingActionSyncProvider",
-        "MeetingManualNoteSyncProvider",
-        "MeetingOccurrenceSyncProvider",
-        "MeetingSummarySyncProvider",
-        "MeetingTranscriptCompletionProvider",
-        "MeetingAttachmentSyncProvider",
-        "MeetingMarkerSyncProvider",
-        "MeetingSpeakerCorrectionSyncProvider",
-        "MeetingTagCatalogSyncProvider",
+    source = {name: read(path) for name, path in required.items()}
+    if (root / "src/store/AuthStore.tsx").exists():
+        failures.append("账号 AuthStore 仍存在于运行时代码")
+    if (root / "src/services/api.ts").exists():
+        failures.append("旧账号/guest API 聚合文件仍存在")
+    legacy_api_dir = root / "src/data/api/v2"
+    if legacy_api_dir.exists() and any(legacy_api_dir.glob("*.ts")):
+        failures.append("旧 /api/laoji 客户端目录仍包含 TypeScript 运行文件")
+
+    runtime_files = sorted((root / "src").rglob("*.ts")) + sorted((root / "src").rglob("*.tsx"))
+    for path in runtime_files:
+        text = read(path)
+        for marker in FORBIDDEN_RUNTIME_MARKERS:
+            if marker in text:
+                failures.append(f"{path.relative_to(root)} 重新引入已退役账号运行标记: {marker}")
+
+    native_runtime_roots = (
+        root / "modules/laoji-native-platform/src",
+        root / "modules/laoji-native-platform/android/src/main",
     )
-    for marker in removed_providers:
-        if marker in app:
-            failures.append(f"App.tsx 仍挂载账号同步 Provider: {marker}")
-    if "mode: 'guest'" not in auth_store or "session: null" not in auth_store or "accessToken: null" not in auth_store:
-        failures.append("AuthStore 未固定为本机 guest/session-null/device-only 模式")
-    if "@laoji:deviceSpeakerNames:v1" not in speakers:
+    native_runtime_files = sorted(
+        path
+        for native_root in native_runtime_roots
+        for suffix in ("*.ts", "*.tsx", "*.kt", "*.java")
+        for path in native_root.rglob(suffix)
+    )
+    for path in native_runtime_files:
+        if "user:" in read(path):
+            failures.append(f"{path.relative_to(root)} 重新引入账号 user scope")
+    for retired_sync_delete in ("DELETE FROM sync_outbox", "DELETE FROM sync_conflicts"):
+        if retired_sync_delete in source["meeting_repository"]:
+            failures.append(f"本机会议删除仍清理已退役账号同步表: {retired_sync_delete}")
+
+    if "LocalProfileProvider" not in source["app"] or "LocalProfileStore" not in source["app"]:
+        failures.append("App 未由 LocalProfileProvider 持有本机资料")
+    if "LOCAL_PROFILE_SCOPE = 'guest'" not in source["local_profile"]:
+        failures.append("LocalProfileStore 未固定历史兼容 scope 为 guest")
+    for marker in REMOVED_SYNC_PROVIDERS:
+        if marker in source["app"]:
+            failures.append(f"App 仍挂载账号同步 Provider: {marker}")
+
+    if "const scope = 'guest'" not in source["events"] or "loadLocalScheduleEvents" not in source["events"]:
+        failures.append("日程 Store 未固定为本机 guest/SQLite 所有者")
+    for marker in (
+        "const scope = 'guest'",
+        "buildStableCanonicalMeetingProjection(scope, 'roots')",
+        "buildStableCanonicalMeetingProjection(scope, 'full')",
+    ):
+        if marker not in source["meetings"]:
+            failures.append(f"会议 Store 缺少 canonical/device 所有权合同: {marker}")
+
+    for marker in ("registerDevice", "ensureDeviceReady", "/api/device/v1"):
+        if marker not in source["device_api"]:
+            failures.append(f"device-v1 服务合同缺失: {marker}")
+    for marker in ("/api/device/v2", "/auth/tokens", "/bootstrap"):
+        if marker not in source["device_v2_api"]:
+            failures.append(f"device-v2 会话合同缺失: {marker}")
+    for marker in ("deviceToken", "dataEpoch"):
+        if marker not in source["current_address"]:
+            failures.append(f"地址反查缺少设备鉴权快照字段: {marker}")
+    for marker in ("authorization: `Bearer ${deviceAuthorization.token}`", "'x-laoji-data-epoch': deviceAuthorization.dataEpoch"):
+        if marker not in source["reverse_geocoder"]:
+            failures.append(f"地址反查请求缺少设备数据域鉴权头: {marker}")
+    for marker in (
+        "parseScheduleRemotely(",
+        "parseScheduleAudioRemotely(",
+        "parseScheduleGraphV2(",
+        "clarifyScheduleGraphV2(",
+    ):
+        if marker not in source["schedule"]:
+            failures.append(f"设备日程解析链缺失: {marker}")
+    if "@laoji:deviceSpeakerNames:v1" not in source["speakers"]:
         failures.append("讲话人显示名称没有本机映射存储")
-    if "name: name.trim()" in device_api or "name: name" in device_api:
-        failures.append("设备讲话人请求仍可能上传用户姓名")
-    if "parseScheduleRemotely(" not in schedule_client:
-        failures.append("复杂日程解析没有走设备服务接口")
-    if "clarifyScheduleRemotely(" not in schedule_client:
-        failures.append("日程补充解析没有走设备服务接口")
-    if "loadDeviceServiceCapabilities" not in media_import_provider:
-        failures.append("文件/视频导入能力探测没有走设备服务接口")
-    if "loadMeetingCapabilities" in media_import_provider or "/api/laoji/capabilities" in media_import_provider:
-        failures.append("文件/视频导入仍依赖旧账号能力接口")
-    if "账号能力接口需要登录" not in capabilities:
-        failures.append("旧账号能力接口缺少无令牌 fail-closed 保护")
-    if "if (!options.accessToken?.trim()) throw new Error('账号能力接口需要登录')" not in capabilities:
-        failures.append("账号能力缓存路径仍可能在无令牌时返回旧能力")
-    if "export async function loadDeviceServiceCapabilities" not in device_api:
-        failures.append("设备能力探测函数缺失")
-    if "request<any>('/capabilities'" not in device_api:
-        failures.append("设备能力探测没有调用设备鉴权端点")
-    if "parseScheduleAudioRemotely(" not in schedule_client:
-        failures.append("日程语音解析没有走设备服务接口")
-    for legacy_schedule_call in (
-        "fetch(meetingUrl('/api/laoji/parse'",
-        "fetch(meetingUrl('/api/laoji/clarify'",
-        "fetch(meetingUrl('/api/laoji/parse-audio'",
-    ):
-        if legacy_schedule_call in schedule_client:
-            failures.append(f"移动端日程服务仍直接调用旧接口: {legacy_schedule_call}")
-    if "retain_generated_result" not in summary or "retain_generated_result" not in questions:
-        failures.append("整理/问答没有携带生成结果保留开关")
-    if "generateGuestMeetingSummary" in summary or "fetchGuestMeetingSummaryTask" in summary:
-        failures.append("设备整理仍保留旧 guest-summary 回退链路")
-    for marker in ("guestSession", "deleteGuestSession", "deleteGuestRealtimeSession"):
-        if marker in native_finalize or marker in native_finalize_hook:
-            failures.append(f"设备录音收尾仍保留旧 guest 会话路径: {marker}")
-    guest_branch_start = questions.find("if (input.scopeKey === 'guest'")
-    guest_branch_end = questions.find("  } else {", guest_branch_start)
-    if guest_branch_start >= 0 and guest_branch_end > guest_branch_start:
-        guest_branch = questions[guest_branch_start:guest_branch_end]
-        if "askLegacy" in guest_branch:
-            failures.append("设备问答仍可能回退到旧 guest 问答接口并上传本机转写")
-    if "打开设置" not in profile or "打开个人资料" in profile:
-        failures.append("原生设置入口仍使用个人资料语义")
+    if "generateMeetingSummaryViaSourceStream(" not in source["summary"]:
+        failures.append("整理未固定使用 source-stream v3 主链")
+    if "askQ2MeetingQuestion(" not in source["questions"]:
+        failures.append("会议问答未固定使用 Q2 设备主链")
 
-    # Speaker enrollment/management has a device/epoch implementation and is
-    # intentionally available without an account.  A stale login-only guard
-    # in the detail-page entry would make the implemented device service
-    # unreachable while still passing API-level checks.
-    if "登录后管理讲话人" in transcription_android:
-        failures.append("会议详情的讲话人入口仍把设备服务错误地阻断为登录功能")
-    if "navigation.navigate('SpeakerManager')" not in transcription_android:
-        failures.append("访客讲话人入口未能打开本机讲话人管理")
-    if "navigation.navigate('SpeakerEnrollment', { speakerId })" not in transcription_android:
-        failures.append("访客讲话人入口未能打开本机讲话人详情")
-    if "canManageSpeakers: Boolean(meeting)" not in transcription_android:
-        failures.append("会议详情仍把本机讲话人管理错误限制为登录账号")
-    if "const meetingActionCollaborationEnabled = !isGuest" not in transcription_android:
-        failures.append("设备模式仍可能暴露只能登录使用的共享待办入口")
-    if "fetchDeviceSpeakerProfiles, fetchSpeakers" not in transcription_android:
-        failures.append("设备讲话人修改面板没有加载本机讲话人资料")
-
-    # WorkManager is the owner of device-v2 recovery. These checks keep the
-    # durable path from silently regressing to a foreground-only upload or
-    # placing a bearer token in persisted WorkManager input data.
-    for marker in (
-        "NetworkType.CONNECTED",
-        "BackoffPolicy.EXPONENTIAL",
-        "ExistingWorkPolicy.KEEP",
-        "laoji-device-v2-r2:",
-        "MeetingUploadWorker.KEY_FILE_URI",
-        "MeetingUploadWorker.KEY_DEVICE_EPOCH_ID",
-    ):
-        if marker not in transfer_module:
-            failures.append(f"device-v2 WorkManager 合同缺失: {marker}")
-    if "MeetingUploadWorker.KEY_ACCESS_TOKEN" in transfer_module:
-        failures.append("WorkManager 输入仍可能持久化 bearer token")
-    for marker in (
-        "PROTOCOL_DEVICE_V2_R2",
-        "DeviceV2R2Uploader",
-        "Result.retry()",
-    ):
-        if marker not in upload_worker:
-            failures.append(f"device-v2 worker 恢复路径缺失: {marker}")
-    if "DeviceV2LeaseRefresher" not in device_v2_uploader:
-        failures.append("device-v2 worker 缺少设备令牌续期路径")
-    assignment_use_case = (root / "src/application/meeting/updateMeetingSpeakerAssignment.ts").read_text(encoding="utf-8")
-    assignment_repository = (root / "src/data/repositories/sqliteMeetingNoteRepository.ts").read_text(encoding="utf-8")
-    if "input.scope === 'future_profile'\n      && (!speakerProfileId || !consentToProfileUpdate)" not in assignment_use_case:
-        failures.append("设备讲话人修改仍被错误限制为登录账号")
-    if "input.scope === 'future_profile'\n      && (!input.speakerProfileId || !input.consentToProfileUpdate)" not in assignment_repository:
-        failures.append("本机讲话人修正仓库仍拒绝设备声纹资料关联")
-
-    # Account/profile screens remain as fail-closed compatibility source, but
-    # the device-primary product must never register them in the production
-    # navigator. This is a runtime-entry gate, not a claim that the dead
-    # compatibility files have been deleted.
     for forbidden_route in (
-        'name="Login"',
-        'name="Account"',
-        'name="Profile"',
-        'name="ProfileField"',
-        'name="ChangePassword"',
-        'name="AccountDeletion"',
-        'name="SharedAction"',
+        'name="Login"', 'name="Account"', 'name="Profile"', 'name="ProfileField"',
+        'name="ChangePassword"', 'name="AccountDeletion"', 'name="SharedAction"',
         'name="SharedMeetingContent"',
     ):
-        if forbidden_route in navigation:
+        if forbidden_route in source["navigation"]:
             failures.append(f"生产导航仍暴露去账号化后禁止的入口: {forbidden_route}")
-    if 'initialRouteName="MainTabs"' not in navigation:
+    if 'initialRouteName="MainTabs"' not in source["navigation"]:
         failures.append("生产导航未以本机主界面作为初始入口")
 
-    # The historical SQLite scope key is intentionally retained for one-time
-    # compatibility, but runtime audit events must identify its real owner and
-    # network path.  This prevents a `scope=guest` line from being mistaken for
-    # a call to the retired anonymous HTTP endpoints.
-    for marker in ("scope_kind", "network_path", "device-local", "device-v1"):
-        if marker not in scope_telemetry:
-            failures.append(f"设备域审计标记缺失: {marker}")
-    if "scopeTelemetry(scope, 'none')" not in meetings_store:
-        failures.append("本机会议镜像未明确标记为无网络本地投影")
-    if "scopeTelemetry(scopeKey, 'none')" not in recording_reconciliation:
-        failures.append("原生录音恢复未明确标记为无网络本地恢复")
-    if "scopeTelemetry(scope as ScopeKey, mode === 'guest' ? 'device-v1' : 'account-api')" not in meetings_store:
-        failures.append("待上传队列未明确标记设备服务网络路径")
-
-    # Account-compatible functions keep their old optional-token signatures
-    # for source compatibility, but no caller is allowed to turn an omitted
-    # token into an unauthenticated request. Check each network-facing legacy
-    # function has the common fail-closed guard before the first fetch.
-    api = schedule_client
-    account_functions = (
-        "saveEvent",
-        "fetchEvents",
-        "deleteEvent",
-        "updateEvent",
-        "fetchMeetings",
-        "createMeeting",
-        "updateMeeting",
-        "fetchMeetingTranscriptSnapshot",
-        "fetchMeetingSummaryDetail",
-        "generateMeetingSummary",
-        "fetchMeetingSummaryTask",
-        "fetchMeetingAudioInfo",
-        "uploadMeetingAudio",
-        "deleteMeeting",
-    )
-    guard_marker = "requireAccountAccessToken(accessToken"
-    for function_name in account_functions:
-        start = api.find(f"export async function {function_name}")
-        if start < 0:
-            failures.append(f"账号兼容函数缺失或改名，未能审计: {function_name}")
-            continue
-        next_function = api.find("\nexport ", start + 1)
-        body = api[start: next_function if next_function >= 0 else len(api)]
-        if guard_marker not in body:
-            failures.append(f"账号兼容函数未 fail-closed: {function_name}")
-
-    # Android is the production target for the current APK. Its guest path
-    # must not retain the transient guest-session protocol or the old summary
-    # endpoint. These strings are intentionally absent from the platform
-    # files; compatibility helpers may remain in api.ts for old account builds.
     for marker in (
-        "createGuestRealtimeSession",
-        "deleteGuestRealtimeSession",
-        "guest_token",
-        "guestToken",
-        "fetchGuestMeeting",
-        "generateGuestMeetingSummary",
+        "NetworkType.CONNECTED", "BackoffPolicy.EXPONENTIAL", "ExistingWorkPolicy.KEEP",
+        "laoji-device-v2-r2:", "MeetingUploadWorker.KEY_FILE_URI",
+        "MeetingUploadWorker.KEY_DEVICE_EPOCH_ID",
     ):
-        if marker in meeting_live_android or marker in transcription_android:
-            failures.append(f"Android guest 运行路径仍保留旧会话/兼容接口: {marker}")
+        if marker not in source["transfer"]:
+            failures.append(f"device-v2 WorkManager 合同缺失: {marker}")
+    if "MeetingUploadWorker.KEY_ACCESS_TOKEN" in source["transfer"]:
+        failures.append("WorkManager 输入仍可能持久化 bearer token")
+    for marker in ('AsyncFunction("getUploadState") Coroutine', "withContext(Dispatchers.IO)"):
+        if marker not in source["transfer"]:
+            failures.append(f"WorkManager 完成态读取仍可能阻塞 UI/模块执行队列: {marker}")
+    if "canonicalRecordingSourceSha256(checksumText)" not in source["upload_reconcile"]:
+        failures.append("上传完成态未同时接受历史裸哈希与 canonical sha256 前缀")
+    for marker in ("PROTOCOL_DEVICE_V2_R2", "DeviceV2R2Uploader", "Result.retry()"):
+        if marker not in source["worker"]:
+            failures.append(f"device-v2 worker 恢复路径缺失: {marker}")
+    if "DeviceV2LeaseRefresher" not in source["uploader"]:
+        failures.append("device-v2 worker 缺少设备令牌续期路径")
 
+    # File selection is owned by one lifecycle-safe native path. A second JS
+    # picker is not a fallback when both depend on Expo's Activity registry.
+    for marker in ("OnActivityResult", "appContext.currentActivity", "startActivityForResult", "MEDIA_PICKER_REQUEST_CODE"):
+        if marker not in source["media_picker_module"]:
+            failures.append(f"会议文件选择缺少 Activity 重建恢复合同: {marker}")
+    for marker in ("RegisterActivityContracts", "AppContextActivityResultLauncher"):
+        if marker in source["media_picker_module"]:
+            failures.append(f"会议文件选择重新依赖 Activity 绑定 launcher: {marker}")
+    if "ExpoFileSystemFile.pickFileAsync" in source["media_picker_bridge"]:
+        failures.append("会议文件选择重新引入共享同一失效注册表的伪回退")
+    if "supportedMeetingMediaMimeTypes" not in source["media_import_support"]:
+        failures.append("会议导入能力缺少统一 MIME 类型所有者")
+    for marker in ("supportedMeetingMediaMimeTypes", "supportedAudioMeetingMediaMimeTypes"):
+        if marker not in source["media_picker_contract"]:
+            failures.append(f"会议文件选择未复用真实导入能力白名单: {marker}")
+
+    # Voice input is an authored capture surface, not a demo form. Examples
+    # belong in tests and onboarding, never as a prefilled-looking field hint.
+    if re.search(r'input\.hint\s*=\s*"[^"\\n]+"', source["voice_host"]):
+        failures.append("语音新建输入框重新出现示例句占位")
+
+    return report(failures)
+
+
+def report(failures: list[str]) -> int:
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
-    print("PASS: 本机主数据、匿名讲话人、生成保留开关和账号同步入口合同成立")
+    print("PASS: 本机资料、canonical SQLite 与 device-v1/v2 服务是唯一移动端运行链")
     return 0
 
 

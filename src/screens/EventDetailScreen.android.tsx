@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { StyleSheet, ToastAndroid, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -16,7 +16,6 @@ import {
 } from '../components/MeetingSeriesCarryForwardSheet';
 import { useEvents } from '../store/EventsStore';
 import { useMeetings } from '../store/MeetingsStore';
-import { useAuth } from '../store/AuthStore';
 import type { EventRecurrenceScope, RootStackParamList } from '../types';
 import { resolveEventReference } from '../utils/eventRecurrence';
 import { eventRefForEvent } from '../utils/eventIdentity';
@@ -29,7 +28,7 @@ import {
   buildNativeCalendarDetailSnapshot,
   buildNativeCalendarSeriesMemorySnapshot,
 } from '../native/nativeCalendarPages';
-import { isScopeKey, type ScopeKey } from '../domain/meeting';
+import type { ScopeKey } from '../domain/meeting';
 import {
   resolveOccurrenceMeeting,
   type OccurrenceMeetingProjection,
@@ -43,18 +42,7 @@ import {
   resolveMeetingSeriesMemory,
   type MeetingSeriesMemoryProjection,
 } from '../services/meetingSeriesMemory';
-import { pullOccurrenceMeeting } from '../services/meetingOccurrencePull';
 import { setOccurrenceMeetingLinkState } from '../services/meetingOccurrenceLifecycle';
-import {
-  loadMeetingOccurrenceSyncConflict,
-  type MeetingOccurrenceSyncConflictView,
-} from '../services/meetingOccurrenceConflicts';
-import {
-  MeetingOccurrenceSyncConflictChangedError,
-  resolveMeetingOccurrenceSyncConflict,
-} from '../application/meeting/resolveMeetingOccurrenceSyncConflict';
-import { mergeDetachedMeetingRecordings } from '../application/meeting';
-import { MeetingOccurrenceConflictSheet } from '../components/MeetingOccurrenceConflictSheet';
 import { diagnosticWarn } from '../services/diagnostics';
 import { Colors as C } from '../theme/colors';
 
@@ -71,8 +59,7 @@ type ScopeRequest = {
 // CAL-DETAIL-001 / CAL-REPEAT-RRULE-001 / UI-OVERLAY-001: the route coordinates repository semantics only.
 export function EventDetailScreen({ navigation, route }: Props) {
   const { events, searchableEvents, deleteEvent, refreshEvents } = useEvents();
-  const { createMeeting, refreshMeetings } = useMeetings();
-  const { mode, session, accessToken } = useAuth();
+  const { createMeeting } = useMeetings();
   const { showDialog } = useAppDialog();
   const [deleting, setDeleting] = useState(false);
   const [scopeRequest, setScopeRequest] = useState<ScopeRequest | null>(null);
@@ -81,10 +68,6 @@ export function EventDetailScreen({ navigation, route }: Props) {
   const [seriesMemory, setSeriesMemory] = useState<MeetingSeriesMemoryProjection | null>(null);
   const [seriesMemoryPhase, setSeriesMemoryPhase] = useState<'loading' | 'ready' | 'error'>('ready');
   const [carrySheetVisible, setCarrySheetVisible] = useState(false);
-  const [occurrenceConflict, setOccurrenceConflict] = useState<MeetingOccurrenceSyncConflictView | null>(null);
-  const [occurrenceConflictVisible, setOccurrenceConflictVisible] = useState(false);
-  const [occurrenceConflictSaving, setOccurrenceConflictSaving] = useState(false);
-  const [occurrenceConflictError, setOccurrenceConflictError] = useState('');
   const meetingActionBusyRef = useRef(false);
   const meetingProjectionRequestRef = useRef(0);
   const seriesMemoryRequestRef = useRef(0);
@@ -92,14 +75,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
     [...events, ...(searchableEvents ?? [])],
     route.params.eventRef,
   ) ?? undefined, [events, route.params.eventRef, searchableEvents]);
-  const scopeKey = useMemo<ScopeKey | null>(() => {
-    const candidate = mode === 'guest'
-      ? 'guest'
-      : mode === 'authenticated' && session
-        ? `user:${session.user.id}`
-        : '';
-    return isScopeKey(candidate) ? candidate : null;
-  }, [mode, session?.user.id]);
+  const scopeKey: ScopeKey = 'guest';
 
   const refreshMeetingProjection = useCallback(async () => {
     const request = ++meetingProjectionRequestRef.current;
@@ -109,16 +85,14 @@ export function EventDetailScreen({ navigation, route }: Props) {
       return;
     }
     setMeetingActionPhase('loading');
-    let localProjection: OccurrenceMeetingProjection | null = null;
-    let reactivated = 0;
     try {
-      reactivated = await setOccurrenceMeetingLinkState({
+      await setOccurrenceMeetingLinkState({
         scopeKey,
         occurrence: eventRefForEvent(event),
         selection: 'occurrence',
         state: 'active',
       });
-      localProjection = await resolveOccurrenceMeeting(scopeKey, eventRefForEvent(event));
+      const localProjection = await resolveOccurrenceMeeting(scopeKey, eventRefForEvent(event));
       if (meetingProjectionRequestRef.current !== request) return;
       setMeetingProjection(localProjection);
       setMeetingActionPhase('ready');
@@ -127,32 +101,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
       setMeetingActionPhase('error');
       return;
     }
-    if (reactivated > 0) return;
-    if (mode !== 'authenticated' || !accessToken) return;
-    try {
-      const pulled = await pullOccurrenceMeeting({
-        scopeKey,
-        occurrence: eventRefForEvent(event),
-        accessToken,
-        refreshRemoteMeetings: refreshMeetings,
-      });
-      if (meetingProjectionRequestRef.current !== request) return;
-      if (pulled.outcome === 'meeting_unavailable') {
-        setMeetingProjection(localProjection);
-        setMeetingActionPhase(localProjection ? 'ready' : 'preparing');
-        return;
-      }
-      const projection = await resolveOccurrenceMeeting(scopeKey, eventRefForEvent(event));
-      if (meetingProjectionRequestRef.current !== request) return;
-      setMeetingProjection(projection);
-      setMeetingActionPhase('ready');
-    } catch {
-      // Remote lookup is additive. Offline recording remains available from the local result.
-      if (meetingProjectionRequestRef.current !== request) return;
-      setMeetingProjection(localProjection);
-      setMeetingActionPhase('ready');
-    }
-  }, [accessToken, event, mode, refreshMeetings, scopeKey]);
+  }, [event, scopeKey]);
 
   const refreshSeriesMemory = useCallback(async () => {
     const request = ++seriesMemoryRequestRef.current;
@@ -205,20 +154,10 @@ export function EventDetailScreen({ navigation, route }: Props) {
       return { kind: 'retry' as const, label: '重试', statusLabel: '会议状态暂时无法读取', enabled: true };
     }
     if (meetingProjection) {
-      if (meetingProjection.syncConflict && meetingProjection.action === 'view') {
-        return {
-          kind: 'resolve' as const,
-          label: '处理关联',
-          statusLabel: '需要确认日程关联',
-          enabled: true,
-        };
-      }
       return {
         kind: meetingProjection.action,
         label: meetingProjection.label,
-        statusLabel: meetingProjection.syncConflict
-          ? '日程关联待确认'
-          : meetingProjection.statusLabel,
+        statusLabel: meetingProjection.statusLabel,
         enabled: true,
       };
     }
@@ -239,49 +178,6 @@ export function EventDetailScreen({ navigation, route }: Props) {
     if (meetingActionPhase === 'loading' || meetingActionPhase === 'preparing') return;
     if (meetingActionPhase === 'error') {
       await refreshMeetingProjection();
-      return;
-    }
-    if (meetingProjection?.syncConflict && meetingProjection.action === 'view') {
-      meetingActionBusyRef.current = true;
-      try {
-        const occurrence = eventRefForEvent(event);
-        let conflict = await loadMeetingOccurrenceSyncConflict(scopeKey, occurrence);
-        if (conflict?.kind === 'remote_meeting_unavailable' && mode === 'authenticated' && accessToken) {
-          await refreshMeetings();
-          conflict = await loadMeetingOccurrenceSyncConflict(scopeKey, occurrence);
-        }
-        if (!conflict) {
-          await refreshMeetingProjection();
-          showDialog({
-            title: '日程关联已变化',
-            message: '请重新打开日程后再试。',
-            tone: 'info',
-          });
-          return;
-        }
-        if (!conflict.canResolve) {
-          const message = conflict.kind === 'remote_meeting_unavailable'
-            ? '云端会议尚未同步到本机，请联网后重试。'
-            : conflict.kind === 'same_meeting_divergence'
-              ? '日程计划信息存在差异，当前不能自动处理。'
-              : conflict.kind === 'target_not_attachable'
-                ? '日程当前关联的会议已有其他日程信息，不能自动处理。'
-              : '日程关联信息不完整，请刷新后重试。';
-          showDialog({ title: '暂时无法处理关联', message, tone: 'error' });
-          return;
-        }
-        setOccurrenceConflict(conflict);
-        setOccurrenceConflictError('');
-        setOccurrenceConflictVisible(true);
-      } catch {
-        showDialog({
-          title: '暂时无法处理关联',
-          message: '云端会议状态暂时无法读取，请检查网络后重试。',
-          tone: 'error',
-        });
-      } finally {
-        meetingActionBusyRef.current = false;
-      }
       return;
     }
     meetingActionBusyRef.current = true;
@@ -312,55 +208,10 @@ export function EventDetailScreen({ navigation, route }: Props) {
     event,
     meetingActionPhase,
     meetingProjection,
-    mode,
     navigation,
-    accessToken,
-    refreshMeetings,
     refreshMeetingProjection,
     scopeKey,
     showDialog,
-  ]);
-
-  const resolveOccurrenceConflict = useCallback(async () => {
-    if (!event || !scopeKey || !occurrenceConflict || occurrenceConflictSaving) return;
-    setOccurrenceConflictSaving(true);
-    setOccurrenceConflictError('');
-    try {
-      const result = await resolveMeetingOccurrenceSyncConflict({
-        conflictId: occurrenceConflict.id,
-        scopeKey,
-        occurrence: eventRefForEvent(event),
-      });
-      if (result.recordingMergeTaskIds.length > 0) {
-        const merged = await mergeDetachedMeetingRecordings(scopeKey, result.targetMeetingId);
-        if (merged.blockedCount > 0) {
-          ToastAndroid.show('日程关联已处理，部分本机录音无法读取。', ToastAndroid.LONG);
-        } else if (merged.failedCount > 0) {
-          ToastAndroid.show('日程关联已处理，本机录音可在会议详情重试加入。', ToastAndroid.LONG);
-        } else if (merged.waitingCount > 0) {
-          ToastAndroid.show('日程关联已处理，录音结束后可在会议详情加入。', ToastAndroid.LONG);
-        }
-      }
-      setOccurrenceConflictVisible(false);
-      await refreshMeetings().catch(() => {});
-      await refreshMeetingProjection();
-    } catch (error) {
-      const message = error instanceof MeetingOccurrenceSyncConflictChangedError
-        ? error.message
-        : error instanceof Error && /[\u3400-\u9fff]/.test(error.message)
-          ? error.message
-          : '日程关联处理失败，请稍后重试。';
-      setOccurrenceConflictError(message);
-    } finally {
-      setOccurrenceConflictSaving(false);
-    }
-  }, [
-    event,
-    occurrenceConflict,
-    occurrenceConflictSaving,
-    refreshMeetingProjection,
-    refreshMeetings,
-    scopeKey,
   ]);
 
   const removeEvent = useCallback(() => {
@@ -502,7 +353,6 @@ export function EventDetailScreen({ navigation, route }: Props) {
         collapsableChildren={false}
       >
         <LaojiCalendarDetailView
-          nativeID="feishu:CAL-REPEAT-RRULE-001:calendar-detail-recurrence-action-surface"
           style={styles.surface}
           snapshot={snapshot}
           onAction={value => handleAction(value.nativeEvent)}
@@ -522,17 +372,6 @@ export function EventDetailScreen({ navigation, route }: Props) {
         onCompleted={result => {
           navigation.navigate('Transcription', { meetingId: result.meetingId, focus: 'notes' });
         }}
-      />
-      <MeetingOccurrenceConflictSheet
-        visible={occurrenceConflictVisible}
-        conflict={occurrenceConflict}
-        saving={occurrenceConflictSaving}
-        error={occurrenceConflictError}
-        onClose={() => {
-          setOccurrenceConflictVisible(false);
-          setOccurrenceConflictError('');
-        }}
-        onResolve={() => { void resolveOccurrenceConflict(); }}
       />
     </ScreenContainer>
   );

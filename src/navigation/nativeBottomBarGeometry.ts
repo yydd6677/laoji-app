@@ -1,6 +1,6 @@
 import { StyleSheet } from 'react-native';
 
-// UI-SHELL-BOTTOM-MAIN-001: Feishu keeps a physical-pixel divider outside its 65dp bar.
+// UI-SHELL-BOTTOM-MAIN-001: keep a physical-pixel divider outside the 65dp bar.
 export const NATIVE_BOTTOM_BAR_CONTENT_HEIGHT = 65;
 export const NATIVE_BOTTOM_BAR_DIVIDER_HEIGHT = StyleSheet.hairlineWidth ?? 1;
 

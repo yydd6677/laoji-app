@@ -172,6 +172,17 @@ class LaojiRecorderModule : Module() {
       }
     }
 
+    AsyncFunction("attachDeviceV2") { options: DeviceV2RecorderStartOptions, promise: Promise ->
+      try {
+        settle(
+          RecorderServiceClient.attachRealtime(requireContext(), options.toConfig()),
+          promise,
+        ) { snapshot -> snapshot.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
     AsyncFunction("prewarmRealtime") { options: RecorderStartOptions, promise: Promise ->
       try {
         settle(
@@ -195,6 +206,46 @@ class LaojiRecorderModule : Module() {
           RecorderServiceClient.start(
             requireContext(),
             RecorderStartConfig.createLocal(sessionId, levelIntervalMs),
+          ),
+          promise,
+        ) { snapshot -> snapshot.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
+    AsyncFunction("startLocalMeeting") {
+        sessionId: String,
+        storageScope: String?,
+        levelIntervalMs: Double?,
+        promise: Promise ->
+      try {
+        settle(
+          RecorderServiceClient.start(
+            requireContext(),
+            RecorderStartConfig.createLocalMeeting(sessionId, storageScope, levelIntervalMs),
+          ),
+          promise,
+        ) { snapshot -> snapshot.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
+    AsyncFunction("startDeferredRealtimeMeeting") {
+        sessionId: String,
+        storageScope: String?,
+        levelIntervalMs: Double?,
+        promise: Promise ->
+      try {
+        settle(
+          RecorderServiceClient.start(
+            requireContext(),
+            RecorderStartConfig.createDeferredRealtimeMeeting(
+              sessionId,
+              storageScope,
+              levelIntervalMs,
+            ),
           ),
           promise,
         ) { snapshot -> snapshot.toMap() }

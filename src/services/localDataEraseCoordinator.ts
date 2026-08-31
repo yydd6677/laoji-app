@@ -9,10 +9,10 @@ import { clearNativeTransferLease } from '../native/nativeTransferCoordinator';
 import { clearNativeUpcomingEventsProjection } from 'laoji-native-platform';
 import { getOrCreateDeviceIdentity } from './deviceIdentity';
 import {
-  clearLegacyEpochCleanupJournal,
-  readLegacyEpochCleanupJournal,
-  writeLegacyEpochCleanupJournal,
-} from './legacyEpochCleanupJournal';
+  clearDeviceEpochCleanupJournal,
+  readDeviceEpochCleanupJournal,
+  writeDeviceEpochCleanupJournal,
+} from './deviceEpochCleanupJournal';
 import {
   beginDeviceV2PurgeOnlyErase,
   resumeDeviceV2PurgeOnlyErase,
@@ -40,7 +40,7 @@ function remotePurgeAlreadyConfirmed(error: unknown): boolean {
  */
 export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult> {
   let remoteCleanup: LocalDataEraseResult['remoteCleanup'] = 'confirmed';
-  let legacyRemotePending = false;
+  let deviceV1RemotePending = false;
   if (supportsPurgeOnlyJournal()) {
     try {
       const prepared = beginDeviceV2PurgeOnlyErase();
@@ -63,23 +63,23 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
   try {
     const identity = await getOrCreateDeviceIdentity();
     epochId = identity.epochId;
-    await writeLegacyEpochCleanupJournal(epochId, 'registering');
+    await writeDeviceEpochCleanupJournal(epochId, 'registering');
     await Promise.race([
       closeDeviceDataEpoch(),
       new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error('remote cleanup timeout')), 5_000);
       }),
     ]);
-    await writeLegacyEpochCleanupJournal(epochId, 'confirmed');
+    await writeDeviceEpochCleanupJournal(epochId, 'confirmed');
   } catch (error) {
     if (!remotePurgeAlreadyConfirmed(error)) {
       remoteCleanup = 'pending';
-      legacyRemotePending = true;
+      deviceV1RemotePending = true;
     }
     // Keep the opaque journal and identity so a later run can retry the
     // server-side purge.  Local business data is still erased below.
     if (epochId && remoteCleanup === 'pending') {
-      await writeLegacyEpochCleanupJournal(epochId, 'pending').catch(() => undefined);
+      await writeDeviceEpochCleanupJournal(epochId, 'pending').catch(() => undefined);
     }
   }
 
@@ -87,7 +87,7 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
     {
       name: 'native-transfer',
       run: async () => {
-        // v2 credentials are scoped by epoch, not by the legacy guest label.
+        // v2 credentials are scoped by epoch, not by the local guest label.
         // Clear both before local media deletion so no queued worker can wake
         // after the files have been erased.
         await clearNativeTransferLease('guest');
@@ -112,10 +112,10 @@ export async function eraseLocalInstallationData(): Promise<LocalDataEraseResult
     ...preDatabaseSteps.filter((_, index) => preResults[index]?.status === 'rejected').map(step => step.name),
     ...ownerSteps.filter((_, index) => ownerResults[index]?.status === 'rejected').map(step => step.name),
   ];
-  if (!legacyRemotePending) {
+  if (!deviceV1RemotePending) {
     try {
       await clearDeviceIdentity();
-      await clearLegacyEpochCleanupJournal();
+      await clearDeviceEpochCleanupJournal();
     } catch {
       failedSteps.push('device-identity');
     }
@@ -142,20 +142,20 @@ export async function resumePendingRemotePurge(): Promise<'none' | 'confirmed' |
       v2Pending = true;
     }
   }
-  const journal = await readLegacyEpochCleanupJournal();
+  const journal = await readDeviceEpochCleanupJournal();
   if (!journal || journal.state === 'confirmed') return v2Pending ? 'pending' : 'none';
   try {
     await closeDeviceDataEpoch();
     await clearDeviceIdentity();
-    await clearLegacyEpochCleanupJournal();
+    await clearDeviceEpochCleanupJournal();
     return v2Pending ? 'pending' : 'confirmed';
   } catch (error) {
     if (remotePurgeAlreadyConfirmed(error)) {
       await clearDeviceIdentity();
-      await clearLegacyEpochCleanupJournal();
+      await clearDeviceEpochCleanupJournal();
       return v2Pending ? 'pending' : 'confirmed';
     }
-    await writeLegacyEpochCleanupJournal(journal.epochId, 'pending').catch(() => undefined);
+    await writeDeviceEpochCleanupJournal(journal.epochId, 'pending').catch(() => undefined);
     return 'pending';
   }
 }

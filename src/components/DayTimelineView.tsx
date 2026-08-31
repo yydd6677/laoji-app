@@ -15,7 +15,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors as C, withAlpha } from '../theme/colors';
 import type { CalEvent } from '../types';
 import { selectTasksForDate } from '../utils/taskOrdering';
@@ -33,7 +33,6 @@ import {
   isSameDay,
   minutesToTime,
   sundayStartOfWeek,
-  timeToMinutes,
 } from '../utils/calendarDate';
 import { eventListTitle } from '../utils/eventTitle';
 import {

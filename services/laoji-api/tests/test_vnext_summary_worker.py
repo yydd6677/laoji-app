@@ -47,14 +47,6 @@ def test_summary_worker_lease_meets_restart_recovery_budget() -> None:
     assert 0 < worker_module.HEARTBEAT_SECONDS < worker_module.LEASE_SECONDS
 
 
-@pytest.mark.asyncio
-async def test_disabled_summary_worker_does_not_start(monkeypatch):
-    monkeypatch.setenv("LAOJI_VNEXT_SUMMARY_SOURCE_STREAM_ENABLED", "0")
-    worker = worker_module.VNextSummarySourceStreamWorker(scan_seconds=60)
-    worker.start()
-    assert worker._task is None
-
-
 def test_summary_worker_preserves_sanitized_generator_error_code() -> None:
     error = SummaryV3GenerationError(
         "SUMMARY_V3_FORMAT_INVALID",
@@ -69,7 +61,6 @@ def test_summary_worker_preserves_sanitized_generator_error_code() -> None:
 
 def test_start_bootstraps_source_schema_before_worker_scan(monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setenv("LAOJI_VNEXT_SUMMARY_SOURCE_STREAM_ENABLED", "1")
     monkeypatch.setattr(
         worker_module.vnext_source_stream_store,
         "ensure_vnext_source_stream_schema",

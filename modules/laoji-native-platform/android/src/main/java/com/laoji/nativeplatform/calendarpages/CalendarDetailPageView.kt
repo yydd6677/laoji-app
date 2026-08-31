@@ -18,13 +18,11 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.view.ViewGroup
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("CAL-DETAIL-EDIT-001", "UI-TITLE-COMMON-001")
 class CalendarDetailPageView(
   context: Context,
   appContext: AppContext,

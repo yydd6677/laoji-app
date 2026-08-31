@@ -148,7 +148,7 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     )
     if (result.consumedY == 0) return
     setHeaderCollapseOffset(result.collapseOffsetPx)
-    // Feishu consumes the whole nested-scroll frame even when scrollTo clamps at an edge.
+    // Consume the whole nested-scroll frame even when scrollTo clamps at an edge.
     consumed[1] += result.consumedY
   }
 
