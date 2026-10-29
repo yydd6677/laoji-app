@@ -22,8 +22,8 @@
 可以被提取，不能当作秘密或与其他用途的 secret 复用。本目录不提供占位凭据。ASR 模型
 revision 必须替换为实际固定 revision。
 
-安装或切换后依次执行 `systemctl --user daemon-reload`、重启三个服务，并分别检查
-`/api/ready`、`/ready` 和 Ollama 模型列表。公网仍只由现有 Cloudflare/Nginx 入口连接 API，
+安装或切换后依次执行 `systemctl --user daemon-reload`、启动相应服务，并分别检查
+`/api/ready`、`/ready` 和 Ollama 模型列表。公网通过 Cloudflare Tunnel 或 HTTPS 反向代理连接 API，
 不得直接暴露三个内部端口。
 
 静态检查：
@@ -32,5 +32,4 @@ revision 必须替换为实际固定 revision。
 python3 tools/verify_deployment_templates.py
 ```
 
-验证通过后仍需单独完成进程启动、真实 R2、重启恢复和双上传加实时回放；模板检查不等于
-生产验证。本目录只是模板，不表示当前服务器已部署这份工作树。
+静态检查覆盖模板配置；运行环境还需验证真实 R2、任务重启恢复，以及并发上传与实时录音。

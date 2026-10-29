@@ -60,8 +60,8 @@ __pycache__/
 
 # Local release and runtime artifacts are reproducible and never source inputs.
 /artifacts/
-# Local acceptance output may contain recordings, UI snapshots, device identity
-# and runtime diagnostics. Reviewed conclusions belong under docs/.
+# Acceptance output and work records remain local. Only edited project
+# documentation belongs in the public source tree.
 /output/
 /.laoji-android-build.lock
 /.laoji-metro-*.json
@@ -102,3 +102,16 @@ __pycache__/
 *~
 /archive/
 /backup*/
+
+# Public documentation is curated explicitly; internal plans and work logs
+# retain their local paths but are not part of source distribution.
+/docs/*
+!/docs/architecture.md
+!/docs/development.md
+!/docs/hardware/
+/docs/hardware/*
+!/docs/hardware/README.md
+!/docs/hardware/BLE-1.3.md
+/AGENTS.md
+/CLAUDE.md
+/.claude/
