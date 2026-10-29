@@ -1,6 +1,6 @@
-# LaoJi Test Board BLE 通信协议
+# BLE 1.3 通信协议
 
-本文档描述 App 与 `LaoJi Test Board` 之间的 BLE 控制、事件和实时音频协议。文中的 JSON 均为 UTF-8 编码，不带 BOM。
+本文定义老记录音设备的BLE控制、事件、实时音频及文件传输。`LaoJi Test Board` 为参考固件的广播名；JSON使用UTF-8编码，不带BOM。用途与采集上下文见[硬件接口](README.md)。
 
 ## 1. BLE 基础参数
 
@@ -37,7 +37,7 @@
 - `frame_id`：`1..65535`
 - `index`：`0..count-1`
 - `count`：`1..255`
-- 完整逻辑帧最大：~~48 KiB~~ **`min(48 * 1024, 255 * fragment_body_capacity)` bytes**
+- 完整逻辑帧最大： **`min(48 * 1024, 255 * fragment_body_capacity)` bytes**
 - MTU 517 时包长：`512 bytes`
 - MTU 517 时正文：`506 bytes`
 
@@ -73,7 +73,7 @@ JSON 请求和事件的 `flags` 必须为 0。失败应答允许使用 `flags.bi
 
 Control RX 上的 JSON 是请求。Control TX 上包含 `ok` 字段的 JSON 是应答，不包含 `ok` 字段的是事件。每个应答必须回传原请求的 `command_id`，App 使用 `command_id` 匹配请求与应答。
 
-发送方先组成一个完整 JSON 帧，再将整个帧作为第 2 节的分片 `body` 进行拆分。~~完整 JSON 帧最大为 48 KiB。~~ **完整 JSON 帧不得超过第 2 节按当前连接计算出的 `max_logical_frame_bytes`。**
+发送方先组成一个完整 JSON 帧，再将整个帧作为第 2 节的分片 `body` 进行拆分。 完整 JSON 帧不得超过第 2 节按当前连接计算出的 `max_logical_frame_bytes`。
 
 ### 3.2 音频帧
 
@@ -557,7 +557,7 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
 
 本节所有 JSON 命令都通过 BLE 发送：请求写入 Control RX，成功或失败应答从 Control TX 返回。`recording.list/get/rename/delete` 不要求开启 Wi-Fi。BLE 的 `recording.audio.read` 只读取 WAV 中的 PCM，Wi-Fi HTTP 则下载设备端完整 WAV 文件。
 
-所有录音文件操作都以 `/disk` 中的实际文件为准，每次请求都直接检查或操作磁盘，不依赖固定数量的内存文件缓存，也不创建隐藏元数据文件。`generation` 每次根据实际文件的修改时间和大小动态生成。
+录音文件操作以 `/disk` 中的实际文件为准，`generation` 根据文件修改时间和大小生成。参考固件可缓存已校验的元数据；缓存失效或文件变化时重新读取，不得用过期缓存替代文件版本检查。
 
 ### 8.1 recording.list
 
@@ -602,7 +602,7 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
 
 `recordings` 只返回文件对应的 `recording_id` 列表。`next_cursor` 为 `null` 表示没有下一页；否则将它原样作为下一次请求的 `cursor`。`limit` 范围为 1..32。需要 generation、文件大小和校验信息时，再调用 `recording.get`。
 
-源码固件 2.0.1 的可选列表扩展：请求携带 `include_previews: true` 时，每页上限收敛为 4，同时返回 `previews` 数组。每项仅含 `recording_id / generation / file_bytes / duration_ms / created_epoch_ms`，只读取文件头，不计算 PCM 校验值。预览不是完整元数据，接收及变更操作前仍调用 `recording.get`，不能用预览提交音频。未请求扩展的旧命令不变；不支持扩展的固件仅返回文件名时，App 展示标题而不编造时长、大小或代际。
+可选列表预览扩展：请求携带 `include_previews: true` 时，每页上限收敛为 4，同时返回 `previews` 数组。每项仅含 `recording_id / generation / file_bytes / duration_ms / created_epoch_ms`，只读取文件头，不计算 PCM 校验值。预览不是完整元数据，接收及变更操作前仍调用 `recording.get`，不能用预览提交音频。未请求扩展的旧命令不变；不支持扩展的固件仅返回文件名时，App 展示标题而不编造时长、大小或代际。
 
 ### 8.2 recording.get
 
@@ -676,7 +676,7 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
 }
 ```
 
-`recording.rename` 直接重命名 `/disk` 中的录音文件。成功后旧 `recording_id` 失效，后续请求必须使用~~应答中的新 `recording_id`~~ **本次请求中的 `new_recording_id`**。`new_recording_id` 必须是合法的单个文件名，不允许包含 `/` 或 `\`，也不能与现有文件重名；目标已存在时返回 `recording_already_exists`。重命名不改变文件内容，因此 `generation` 保持不变。
+`recording.rename` 直接重命名 `/disk` 中的录音文件。成功后旧 `recording_id` 失效，后续请求必须使用 本次请求中的 `new_recording_id`。`new_recording_id` 必须是合法的单个文件名，不允许包含 `/` 或 `\`，也不能与现有文件重名；目标已存在时返回 `recording_already_exists`。重命名不改变文件内容，因此 `generation` 保持不变。
 
 ### 8.4 recording.delete
 
@@ -805,7 +805,7 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
 
 录音 PCM 从 Audio TX 以独立音频帧发送，`kind = 0x11`。`stream_id` 等于 `recording.audio.read` 应答中的 `transfer.stream_id`，`sequence` 在本次流中从 1 连续递增。
 
-每个 Notify 使用第 3.2 节的 20 字节音频帧头，`pcm_offset` 是本帧 PCM 首字节相对于 WAV `data` chunk 的偏移。PCM 长度由 Notify 实际长度减 20 得到，最大为应答中的 ~~`chunk_size_bytes = 492`~~ **`transfer.chunk_size_bytes`，不得超过第 3.2 节的容量上限**。音频帧不使用 BLE 分片头，也没有 `payload_length` 或 CRC 字段。
+每个 Notify 使用第 3.2 节的 20 字节音频帧头，`pcm_offset` 是本帧 PCM 首字节相对于 WAV `data` chunk 的偏移。PCM 长度由 Notify 实际长度减 20 得到，最大为应答中的  `transfer.chunk_size_bytes`，不得超过第 3.2 节的容量上限。音频帧不使用 BLE 分片头，也没有 `payload_length` 或 CRC 字段。
 
 最后一个数据帧设置 `flags.bit0 = 1`，表示本次请求范围发送完毕，不一定表示整段录音末尾。
 
@@ -874,7 +874,7 @@ Wi-Fi 是可选的完整 WAV 文件下载通道，不是文件管理或录音丢
 }
 ```
 
-指定录音的完整下载 URL 为 ~~`base_url + recording_base_path + recording_id`~~ **`base_url + recording_base_path + percent_encode_utf8(recording_id)`**。编码时仅保留 ASCII 字母、数字和 `-._~`，其余字符按 UTF-8 字节进行百分号编码；空格编码为 `%20`，不是 `+`。HTTP 框架和业务代码合计只解码一次，再按第 8.3 节的合法单文件名规则校验，解码结果不得再次解释为路径。HTTP 请求携带 `Authorization: Bearer <bearer_token>`。SSID 密码和 token 属于敏感信息，不应写入普通日志。`expires_in_ms` 从应答生成时开始计算；绝对时间可信时同时使用 `expires_epoch_ms`。
+指定录音的完整下载 URL 为  `base_url + recording_base_path + percent_encode_utf8(recording_id)`。编码时仅保留 ASCII 字母、数字和 `-._~`，其余字符按 UTF-8 字节进行百分号编码；空格编码为 `%20`，不是 `+`。HTTP 框架和业务代码合计只解码一次，再按第 8.3 节的合法单文件名规则校验，解码结果不得再次解释为路径。HTTP 请求携带 `Authorization: Bearer <bearer_token>`。SSID 密码和 token 属于敏感信息，不应写入普通日志。`expires_in_ms` 从应答生成时开始计算；绝对时间可信时同时使用 `expires_epoch_ms`。
 
 ### 9.2 transport.wifi.status
 
@@ -959,7 +959,7 @@ Wi-Fi 是可选的完整 WAV 文件下载通道，不是文件管理或录音丢
 
 1. App 通过 BLE 调用 `recording.get`，保存 `generation`、`file_bytes`、`audio_bytes` 和 `checksum_sha256`。
 2. App 通过 BLE 调用 `transport.wifi.offer`，设备开启 SoftAP 和临时 HTTP 服务。
-3. App 连接 `wifi_offer.ssid`，使用 ~~`base_url + recording_base_path + recording_id`~~ **第 9.1 节定义的编码后 URL** 访问录音文件。
+3. App 连接 `wifi_offer.ssid`，使用  第 9.1 节定义的编码后 URL 访问录音文件。
 4. App 可先发送 `HEAD` 获取文件长度和续传能力，再用 `GET` 或带 `Range` 的 `GET` 下载。
 5. App 下载完成后按 `checksum_scope` 计算 SHA-256，并与录音元数据中的 `checksum_sha256` 比较。
 6. 下载结束后 App 调用 `transport.wifi.close`。
@@ -1064,7 +1064,7 @@ Connection: keep-alive
 
 ### 10.5 HTTP 错误 JSON
 
-~~HTTP 错误响应~~ **GET 错误响应**使用 `application/json; charset=utf-8`，结构与 BLE 错误一致，并增加 HTTP 操作名 `recording.download`。**HEAD 的错误响应不发送 body。** 以下 JSON 示例适用于 GET。
+ GET 错误响应使用 `application/json; charset=utf-8`，结构与 BLE 错误一致，并增加 HTTP 操作名 `recording.download`。HEAD 的错误响应不发送 body。 以下 JSON 示例适用于 GET。
 
 token 无效或已过期：
 
@@ -1330,14 +1330,14 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
 | 位深 | `16-bit` |
 | 声道 | `1` |
 | 字节序 | little-endian |
-| 普通帧 PCM | ~~`492 bytes`~~ 按第 3.2 节计算；MTU 517 时为 `492 bytes` |
+| 普通帧 PCM |  按第 3.2 节计算；MTU 517 时为 `492 bytes` |
 | 普通帧采样数 | `246` |
 | 普通帧时长 | `15.375 ms` |
 | `stream_id` | 来自 `capture.started.stream_id` |
 | 音频帧头 | 第 3.2 节的 20 字节帧头 |
 | 结束帧 | 只有音频帧头，`flags = 0x01` |
 
-每个 Audio TX Notify 使用第 3.2 节的独立音频帧格式。~~普通实时帧携带 492 bytes PCM，即 246 个 `pcm_s16le` 单声道采样；采集结束时最后一个数据帧可以少于 492 bytes，但必须按 `block_align = 2` 对齐。~~ **普通实时帧的 PCM 上限按第 3.2 节计算；MTU 517 时最多携带 492 bytes PCM，即 246 个 `pcm_s16le` 单声道采样。最后一个数据帧可以少于当前连接的 PCM 上限，但必须按 `block_align = 2` 对齐。**
+每个 Audio TX Notify 使用第 3.2 节的独立音频帧格式。 普通实时帧的 PCM 上限按第 3.2 节计算；MTU 517 时最多携带 492 bytes PCM，即 246 个 `pcm_s16le` 单声道采样。最后一个数据帧可以少于当前连接的 PCM 上限，但必须按 `block_align = 2` 对齐。
 
 实时帧与 `kind = 0x11` 补传帧使用同一个 PCM 偏移空间。App 按音频帧头中的 `pcm_offset` 写入临时 PCM 文件；偏移跳变时记录缺口，录音结束后通过 `recording.audio.read` 修复。实时流的 `sequence` 从 1 连续递增。
 
@@ -1414,7 +1414,7 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
 | `resume_mismatch` | `expected_generation` 与当前 generation 不一致 | 否 |
 | `recording_not_found` | 指定录音不存在 | 否 |
 | `recording_already_exists` | 重命名的目标文件名已经存在 | 否 |
-| `transfer_not_found` | 指定 BLE 音频传输不存在~~或已结束~~；已知且已结束的传输按第 8.6 节取消仍成功 | 否 |
+| `transfer_not_found` | 指定 BLE 音频传输不存在；已知且已结束的传输按第 8.6 节取消仍成功 | 否 |
 | `invalid_range` | BLE PCM 读取的 offset 或 length 越界或未按 block_align 对齐 | 否 |
 | `unauthorized` | HTTP bearer token 无效或已过期 | 否 |
 | `range_not_satisfiable` | HTTP Range 超出文件边界 | 否 |
@@ -1493,36 +1493,9 @@ generation 冲突示例：
 | --- | --- | --- | --- |
 | `recording.audio.read` 数据流 | Audio TX Notify | `0x11` | 20 字节音频帧头 + 当前连接动态 PCM |
 
-## 16. 修订记录
+## 16. 可选扩展：实时短范围恢复
 
-| 位置 | 改动 |
-| --- | --- |
-| 第 2 节、第 3.1 节 | 逻辑帧上限改为 `min(48 * 1024, 255 * fragment_body_capacity)`，计入 8 字节 JSON 帧头；新增容量计算及超限不截断约束。第 2 节约束由代码块改为列表以显示删除线。 |
-| 第 3.2 节 | 新增按实际 ATT MTU 和 `block_align` 计算 PCM 容量的公式；声明的分块上限不得超过该容量，实际 PCM 不超过声明上限且按采样块对齐。 |
-| 第 8.3 节 | 重命名后的 ID 取值从“应答中的新 `recording_id`”改为“本次请求中的 `new_recording_id`”。 |
-| 第 8.7 节、第 12 节、第 15 节 | 将固定 492 bytes 的 PCM 传输上限改为当前连接容量。 |
-| 第 9.1 节、第 10.1 节 | 下载 URL 的文件名改为 UTF-8 百分号编码的单一路径段；新增编码字符范围、单次解码和解码后文件名校验规则。 |
-| 第 10.5 节 | 将错误 JSON 的适用范围明确为 GET；补充 HEAD 错误响应也不带 body。 |
-| 第 10.5 节 | 为 401 响应示例补上 `WWW-Authenticate: Bearer` 认证挑战头。 |
-| 第 14 节 | 删除 `transfer_not_found` 场景中的“或已结束”，与已结束传输可成功取消的规则一致。 |
-| 第 17 节 | 新增 B 类待确认问题及建议修改，不作为已生效的协议要求。 |
-
-## 17. 待确认问题与建议修改
-
-| 项 | 原文位置 | 问题 | 建议修改 |
-| --- | --- | --- | --- |
-| 1. 重试与去重 | 4.1、4.3、8.6、14 | 未区分结果未知的重发与失败后的重试；去重记录保留范围不明。 | 有效去重期内，结果未知沿用原 ID；确认失败且无副作用、条件改善后使用新 ID。跨重连或重启先核实状态，并约定去重记录及已结束传输 ID 的保留范围。 |
-| 2. MTU 不足 | 1、3.2、5.2 | MTU 23 时音频头已占满载荷，无法传 PCM；拒绝方式未定义。 | 协商后判断音频能力，不足时明确拒绝音频传输，保留可用控制与本地录音。确认运行门槛、能力声明和错误码。 |
-| 3. JSON 超限 | 2、8.1 | 小 MTU、长文件名可能使列表超过分片容量。 | 按实际 JSON 字节数缩页并返回有效游标；单条仍超限时明确失败，不截断、不循环空页。确认缩页策略及错误码。 |
-| 4. 尾部缺失 | 8.7、8.8、11.7 | 最后一包缺失没有后续帧触发跳变；结束事件未处理到可能持续等待。 | 按请求范围核对收齐情况，设置在途等待、无进展超时及重试上限；先终止旧传输再续读。实时录音先查询状态和最终文件信息，不把仍在录音或落盘当作完成，不增加逐包 ACK。 |
-| 5. 文件互斥 | 8.3～8.5、10 | 同一文件录音、落盘或下载时，能否重命名、删除未定义。 | 建议占用期间拒绝该文件的重命名、删除，落盘前不提供最终下载；检查与占用原子执行，实际活动结束才释放。BLE 断开不释放仍在录音或 Wi-Fi 下载的占用；不额外限制其他已完成文件。确认策略及错误码。 |
-| 6. source/reason | 7.1、7.4、11.1、11.4 | 固定 `device` 值是否表示操作发起方不明确。 | 优先保留字段和值，不据此区分手机与按键发起；仅在确需区分时共同定义语义和枚举。 |
-| 7. 中文响应头 | 8.3、10.2～10.4 | `X-Recording-Id` 未定义中文文件名编码。 | 若保留，建议 UTF-8 百分号编码、解码一次；无使用方时可讨论删除。BLE 原始 ID 不变。 |
-| 8. HTTP 错误结构 | 4.2、10.5 | 声称沿用 BLE 结构，但 HTTP 示例没有 `command_id`。 | 建议按现有 HTTP 示例保留 `schema_version/op/ok/error`，不新增 `command_id`；HEAD 仍无正文。 |
-
-## 18. 可选实现扩展：实时短范围恢复
-
-本节不改变前述 BLE 1.3 基本帧或协作者原协议；仅在 `hello.capabilities.capture.live_range_repair` 存在时使用。当前源码实现声明 `max_bytes=32768`、`retention_bytes=262144`，缺少能力时按原实时链路和结束后完整校验工作。
+本扩展复用BLE 1.3基本帧；仅在 `hello.capabilities.capture.live_range_repair` 存在时使用。当前源码实现声明 `max_bytes=32768`、`retention_bytes=262144`，缺少能力时按原实时链路和结束后完整校验工作。
 
 | 操作 | 请求 | 成功应答 |
 | --- | --- | --- |

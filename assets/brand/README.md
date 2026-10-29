@@ -1,9 +1,10 @@
-# Visionary Tech mark
+# 应用标识
 
-`visionary-mark.svg` is the editable source for the app identity. Its front-facing geometry and flat navy/teal colors are inferred from the user's oblique wall-sign photograph, not verified official artwork or official color values. Keep the two overlapping straight-sided strokes; do not include the photographed company lettering, wall, glare, perspective or shadow.
+`visionary-mark.svg` 是可编辑源文件。标识使用两条交叠的直边笔画，主体外接范围为1:1：
 
-The user-adjusted palette is navy `#305978` and teal `#4098A9`, one small step lighter than the first reconstruction. The visible mark itself has a 1:1 bounding box; preserve this independently of square image padding or launcher masks.
+- 深蓝：`#305978`
+- 青色：`#4098A9`
 
-Run `node tools/generate-brand-assets.cjs` on Linux or Windows to regenerate the launcher, adaptive/monochrome icon, favicon, splash mark and bottom credit. The existing neutral typeface renders the small credit reproducibly; no additional runtime font is packaged.
+`node tools/generate-brand-assets.cjs` 可在Linux或Windows生成启动图、桌面图标、adaptive/monochrome图标和favicon。生成PNG作为构建输入随源码保存；常规构建无需重新栅格化。
 
-The adaptive foreground fits inside Android's 66/108 safe circle. The bottom credit uses the platform 200×80dp branding slot, contains only `created by visionary tech`, and does not introduce a minimum splash duration. Generated PNGs are committed inputs so a normal build does not require the rasterizer.
+Android adaptive前景位于66/108安全圆内。启动页底部署名为 `created by visionary tech`，使用系统200×80dp branding区域，不增加强制停留时间。字体沿用项目字体资源。
