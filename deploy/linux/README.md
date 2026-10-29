@@ -1,6 +1,6 @@
 # 老记生产部署模板
 
-这里保留一套用户级生产拓扑的无密钥模板。`LAOJI_USER` 只是必须在落盘前替换的示例用户名；仓库不记录真实部署账号。运行边界固定为：
+本目录提供 Linux systemd 用户级服务模板。安装时将 `LAOJI_USER` 替换为部署用户名。默认服务与目录配置如下：
 
 - API：`127.0.0.1:18020`
 - ASR：`127.0.0.1:8030`
@@ -11,9 +11,7 @@
 - Python：`/home/LAOJI_USER/laoji-service-platform/.venvs/laoji-compact-py312`
 - 私有配置：`/home/LAOJI_USER/.config/laoji/laoji.env`
 
-`current` 必须是由部署流程原子更新的只读发布链接；systemd 文件不再钉死某个 APK
-版本目录，也不包含候选端口、密钥或关闭功能的历史开关。源码、模型和数据库仍是不同
-生命周期的资产，切换 `current` 不得替换数据目录。
+`current` 是由部署流程原子更新的源码发布链接。systemd 单元引用该链接，模型与持久数据使用独立目录。切换源码版本不替换模型或用户数据。
 
 安装时把三个 `*.service.example` 复制到 `~/.config/systemd/user/` 并移除 `.example`
 后缀；先在两个环境示例中替换 `LAOJI_USER`，再把需要的非密钥项合并到权限为 `0600` 的

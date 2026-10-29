@@ -1,37 +1,59 @@
-# 老记 · LaoJi
+# 老记
 
-日程与会议记录应用，基于 React Native 和 Android 原生模块构建。
+老记是一个 Android 优先的 React Native 日程与会议应用，支持文字和语音创建日程、本机提醒、实时会议转写、录音导入、会议整理、问答、回放和分享。
 
-老记将日历、录音、文字记录和会议资料放在同一个工作流中：日程在本机管理，录音可实时转写或导入后处理，整理结果和问答保留可回到原文的依据。
+应用采用免登录、设备身份鉴权和本机数据优先的形态。日程、会议索引和用户编辑内容以设备本地数据为准；语音识别、复杂解析、整理、问答和更新由兼容的远端服务提供，会议资料由手机直接导出分享。
 
-## 功能
+## 文档与分支
 
-- 日程：文字与语音输入、编辑、搜索、日历视图和本机提醒。
-- 会议：手机录音、音视频导入、实时与批量转写、讲话人和笔记。
-- 阅读：结构化整理、行动候选、基于会议内容的问答和引用跳转。
-- 管理：标签、录音回放、回收站、Markdown 分享和应用内更新。
-- 外接录音：ESP32-S3 参考固件，支持 BLE 控制、实时音频及 BLE/Wi-Fi 文件接收。
-- 界面：标准、绚彩、纸境和夜航四种主题。
-
-## 数据与服务
-
-应用免登录，以设备本地数据为准。日程与会议使用独立 SQLite 数据库；语音识别、复杂日程解析、整理和问答需要兼容的服务端。设备身份用于鉴权和任务恢复，不提供账号式跨设备同步。
-
-服务端包含 FastAPI、ASR 和可替换的生成/embedding Provider；部署配置和密钥不随源码分发。详见[架构](docs/architecture.md)。
-
-## 开始使用
-
-- [Android 更新清单](https://laoji.cloud/downloads/android/latest.json)
+- [架构说明](docs/architecture.md)
 - [开发与构建](docs/development.md)
-- [硬件接口](docs/hardware/README.md)
-- [Linux 部署模板](deploy/linux/README.md)
+- [硬件接口与 BLE 协议](docs/hardware/README.md)
+- [Linux 部署配置](deploy/linux/README.md)
 
-Android 是当前主要支持平台。原生功能依赖自定义模块，不能直接使用 Expo Go 运行。
+`master` 保存稳定版本，`develop` 用于功能开发。Android 发行信息见[更新清单](https://laoji.cloud/downloads/android/latest.json)。
 
-## 分支
+## 环境要求
 
-`master` 保存稳定版本，`develop` 保存进行中的开发。下载版本以公开更新清单为准，不以开发分支的版本字段代替发布状态。
+- Node.js 20 LTS
+- npm 10 或更高版本
+- JDK 17
+- Android Studio 与 Android SDK 36
+
+## 快速开始
+
+```bash
+git clone --branch master --single-branch https://github.com/yydd6677/laoji-app.git
+cd laoji-app
+npm ci
+cp .env.example .env.local
+npm run android:emulator:install
+```
+
+`.env.local` 不纳入版本控制。默认 API 地址为 `https://laoji.cloud`，实时语音地址由同一地址派生为 `wss://laoji.cloud`。部署时需配置隐私政策、用户协议和其他公开地址。凭据通过本地环境提供，不纳入版本控制。
+
+## 验证和构建
+
+```bash
+npx tsc --noEmit
+npm run verify:android-native-source
+npm run verify:ui-known-regressions
+npm run verify:ui-continuity
+npm run android:release
+```
+
+Windows 使用 `gradlew.bat`；环境文件可用 `Copy-Item .env.example .env.local` 创建。根目录 `android/`、依赖目录和构建缓存由工具生成，不要求提交。
+
+发布构建需要受保护的 Android 签名配置。构建脚本会从当前配置生成干净的原生工程，并按目标限制 ABI；发布前必须核对版本号、构建号、签名、APK 哈希、更新清单和服务端兼容性。没有原签名密钥时生成的安装包不能覆盖已安装的正式包。
+
+## 隐私和安全边界
+
+公开仓库只包含源码、可公开配置、协议、测试和不含隐私的数据样例。服务器凭据、签名私钥、设备私钥、用户录音、真机证据、内部日志和部署机密不属于仓库内容，应通过本机环境变量、密钥管理器或私有归档提供。
+
+device-v1 的 bootstrap 准入值随 `EXPO_PUBLIC` 配置进入 APK，可被提取，不构成设备身份或持久授权边界。device-v2 使用设备 P-256 密钥、challenge 和短期 token。客户端准入值不得与服务器主密钥或其他用途的凭据复用。
+
+不要使用 `git add -f` 绕过忽略规则，也不要在 Issue、提交信息或测试夹具中写入真实令牌、密码、用户内容或私有服务器路径。安全问题请按照 [SECURITY.md](SECURITY.md) 报告。
 
 ## 许可证
 
-源码采用 [MIT License](LICENSE)。第三方字体、依赖和模型分别遵循各自许可证；字体及资源声明随源码保留。安全问题见 [SECURITY.md](SECURITY.md)。
+项目源码使用 MIT License。依赖项、模型和第三方工具分别遵循各自的许可证。

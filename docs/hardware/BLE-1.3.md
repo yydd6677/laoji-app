@@ -1,10 +1,30 @@
 # BLE 1.3 通信协议
 
-本文定义老记录音设备的BLE控制、事件、实时音频及文件传输。`LaoJi Test Board` 为参考固件的广播名；JSON使用UTF-8编码，不带BOM。用途与采集上下文见[硬件接口](README.md)。
+本文定义Android App与ESP32-S3录音设备使用的BLE 1.3应用层协议，包括控制、事件、实时音频和文件传输。JSON采用UTF-8编码，不带BOM；多字节整数字段使用little-endian。
+
+帧版本`major/minor`、JSON对象的`schema_version`与设备`firmware_revision`是独立字段：分别表示帧协议、消息结构和固件发行版本。
+
+## 适用范围
+
+Android实现接受`major=1, minor=3`，不接收其他帧版本。下表区分接入要求与可选能力；可选项均有仓库实现，不表示所有设备必须支持。
+
+| 范围 | 启用条件 | 定义 |
+| --- | --- | --- |
+| 控制与文件读取 | 必需 | BLE、Control RX/TX、Audio TX、`development_ble`、本地存储及`storage.ble_audio_read=true` |
+| 录音格式 | 必需 | `pcm_s16le`、16000Hz、单声道、16-bit |
+| 列表预览 | 可选请求扩展 | `recording.list(include_previews=true)`，第8.1节 |
+| Wi-Fi下载 | `wifi.bulk_transfer=true` | 第9、10节；App接收`development_http`配置 |
+| 实时范围恢复 | `capture.live_range_repair`声明有效 | 第16节 |
+| 会议/日程用途 | `capture.purposes`包含相应用途 | 第17节；缺省用途为meeting |
+| 电量与软件关机 | 参考固件未实现 | 不声明可用；电量字段为null |
+
+参考配置使用广播名`LaoJi Test Board`。示例中的ID、文件名、时间、哈希和凭据为说明值，不是固定设备标识或可下载文件。
+
+[消息Schema](../../contracts/hardware/laoji-hardware-control-v1.3.schema.json)覆盖已知BLE控制/事件操作名、部分字段类型及实时范围恢复约束，不适用于HTTP响应或未知操作的错误回显。它不是完整的状态或消息验证器；本规范中的必填字段、能力条件和生命周期约束仍须检查。
 
 ## 1. BLE 基础参数
 
-| 参数 | 当前值 |
+| 参数 | 规定值 |
 | --- | --- |
 | 设备广播名 | `LaoJi Test Board` |
 | Service UUID | `9f7a0001-6d6f-4a6f-8a4b-6c616f6a6901` |
@@ -13,7 +33,7 @@
 | Audio TX UUID | `9f7a0004-6d6f-4a6f-8a4b-6c616f6a6901` |
 | CCCD UUID | `00002902-0000-1000-8000-00805f9b34fb` |
 | Control RX 属性 | `Write`、`Write Without Response` |
-| App 当前写入方式 | `Write With Response` |
+| App写入方式 | `Write With Response` |
 | Control TX 属性 | `Indicate` |
 | Audio TX 属性 | `Notify` |
 | 首选 ATT MTU | `517` |
@@ -60,7 +80,7 @@ Control RX/TX 和 Audio TX 使用不同的帧格式。所有多字节整数均�
 
 完整 JSON 帧由 8 字节帧头和 JSON UTF-8 payload 组成：
 
-| 偏移 | 长度 | 字段 | 类型/当前值 |
+| 偏移 | 长度 | 字段 | 类型/规定值 |
 | ---: | ---: | --- | --- |
 | 0 | 1 | `major` | `uint8 = 1` |
 | 1 | 1 | `minor` | `uint8 = 3` |
@@ -73,13 +93,13 @@ JSON 请求和事件的 `flags` 必须为 0。失败应答允许使用 `flags.bi
 
 Control RX 上的 JSON 是请求。Control TX 上包含 `ok` 字段的 JSON 是应答，不包含 `ok` 字段的是事件。每个应答必须回传原请求的 `command_id`，App 使用 `command_id` 匹配请求与应答。
 
-发送方先组成一个完整 JSON 帧，再将整个帧作为第 2 节的分片 `body` 进行拆分。 完整 JSON 帧不得超过第 2 节按当前连接计算出的 `max_logical_frame_bytes`。
+发送方先组成一个完整 JSON 帧，再将整个帧作为第 2 节的分片 `body` 进行拆分。完整 JSON 帧不得超过第 2 节按当前连接计算出的 `max_logical_frame_bytes`。
 
 ### 3.2 音频帧
 
 每个 Audio TX Notify 都是一个完整音频帧，不使用第 2 节的 BLE 分片头。固定帧头为 20 字节：
 
-| 偏移 | 长度 | 字段 | 类型/当前值 |
+| 偏移 | 长度 | 字段 | 类型/规定值 |
 | ---: | ---: | --- | --- |
 | 0 | 1 | `major` | `uint8 = 1` |
 | 1 | 1 | `minor` | `uint8 = 3` |
@@ -134,14 +154,16 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
 | `op` | string | 是 | 操作名 |
 | `command_id` | string | 是 | App 生成的唯一、安全、不重复命令 ID，用于去重和日志追踪 |
 
-同一 `command_id` 的重试必须保持 `op` 和参数完全一致。设备已处理过该命令时，应返回原处理结果，不应重复执行有副作用的操作。
+同一`command_id`的重发必须保留原始JSON字节，不能改变参数、字段顺序或序列化形式。命中设备重放缓存时返回原结果，不重复执行副作用。
+
+参考固件保留最近8条命令的请求摘要和应答，重启后清空；不承诺跨重启或缓存淘汰后的永久去重。结果未知时先通过`status.get`或文件元数据核实状态，再决定是否发起新命令。`command_id`为1～96字节，`session_id`为1～95字节。
 
 ### 4.2 成功应答公共字段
 
 ```json
 {
   "schema_version": 1,
-  "op": "status.get",
+  "op": "diagnostics.ping",
   "command_id": "cmd-018f6ec0-b773-7f02-a11b-74d02b0b1c21",
   "ok": true
 }
@@ -185,13 +207,15 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
 - 必填且当前没有值的字段使用 `null`，例如 `status.session_id`。
 - 可选请求字段没有值时应省略，不发送空字符串代替。
 - 接收方必须忽略未知 JSON 字段，以支持同一主版本内向后兼容扩展。
-- ID、游标、generation 和 token 都是不透明字符串，不得解析其内部格式。
+- ID、游标、generation和token均为不透明值，不得从其内部格式推导业务含义。App接收的generation为1～128个`[A-Za-z0-9._:-]`字符。
 - 所有 `*_ms` 时间均为整数毫秒；`epoch_ms` 使用 Unix Epoch UTC。
 - 所有 `*_bytes` 均为非负整数。
 
 ## 5. hello
 
-`hello` 应在订阅 Control TX 后首先调用。成功前不应发送其他业务命令。
+建立GATT连接后，先订阅Control TX Indicate与Audio TX Notify，再发送`hello`。握手成功前不得发送业务命令。App核对协议版本、安全模式、存储能力和音频格式后，依次调用`time.sync`与`status.get`。
+
+`hello`中的型号及固件版本用于设备描述；接入判定依据是协议及能力字段，不要求照抄示例标识。
 
 ### 5.1 请求
 
@@ -202,7 +226,7 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
   "command_id": "cmd-018f6ec0-b773-7f02-a11b-74d02b0b1c21",
   "app": {
     "name": "laoji-android",
-    "version": "1.4.0"
+    "version": "1.3.2"
   },
   "supported_protocols": [
     {
@@ -229,17 +253,16 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
     "minor": 3
   },
   "device": {
-    "device_id": "esp32s3-94dea5a0ed30",
-    "model": "PD-AILAMP-D01-test",
-    "firmware_revision": "laoji-test-board-1.2.3",
-    "hardware_revision": "PD-AILAMP-D01-observed"
+    "device_id": "esp32s3-001122334455",
+    "model": "ESP32S3-VoiceMemo-V1",
+    "firmware_revision": "laoji-recorder-2.2.0",
+    "hardware_revision": "voice-memo-v1.0-20260917"
   },
   "security": {
     "mode": "development_ble"
   },
   "capabilities": {
     "transports": [
-      "usb",
       "ble",
       "wifi"
     ],
@@ -258,7 +281,16 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
       ],
       "channels": [
         1
-      ]
+      ],
+      "purposes": [
+        "meeting",
+        "schedule"
+      ],
+      "button_gestures": "long_meeting_double_schedule_v1",
+      "live_range_repair": {
+        "max_bytes": 32768,
+        "retention_bytes": 262144
+      }
     },
     "power": {
       "battery_status": false,
@@ -274,8 +306,7 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
         "list",
         "rename",
         "delete"
-      ],
-      "capacity_bytes": 8032092160
+      ]
     },
     "wifi": {
       "bulk_transfer": true,
@@ -339,7 +370,9 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
     "recording_id": null,
     "battery_percent": null,
     "storage_free_bytes": 8012345678,
-    "pending_recordings": 2
+    "pending_recordings": 2,
+    "recorded_audio_bytes": 0,
+    "purpose": "meeting"
   }
 }
 ```
@@ -371,7 +404,9 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
 }
 ```
 
-`time_zone` 使用 IANA 时区名称。
+`time_zone`使用IANA时区名称，参考固件上限为63个ASCII字节。`epoch_ms`为UTC毫秒，采集上下文支持`1577836800000 <= epoch_ms < 4102444800000`。
+
+App主动调用`capture.start`之前必须校时；未校时的请求返回`time_sync_required`。实体按键可在离线状态录音，此时未知时刻使用0，日期处理见第17节。
 
 ### 6.3 diagnostics.ping
 
@@ -399,8 +434,7 @@ pcm_capacity_bytes    = floor((attribute_value_bytes - 20) / block_align) * bloc
 ## 7. 录音控制命令
 
 以下示例使用同一个 `session_id`、`recording_id` 和 `stream_id` 展示完整录音生命周期。
-session_id 用来标识“一次录音会话”，不是 BLE 连接 ID，也不是单条命令 ID。
-recording_id 用来唯一标识一条已经创建的录音文件
+`session_id`标识一次采集会话，与BLE连接和命令身份分离；`recording_id`标识设备上的文件名。
 ### 7.1 capture.start
 
 请求：
@@ -416,7 +450,8 @@ recording_id 用来唯一标识一条已经创建的录音文件
     "sample_rate_hz": 16000,
     "channels": 1,
     "live_stream": true
-  }
+  },
+  "purpose": "meeting"
 }
 ```
 
@@ -434,6 +469,8 @@ recording_id 用来唯一标识一条已经创建的录音文件
 ```
 
 应答表示启动请求已接受。实际开始采集以随后的 `capture.started` 事件为准。
+
+`purpose`为`meeting`或`schedule`，缺省为`meeting`；使用日程用途前须检查第17节的能力声明。
 
 `capture.start.audio.live_stream` 是手机主动启动录音时的明确选择。设为
 `true` 表示本次录音需要实时 PCM，设为 `false` 或省略表示只保存本地 WAV。
@@ -466,6 +503,8 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
   "live_stream": true
 }
 ```
+
+响应中的`live_stream`是设备接受的实际值；未满足音频通道条件时可为false。
 
 `live_stream: true` 表示手机空闲并需要同步，发送前必须订阅 Audio TX Notify；
 `false` 表示只保存本地 WAV。设备等待最多 300 ms，然后才开始录音；未连接、
@@ -602,7 +641,9 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
 
 `recordings` 只返回文件对应的 `recording_id` 列表。`next_cursor` 为 `null` 表示没有下一页；否则将它原样作为下一次请求的 `cursor`。`limit` 范围为 1..32。需要 generation、文件大小和校验信息时，再调用 `recording.get`。
 
-可选列表预览扩展：请求携带 `include_previews: true` 时，每页上限收敛为 4，同时返回 `previews` 数组。每项仅含 `recording_id / generation / file_bytes / duration_ms / created_epoch_ms`，只读取文件头，不计算 PCM 校验值。预览不是完整元数据，接收及变更操作前仍调用 `recording.get`，不能用预览提交音频。未请求扩展的旧命令不变；不支持扩展的固件仅返回文件名时，App 展示标题而不编造时长、大小或代际。
+可选列表预览扩展：请求携带`include_previews: true`时，每页最多4项，并返回`previews`数组。每项包含`recording_id / generation / file_bytes / duration_ms / created_epoch_ms`，可附带第17节的`purpose / capture_id`。预览仅用于目录展示，不提供PCM校验值；接收及变更操作之前须获取完整元数据。
+
+未请求或不支持预览扩展时，响应仅需返回文件名列表；缺失预览信息以未知值展示。
 
 ### 8.2 recording.get
 
@@ -638,12 +679,15 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
     },
     "samples": 160000,
     "audio_bytes": 320000,
-    "file_bytes": 320044,
+    "file_bytes": 320224,
     "duration_ms": 10000,
     "checksum_sha256": "sha256:4e810e1f2bcd4fdc6e62a08b481c4d083b394765b26d13b50c1d54b70f50158c",
     "checksum_scope": "audio_payload",
     "created_epoch_ms": 1787900000000,
-    "recovered": false
+    "recovered": false,
+    "purpose": "meeting",
+    "capture_id": "ses-018f6ec0-cf42-79c4-8c39-7ab351a8dd31",
+    "time_zone": "Asia/Shanghai"
   }
 }
 ```
@@ -676,7 +720,7 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
 }
 ```
 
-`recording.rename` 直接重命名 `/disk` 中的录音文件。成功后旧 `recording_id` 失效，后续请求必须使用 本次请求中的 `new_recording_id`。`new_recording_id` 必须是合法的单个文件名，不允许包含 `/` 或 `\`，也不能与现有文件重名；目标已存在时返回 `recording_already_exists`。重命名不改变文件内容，因此 `generation` 保持不变。
+`recording.rename`重命名设备文件。成功后使用请求中的`new_recording_id`访问，原文件名失效；文件内容、generation和采集身份`capture_id`保持不变。文件名必须是单一路径段。参考固件接收不超过120字节的UTF-8名称，拒绝控制字符、DEL及`/\<>:"|?*`，重命名目标须以`.wav`结尾。目标已存在时返回`recording_already_exists`。
 
 ### 8.4 recording.delete
 
@@ -699,14 +743,15 @@ App 根据当前是否空闲回复以下命令；`request_id` 必须来自该事
   "schema_version": 1,
   "op": "recording.delete",
   "command_id": "cmd-recording-delete-0001",
-  "ok": true,
-  "recording_id": "20260903_153000.wav"
+  "ok": true
 }
 ```
 
 `expected_generation` 用于并发保护。generation 不匹配时返回 `resume_mismatch`，并在 `details.actual_generation` 中返回当前值。
 
-当前文件协议只允许查询、下载、重命名和删除设备录音，不支持由 App 向设备上传、创建、覆盖或追加文件。未定义的文件操作返回 `unsupported_operation`。
+文件协议只允许查询、下载、重命名和删除设备录音，不支持由 App 向设备上传、创建、覆盖或追加文件。未定义的文件操作返回 `unsupported_operation`。
+
+参考固件在采集活动或BLE文件读取期间拒绝其他`recording.get/rename/delete/audio.read`操作；Wi-Fi占用存储时拒绝重命名和删除。App应串行安排这些操作，不能将文件读取与采集并行作为兼容性前提。
 
 ### 8.5 recording.audio.read
 
@@ -861,7 +906,7 @@ Wi-Fi 是可选的完整 WAV 文件下载通道，不是文件管理或录音丢
   "command_id": "cmd-wifi-offer-0001",
   "ok": true,
   "wifi_offer": {
-    "ssid": "LaoJi-a0ed30",
+    "ssid": "LaoJi-001122334455",
     "password": "example-only",
     "base_url": "http://192.168.4.1",
     "recording_base_path": "/recording/",
@@ -898,9 +943,9 @@ Wi-Fi 是可选的完整 WAV 文件下载通道，不是文件管理或录音丢
   "ok": true,
   "wifi": {
     "state": "client_connected",
-    "ssid": "LaoJi-a0ed30",
+    "ssid": "LaoJi-001122334455",
     "device_ipv4": "192.168.4.1",
-    "client_ipv4": "192.168.4.2",
+    "client_ipv4": null,
     "expires_epoch_ms": 1787900120000,
     "expires_in_ms": 83214
   }
@@ -970,7 +1015,9 @@ Wi-Fi 是可选的完整 WAV 文件下载通道，不是文件管理或录音丢
 Authorization: Bearer b64url-token-value
 ```
 
-Bearer token 对本次临时 HTTP 文件服务有效，可用于访问 `/recording/{recording_id}` 指定的录音文件，并在 offer 到期或 `transport.wifi.close` 成功后立即失效。
+Bearer token仅用于该次offer的HTTP文件服务。有效期控制新请求的准入：到期后拒绝新请求，已通过鉴权的在途下载可继续完成；显式`transport.wifi.close`、BLE断连或新的offer会撤销原服务及凭据。参考offer有效期为120000ms。
+
+App接受的Wi-Fi配置为`base_url=http://192.168.4.1`、`recording_base_path=/recording/`与`security_mode=development_http`。参考固件每次offer生成独立密码及token，SSID使用设备公开MAC的十六进制表示。
 
 ### 10.2 查询文件信息 HEAD
 
@@ -981,21 +1028,21 @@ HEAD /recording/20260903_153000.wav HTTP/1.1
 Host: 192.168.4.1
 Authorization: Bearer b64url-token-value
 If-Match: "gen-00000002-91bd"
-Connection: keep-alive
+Connection: close
 ```
 
 成功应答：
 
 ```http
 HTTP/1.1 200 OK
-Content-Type: application/octet-stream
-Content-Length: 320044
+Content-Type: audio/wav
+Content-Length: 320224
 Accept-Ranges: bytes
 ETag: "gen-00000002-91bd"
 X-Recording-Id: 20260903_153000.wav
 X-Checksum-SHA256: sha256:4e810e1f2bcd4fdc6e62a08b481c4d083b394765b26d13b50c1d54b70f50158c
 X-Checksum-Scope: audio_payload
-Connection: keep-alive
+Connection: close
 ```
 
 `HEAD` 应答没有响应 body。`ETag` 固定等于当前 recording generation。
@@ -1011,23 +1058,23 @@ GET /recording/20260903_153000.wav HTTP/1.1
 Host: 192.168.4.1
 Authorization: Bearer b64url-token-value
 If-Match: "gen-00000002-91bd"
-Connection: keep-alive
+Connection: close
 ```
 
 成功应答头：
 
 ```http
 HTTP/1.1 200 OK
-Content-Type: application/octet-stream
-Content-Length: 320044
+Content-Type: audio/wav
+Content-Length: 320224
 Accept-Ranges: bytes
 ETag: "gen-00000002-91bd"
 X-Recording-Id: 20260903_153000.wav
 X-Checksum-SHA256: sha256:4e810e1f2bcd4fdc6e62a08b481c4d083b394765b26d13b50c1d54b70f50158c
 X-Checksum-Scope: audio_payload
-Connection: keep-alive
+Connection: close
 
-<320044 bytes file body>
+<320224 bytes file body>
 ```
 
 ### 10.4 Range 断点续传
@@ -1040,31 +1087,31 @@ Host: 192.168.4.1
 Authorization: Bearer b64url-token-value
 Range: bytes=100000-
 If-Range: "gen-00000002-91bd"
-Connection: keep-alive
+Connection: close
 ```
 
 成功应答：
 
 ```http
 HTTP/1.1 206 Partial Content
-Content-Type: application/octet-stream
-Content-Length: 220044
-Content-Range: bytes 100000-320043/320044
+Content-Type: audio/wav
+Content-Length: 220224
+Content-Range: bytes 100000-320223/320224
 Accept-Ranges: bytes
 ETag: "gen-00000002-91bd"
 X-Recording-Id: 20260903_153000.wav
 X-Checksum-SHA256: sha256:4e810e1f2bcd4fdc6e62a08b481c4d083b394765b26d13b50c1d54b70f50158c
 X-Checksum-Scope: audio_payload
-Connection: keep-alive
+Connection: close
 
-<220044 bytes partial file body>
+<220224 bytes partial file body>
 ```
 
-偏移量以完整 HTTP 文件 body 的第 0 字节为起点。设备当前只需支持单个 byte range；多段 Range 请求返回 `400 Bad Request`。如果 `If-Range` 与当前 generation 不一致，设备返回完整文件的 `200 OK`，App 必须丢弃旧临时文件并重新下载。
+偏移量以完整 HTTP 文件 body 的第 0 字节为起点。设备支持单个byte range；多段 Range 请求返回 `400 Bad Request`。如果 `If-Range` 与当前 generation 不一致，设备返回完整文件的 `200 OK`，App 必须丢弃旧临时文件并重新下载。
 
 ### 10.5 HTTP 错误 JSON
 
- GET 错误响应使用 `application/json; charset=utf-8`，结构与 BLE 错误一致，并增加 HTTP 操作名 `recording.download`。HEAD 的错误响应不发送 body。 以下 JSON 示例适用于 GET。
+ GET 错误响应使用 `application/json; charset=utf-8`，错误对象与BLE共用`code/message/retryable/details`语义；HTTP根对象为`schema_version/op/ok/error`，`op=recording.download`，不包含BLE命令关联字段`command_id`。HEAD 的错误响应不发送 body。 以下 JSON 示例适用于 GET。
 
 token 无效或已过期：
 
@@ -1146,7 +1193,7 @@ Range 起点超出文件末尾：
 ```http
 HTTP/1.1 416 Range Not Satisfiable
 Content-Type: application/json; charset=utf-8
-Content-Range: bytes */320044
+Content-Range: bytes */320224
 Cache-Control: no-store
 Connection: close
 ```
@@ -1161,7 +1208,7 @@ Connection: close
     "message": "Requested byte range is outside the file",
     "retryable": false,
     "details": {
-      "file_size": 320044,
+      "file_size": 320224,
       "requested_start": 400000
     }
   }
@@ -1195,7 +1242,8 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
   "op": "capture.requested",
   "request_id": "key-4a21bc90",
   "source": "device",
-  "timeout_ms": 300
+  "timeout_ms": 300,
+  "purpose": "meeting"
 }
 ```
 
@@ -1219,11 +1267,15 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
     "bits_per_sample": 16,
     "channels": 1,
     "local_storage": true
-  }
+  },
+  "purpose": "meeting",
+  "capture_id": "ses-018f6ec0-cf42-79c4-8c39-7ab351a8dd31",
+  "created_epoch_ms": 1787900000000,
+  "time_zone": "Asia/Shanghai"
 }
 ```
 
-`source` 固定为 `device`，表示录音由设备主动发起并通过事件通知 App。
+`source=device`标识设备发出的采集事件，不区分手机命令或实体按键发起；调用方不得据此推断操作来源。
 
 ### 11.2 capture.paused
 
@@ -1263,10 +1315,23 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
   "reason": "device",
   "samples": 160000,
   "audio_bytes": 320000,
-  "file_bytes": 320044,
+  "file_bytes": 320224,
   "duration_ms": 10000,
   "checksum_sha256": "sha256:4e810e1f2bcd4fdc6e62a08b481c4d083b394765b26d13b50c1d54b70f50158c",
-  "checksum_scope": "audio_payload"
+  "checksum_scope": "audio_payload",
+  "purpose": "meeting",
+  "capture_id": "ses-018f6ec0-cf42-79c4-8c39-7ab351a8dd31",
+  "created_epoch_ms": 1787900000000,
+  "time_zone": "Asia/Shanghai",
+  "container": "wav",
+  "audio": {
+    "codec": "pcm_s16le",
+    "sample_rate_hz": 16000,
+    "bits_per_sample": 16,
+    "channels": 1,
+    "local_storage": true
+  },
+  "recovered": false
 }
 ```
 
@@ -1294,7 +1359,7 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
   "schema_version": 1,
   "op": "transport.wifi.state_changed",
   "state": "client_connected",
-  "client_ipv4": "192.168.4.2",
+  "client_ipv4": null,
   "reason": null
 }
 ```
@@ -1322,7 +1387,7 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
 
 ## 12. 实时音频
 
-| 参数 | 当前值 |
+| 参数 | 规定值 |
 | --- | --- |
 | `kind` | `0x10` |
 | `codec` | `pcm_s16le` |
@@ -1331,13 +1396,13 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
 | 声道 | `1` |
 | 字节序 | little-endian |
 | 普通帧 PCM |  按第 3.2 节计算；MTU 517 时为 `492 bytes` |
-| 普通帧采样数 | `246` |
-| 普通帧时长 | `15.375 ms` |
+| 单帧最大采样数（MTU 517） | `246` |
+| 单帧最大覆盖时长（MTU 517） | `15.375 ms` |
 | `stream_id` | 来自 `capture.started.stream_id` |
 | 音频帧头 | 第 3.2 节的 20 字节帧头 |
 | 结束帧 | 只有音频帧头，`flags = 0x01` |
 
-每个 Audio TX Notify 使用第 3.2 节的独立音频帧格式。 普通实时帧的 PCM 上限按第 3.2 节计算；MTU 517 时最多携带 492 bytes PCM，即 246 个 `pcm_s16le` 单声道采样。最后一个数据帧可以少于当前连接的 PCM 上限，但必须按 `block_align = 2` 对齐。
+每个 Audio TX Notify 使用第 3.2 节的独立音频帧格式。普通实时帧的 PCM 上限按第 3.2 节计算；MTU 517 时最多携带 492 bytes PCM，即 246 个 `pcm_s16le` 单声道采样。最后一个数据帧可以少于当前连接的 PCM 上限，但必须按 `block_align = 2` 对齐。
 
 实时帧与 `kind = 0x11` 补传帧使用同一个 PCM 偏移空间。App 按音频帧头中的 `pcm_offset` 写入临时 PCM 文件；偏移跳变时记录缺口，录音结束后通过 `recording.audio.read` 修复。实时流的 `sequence` 从 1 连续递增。
 
@@ -1361,7 +1426,7 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
   },
   "samples": 160000,
   "audio_bytes": 320000,
-  "file_bytes": 320044,
+  "file_bytes": 320224,
   "duration_ms": 10000,
   "checksum_sha256": "sha256:4e810e1f2bcd4fdc6e62a08b481c4d083b394765b26d13b50c1d54b70f50158c",
   "checksum_scope": "audio_payload",
@@ -1382,14 +1447,23 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
 | `duration_ms` | integer | 有效录音时长，不含暂停时间 |
 | `checksum_sha256` | string | `sha256:` 加 64 位小写十六进制摘要 |
 | `checksum_scope` | string | 当前固定为 `audio_payload` |
-| `created_epoch_ms` | integer | 录音开始时间 |
+| `created_epoch_ms` | integer | 原始采集UTC毫秒；时钟未知为0 |
 | `recovered` | boolean | 是否由设备启动恢复流程找回 |
+
+App接收完整录音元数据时要求：
+
+- `audio_bytes`为正偶数，`samples = audio_bytes / 2`。
+- `file_bytes >= audio_bytes + 44`，PCM长度不包含RIFF头或其他chunk。
+- `duration_ms`与`floor(audio_bytes * 1000 / 32000)`的偏差不超过1ms。
+- `checksum_sha256`为`sha256:`及64位十六进制摘要，校验范围为`audio_payload`。
+- 文件格式为WAV、`pcm_s16le`、16000Hz、16-bit、单声道。
+- 用途扩展启用时同时遵循第17节；目录预览不能代替完整元数据。
 
 ### 13.2 wifi_offer
 
 ```json
 {
-  "ssid": "LaoJi-a0ed30",
+  "ssid": "LaoJi-001122334455",
   "password": "example-only",
   "base_url": "http://192.168.4.1",
   "recording_base_path": "/recording/",
@@ -1403,22 +1477,26 @@ HTTP `200` 或 `206` 只表示本次网络传输成功。App 应检查以下条�
 
 ## 14. 错误码
 
-| code | 常见场景 | 默认可重试 |
+| code | 含义 | 重试条件 |
 | --- | --- | --- |
-| `unsupported_protocol` | `hello` 没有共同协议版本 | 否 |
-| `unsupported_operation` | `op` 未实现或能力未开启 | 否 |
-| `invalid_state` | 当前状态不允许该操作 | 否 |
-| `busy` | 设备正在处理互斥任务 | 是 |
-| `capture_unavailable` | 音频采集硬件或服务不可用 | 是 |
-| `storage_full` | 存储空间不足；清理空间后可重试 | 是 |
-| `resume_mismatch` | `expected_generation` 与当前 generation 不一致 | 否 |
-| `recording_not_found` | 指定录音不存在 | 否 |
-| `recording_already_exists` | 重命名的目标文件名已经存在 | 否 |
-| `transfer_not_found` | 指定 BLE 音频传输不存在；已知且已结束的传输按第 8.6 节取消仍成功 | 否 |
-| `invalid_range` | BLE PCM 读取的 offset 或 length 越界或未按 block_align 对齐 | 否 |
-| `unauthorized` | HTTP bearer token 无效或已过期 | 否 |
-| `range_not_satisfiable` | HTTP Range 超出文件边界 | 否 |
-| `internal_error` | 未分类内部错误 | 是 |
+| `unsupported_protocol` | 没有共同协议版本 | 不重试同一协议 |
+| `unsupported_operation` | 操作未实现 | 不重试同一操作 |
+| `invalid_argument` | 参数、范围或对齐无效 | 修正参数 |
+| `invalid_state` | 状态不允许操作 | 依据响应`retryable`和设备状态 |
+| `busy` | 互斥任务占用 | 等待任务结束 |
+| `time_sync_required` | 主动采集前未校时 | 先执行`time.sync` |
+| `capture_unavailable` | 采集或存储初始化失败 | 依据响应及设备状态 |
+| `storage_failed` | 文件读写失败 | 依据响应；避免重复副作用 |
+| `wifi_unavailable` | Wi-Fi服务启动失败 | 依据响应及设备状态 |
+| `resume_mismatch` | 文件generation不同 | 获取元数据并重新建立来源 |
+| `recording_not_found` | 文件不存在或无法解析 | 重新查询文件列表 |
+| `recording_already_exists` | 改名目标已存在 | 选择其他名称 |
+| `transfer_not_found` | 不是活动或最近完成的读取stream | 查询状态；不取消其他stream |
+| `source_range_unavailable` | 实时PCM范围不在保留窗口 | 最终文件完成后读取缺失范围 |
+| `unauthorized` | HTTP凭据无效或到期 | 获取新offer |
+| `range_not_satisfiable` | HTTP Range无效 | 校验文件版本及范围 |
+
+`error.retryable`以实际响应为准，不能只根据错误码决定重试。调用方应识别稳定`code`并容忍未知错误码；`error.message`为诊断文字，`details`为可选字段。BLE命令和HTTP下载的响应结构分别定义，不共用命令关联字段。
 
 generation 冲突示例：
 
@@ -1469,14 +1547,14 @@ generation 冲突示例：
 | `time.sync` | `epoch_ms`、`time_zone` | - | - |
 | `diagnostics.ping` | - | - | - |
 | `capture.request.resolve` | `request_id`、`live_stream` | `request_id`、`live_stream` | `capture.started` |
-| `capture.start` | `session_id`、`audio`（`live_stream` 可选） | `session_id`、`recording_id` | `capture.started` 或 `capture.interrupted` |
+| `capture.start` | `session_id`、`audio`、`purpose`（可选） | `session_id`、`recording_id` | `capture.started` 或 `capture.interrupted` |
 | `capture.pause` | `session_id` | `session_id` | `capture.paused` |
 | `capture.resume` | `session_id` | `session_id` | `capture.resumed` |
 | `capture.stop` | `session_id` | `session_id` | `capture.finished` 或 `capture.interrupted` |
-| `recording.list` | `cursor`（可选）、`limit`（可选） | `recordings`、`next_cursor` | - |
+| `recording.list` | `cursor`、`limit`、`include_previews`（均可选） | `recordings`、`next_cursor`、`previews`（可选） | - |
 | `recording.get` | `recording_id` | `recording` | - |
 | `recording.rename` | `recording_id`、`expected_generation`、`new_recording_id` | - | - |
-| `recording.delete` | `recording_id`、`expected_generation` | `recording_id` | - |
+| `recording.delete` | `recording_id`、`expected_generation` | - | - |
 | `recording.audio.read` | `recording_id`、`expected_generation`、`offset`、`length`（可选） | `transfer` | `transfer.finished` |
 | `recording.audio.read.cancel` | `stream_id` | `stream_id` | - |
 | `transport.wifi.offer` | - | `wifi_offer` | `transport.wifi.state_changed` |
@@ -1495,11 +1573,128 @@ generation 冲突示例：
 
 ## 16. 可选扩展：实时短范围恢复
 
-本扩展复用BLE 1.3基本帧；仅在 `hello.capabilities.capture.live_range_repair` 存在时使用。当前源码实现声明 `max_bytes=32768`、`retention_bytes=262144`，缺少能力时按原实时链路和结束后完整校验工作。
+本扩展用于读取活动采集中的一段已提交PCM。设备在`hello.capabilities.capture.live_range_repair`声明`max_bytes`与`retention_bytes`；两者必须为正偶数，且`retention_bytes >= max_bytes`。参考值分别为32768和262144字节。未声明该能力时，App不发送本节命令。
 
 | 操作 | 请求 | 成功应答 |
 | --- | --- | --- |
-| `capture.audio.read` | `session_id`、原实时 `stream_id`、偶数 `offset`、正偶数 `length`（不超过声明上限） | `transfer`：`transport=ble`、`session_id`、`source_stream_id`、新的 `stream_id`、`offset_scope=audio_payload`、`offset`、`length`、当前 MTU 的 `chunk_size_bytes` |
-| `capture.audio.read.cancel` | 回读 `stream_id` | 同一 `stream_id`；当前或最近已结束的回读可取消 |
+| `capture.audio.read` | `session_id`、原实时`stream_id`、偶数`offset`、正偶数`length` | `transfer`对象 |
+| `capture.audio.read.cancel` | 恢复读取的`stream_id` | 同一`stream_id` |
 
-数据仍用原 20 字节音频头，kind `0x11`、独立序号从 1、绝对源偏移，最后一帧 FINAL。源必须是同一活动/暂停的实时 capture，且整个请求仍在环形缓存内；不支持已结束/被覆盖/未来范围，返回 `source_range_unavailable`，不填静音、不改时间轴。只允许一个最多 32 KiB 的不可变快照与发送任务；发送绝对期限 2 秒，取消/断开/停止后释放。手机最多缓存 128 KiB/512 帧，缺口 3 秒内未恢复就封住有效前缀，结束后沿原完整来源链恢复。该扩展不增加逐包 ACK、录音文件身份或新的会议状态 owner。
+### 16.1 请求与响应
+
+`offset`和`length`以采集PCM原点计数。参考实现要求`0 <= offset <= 4294967295`，`2 <= length <= min(max_bytes, 32768)`。
+
+```json
+{
+  "schema_version": 1,
+  "op": "capture.audio.read",
+  "command_id": "cmd-live-read-0001",
+  "session_id": "ses-018f6ec0-cf42-79c4-8c39-7ab351a8dd31",
+  "stream_id": 182736451,
+  "offset": 1280,
+  "length": 984
+}
+```
+
+```json
+{
+  "schema_version": 1,
+  "op": "capture.audio.read",
+  "command_id": "cmd-live-read-0001",
+  "ok": true,
+  "transfer": {
+    "transport": "ble",
+    "session_id": "ses-018f6ec0-cf42-79c4-8c39-7ab351a8dd31",
+    "source_stream_id": 182736451,
+    "stream_id": 92837467,
+    "offset_scope": "audio_payload",
+    "offset": 1280,
+    "length": 984,
+    "chunk_size_bytes": 492
+  }
+}
+```
+
+响应中的`source_stream_id`等于请求的原实时流ID，新的`stream_id`不得与原流相同。数据复用20字节音频头和kind `0x11`，sequence从1递增，`pcm_offset`为绝对来源偏移。最后一帧设置FINAL；仅当收到的连续字节数等于响应length时完成本次范围读取，不等待`transfer.finished`事件。
+
+```json
+{
+  "schema_version": 1,
+  "op": "capture.audio.read.cancel",
+  "command_id": "cmd-live-cancel-0001",
+  "stream_id": 92837467
+}
+```
+
+```json
+{
+  "schema_version": 1,
+  "op": "capture.audio.read.cancel",
+  "command_id": "cmd-live-cancel-0001",
+  "ok": true,
+  "stream_id": 92837467
+}
+```
+
+### 16.2 生命周期
+
+来源必须属于相同session和原实时流，采集处于recording或paused且已启用实时PCM。请求范围必须全部位于已提交、尚未覆盖的环形缓冲内；未来范围、覆盖范围或无有效活动来源的请求失败，不返回补静音数据。
+
+参考固件一次发送一个不超过32KiB的不可变范围快照，发送期限为2秒。取消、BLE断连或停止采集会结束该任务；活动或最近结束的stream可取消。来源状态不符返回`invalid_state`，来源范围不可用返回`source_range_unavailable`，传输占用返回`busy`。
+
+未恢复的实时缺口保留为缺口，最终录音完成后按第8节从完整存卡来源接收并校验。实时范围恢复不替代最终文件长度和SHA-256校验。
+
+## 17. 可选扩展：用途与采集上下文
+
+### 17.1 能力与按键
+
+支持日程语音的设备在`hello.capabilities.capture.purposes`包含`schedule`；支持会议录音时包含`meeting`。未声明日程用途时，App不发起日程采集。参考按键配置通过`button_gestures=long_meeting_double_schedule_v1`声明。
+
+| 状态 | 手势 | 行为 |
+| --- | --- | --- |
+| 待机 | 长按800ms | 开始meeting采集 |
+| 待机 | 双击，窗口320ms | 开始schedule采集 |
+| 录制或暂停 | 短按 | 暂停或继续 |
+| 录制或暂停 | 长按 | 结束采集 |
+
+待机单击不开始采集。上电按住和长按后的松手不产生第二次操作。用途由明确操作决定，不根据内容或时长猜测。按键开始采集的实时协商遵循第7.1.1节。
+
+### 17.2 消息字段
+
+| 字段 | 类型与约束 | 携带位置 |
+| --- | --- | --- |
+| `purpose` | `meeting`或`schedule`；省略为meeting | `capture.start`请求；requested/started/finished事件；status；recording及可选preview |
+| `capture_id` | 不可变的采集身份，最多95个UTF-8字节 | started/finished事件、完整recording及可选preview |
+| `created_epoch_ms` | 原始采集UTC毫秒；未知为0 | started/finished事件、完整recording及preview |
+| `time_zone` | 最多63字节的IANA时区；未知为空字符串 | started/finished事件及完整recording |
+
+采用本扩展的完整元数据必须提供采集身份和上下文；schedule记录缺少有效capture_id时，App拒绝作为日程来源。参考实现的capture_id等于原始session_id，文件改名、接收和重连不改变该值。
+
+`status.purpose`仅在recording、paused或finalizing状态表示活动用途；ready状态不得用作文件用途判断。预览不是完整采集上下文，保存或接收前仍需完整元数据。
+
+相对日期使用原始采集时刻与时区解释。时钟未知时保留日期待选，不以接收当天代替。明确schedule但上下文损坏的文件不得静默转成meeting。
+
+### 17.3 RIFF持久化
+
+用途与上下文使用RIFF `ljct`块持久化，独立于BLE音频帧。块payload为172字节：
+
+| payload偏移 | 长度 | 内容 |
+| --- | --- | --- |
+| 0 | 1 | 版本1 |
+| 1 | 1 | 用途：0为meeting，1为schedule |
+| 2 | 2 | 保留，写入0 |
+| 4 | 8 | UTC毫秒，little-endian；0为未知 |
+| 12 | 64 | NUL结尾的UTF-8时区 |
+| 76 | 96 | NUL结尾的UTF-8 capture ID |
+
+参考WAV布局依次为RIFF、fmt、ljct和data，头部共224字节，data从偏移224开始；通用接收器仍须按RIFF chunk解析，不以224或44作为固定偏移。checksum_scope为audio_payload，校验仅覆盖data中的PCM。
+
+不含ljct块的WAV按meeting处理。出现ljct块时，错误长度、版本、用途、非终止字符串或非法非零时刻使文件上下文无效，不按缺失扩展处理。
+
+## 实现入口
+
+- Android帧编码与解码：[HardwareProtocol.kt](../../modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/hardware/HardwareProtocol.kt)、[BleHardwareFraming.kt](../../modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/hardware/BleHardwareFraming.kt)。
+- Android连接和控制：[HardwareRuntime.kt](../../modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/hardware/HardwareRuntime.kt)、[HardwareBoardContract.kt](../../modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/hardware/HardwareBoardContract.kt)。
+- 固件控制和帧：[control.c](../../hardware/esp32s3-voice-memo/firmware/main/control.c)、[wire.c](../../hardware/esp32s3-voice-memo/firmware/main/wire.c)。
+- 文件与上下文：[storage.c](../../hardware/esp32s3-voice-memo/firmware/main/storage.c)、[capture_context.c](../../hardware/esp32s3-voice-memo/firmware/main/capture_context.c)。
+- HTTP与凭据生命周期：[wifi.c](../../hardware/esp32s3-voice-memo/firmware/main/wifi.c)。
