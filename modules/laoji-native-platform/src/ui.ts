@@ -66,7 +66,6 @@ export interface NativeToastSnapshot {
 
 export type NativeWindowOverlayKind =
   | 'calendar-search'
-  | 'schedule-voice'
   | 'action-sheet'
   | 'dialog'
   | 'toast';

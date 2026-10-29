@@ -36,11 +36,11 @@
     },
     {
       "patternId": "input.capture",
-      "implementationPaths": ["modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceHostView.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceFields.kt"],
+      "implementationPaths": ["modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditPageView.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditInputDock.kt"],
       "nativeOrRn": "native",
-      "stateCases": ["confirmation", "confirmation-long", "confirmation-font2", "equal-update", "theme-draft-composition", "theme-clarification", "theme-held-capture"],
+      "stateCases": ["loading-restore", "inline-editing", "recording-level", "equal-update", "theme-draft-composition", "real-ime-overlap", "stable-title-actions"],
       "themeCases": ["neutral", "vivid", "paper", "midnight"],
-      "runnerPaths": ["modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceExperienceTest.kt"]
+      "runnerPaths": ["modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/ui/NativeThemeContinuityTest.kt"]
     }
   ]
 }

@@ -1,26 +1,29 @@
 package com.laoji.nativeplatform.calendarpages
 
-// CAL-EDIT-TIME-001: one working state owns both endpoints until Done commits atomically.
-
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeParseException
 import java.util.Locale
 
-internal enum class CalendarEditEndpoint {
-  START,
-  END,
+internal enum class CalendarEditEndpoint { START, END }
+internal enum class CalendarTimePrecision(val wireName: String, val label: String) {
+  UNSPECIFIED("unspecified", "未设置"), PERIOD("period", "时段"), EXACT("exact", "具体时间");
+  companion object {
+    fun fromWire(value: String?): CalendarTimePrecision? = entries.firstOrNull { it.wireName == value }
+  }
 }
-
+internal enum class CalendarTimePeriod(val wireName: String, val label: String) {
+  EARLY_MORNING("early_morning", "凌晨"), MORNING("morning", "上午"), NOON("noon", "中午"),
+  AFTERNOON("afternoon", "下午"), EVENING("evening", "傍晚"), NIGHT("night", "晚上");
+  companion object {
+    fun fromWire(value: String?): CalendarTimePeriod? = entries.firstOrNull { it.wireName == value }
+  }
+}
 internal object CalendarEditDateRange {
   const val MIN_YEAR = 1900
   const val MAX_YEAR = 2100
-
   fun contains(value: LocalDate): Boolean = value.year in MIN_YEAR..MAX_YEAR
-
   fun clamp(value: LocalDate): LocalDate = when {
     value.year < MIN_YEAR -> LocalDate.of(MIN_YEAR, 1, 1)
     value.year > MAX_YEAR -> LocalDate.of(MAX_YEAR, 12, 31)
@@ -28,270 +31,126 @@ internal object CalendarEditDateRange {
   }
 }
 
+/** One disposable working copy. Only Done commits; no snapping or boundary repair. */
 internal data class CalendarEditTimeState(
   val baseDraft: CalendarEditDraft,
   val startDate: LocalDate,
   val endDate: LocalDate,
   val startTime: LocalTime,
   val endTime: LocalTime,
-  val allDay: Boolean,
-  val timedEnabled: Boolean,
+  val precision: CalendarTimePrecision,
+  val period: CalendarTimePeriod,
   val endTimedEnabled: Boolean,
   val selectedEndpoint: CalendarEditEndpoint,
+  val dateOnly: Boolean = false,
+  val timeChanged: Boolean = false,
+  val dateChanged: Boolean = false,
 ) {
-  val hasTime: Boolean
-    get() = !allDay && timedEnabled
-
-  fun timeEnabled(endpoint: CalendarEditEndpoint): Boolean = when (endpoint) {
-    CalendarEditEndpoint.START -> hasTime
-    CalendarEditEndpoint.END -> hasTime && endTimedEnabled
-  }
-
-  fun selectedDate(): LocalDate = dateFor(selectedEndpoint)
-
-  fun selectedTime(): LocalTime = timeFor(selectedEndpoint)
-
-  fun dateFor(endpoint: CalendarEditEndpoint): LocalDate = when (endpoint) {
-    CalendarEditEndpoint.START -> startDate
-    CalendarEditEndpoint.END -> endDate
-  }
-
-  fun timeFor(endpoint: CalendarEditEndpoint): LocalTime = when (endpoint) {
-    CalendarEditEndpoint.START -> startTime
-    CalendarEditEndpoint.END -> endTime
-  }
-
-  fun select(endpoint: CalendarEditEndpoint): CalendarEditTimeState = copy(selectedEndpoint = endpoint)
-
-  fun setAllDay(enabled: Boolean): CalendarEditTimeState = copy(allDay = enabled)
-    .enforceBoundary(selectedEndpoint)
-
-  fun setTimedEnabled(enabled: Boolean): CalendarEditTimeState = copy(
-    allDay = false,
-    timedEnabled = enabled,
-  ).enforceBoundary(selectedEndpoint)
-
-  fun setEndTimedEnabled(enabled: Boolean): CalendarEditTimeState = copy(
-    allDay = false,
-    timedEnabled = timedEnabled || enabled,
-    endTimedEnabled = enabled,
-  ).enforceBoundary(CalendarEditEndpoint.END)
-
+  val hasTime: Boolean get() = precision == CalendarTimePrecision.EXACT
+  fun timeEnabled(endpoint: CalendarEditEndpoint): Boolean = hasTime &&
+    (endpoint == CalendarEditEndpoint.START || endTimedEnabled)
+  fun selectedDate(): LocalDate = if (selectedEndpoint == CalendarEditEndpoint.START) startDate else endDate
+  fun selectedTime(): LocalTime = if (selectedEndpoint == CalendarEditEndpoint.START) startTime else endTime
+  fun select(endpoint: CalendarEditEndpoint): CalendarEditTimeState =
+    if (endpoint == CalendarEditEndpoint.END && !endTimedEnabled && !dateOnly) this else copy(selectedEndpoint = endpoint)
+  fun setPrecision(value: CalendarTimePrecision): CalendarEditTimeState = copy(
+    precision = value, timeChanged = timeChanged || value != precision,
+    endTimedEnabled = endTimedEnabled && value == CalendarTimePrecision.EXACT,
+    selectedEndpoint = CalendarEditEndpoint.START,
+  )
+  fun setPeriod(value: CalendarTimePeriod): CalendarEditTimeState = copy(
+    precision = CalendarTimePrecision.PERIOD, period = value, timeChanged = true,
+    endTimedEnabled = false, selectedEndpoint = CalendarEditEndpoint.START,
+  )
+  fun setEndEnabled(enabled: Boolean): CalendarEditTimeState = copy(
+    endTimedEnabled = enabled, timeChanged = true,
+    selectedEndpoint = if (enabled) CalendarEditEndpoint.END else CalendarEditEndpoint.START,
+    endDate = if (!enabled && baseDraft.endDate == baseDraft.startDate) startDate else endDate,
+  )
   fun setDate(endpoint: CalendarEditEndpoint, value: LocalDate): CalendarEditTimeState {
-    val bounded = value.coerceCalendarRange()
-    val changed = when (endpoint) {
-      CalendarEditEndpoint.START -> copy(startDate = bounded)
-      CalendarEditEndpoint.END -> copy(endDate = bounded)
-    }
-    return changed.enforceBoundary(endpoint)
+    val bounded = CalendarEditDateRange.clamp(value)
+    return if (endpoint == CalendarEditEndpoint.START) copy(
+      startDate = bounded,
+      endDate = if (!endTimedEnabled && endDate == startDate) bounded else endDate,
+      dateChanged = true,
+    ) else copy(endDate = bounded, dateChanged = true)
   }
-
   fun setYear(value: Int): CalendarEditTimeState {
     val current = selectedDate()
     val year = value.coerceIn(MIN_YEAR, MAX_YEAR)
-    val day = current.dayOfMonth.coerceAtMost(YearMonth.of(year, current.monthValue).lengthOfMonth())
-    return setDate(selectedEndpoint, LocalDate.of(year, current.monthValue, day))
+    return setDate(selectedEndpoint, LocalDate.of(year, current.monthValue,
+      current.dayOfMonth.coerceAtMost(YearMonth.of(year, current.monthValue).lengthOfMonth())))
   }
-
   fun setMonth(value: Int): CalendarEditTimeState {
     val current = selectedDate()
     val month = value.coerceIn(1, 12)
-    val day = current.dayOfMonth.coerceAtMost(YearMonth.of(current.year, month).lengthOfMonth())
-    return setDate(selectedEndpoint, LocalDate.of(current.year, month, day))
+    return setDate(selectedEndpoint, LocalDate.of(current.year, month,
+      current.dayOfMonth.coerceAtMost(YearMonth.of(current.year, month).lengthOfMonth())))
   }
-
-  fun setDayOfMonth(value: Int): CalendarEditTimeState {
-    val current = selectedDate()
-    val day = value.coerceIn(1, YearMonth.from(current).lengthOfMonth())
-    return setDate(selectedEndpoint, current.withDayOfMonth(day))
-  }
-
-  fun setHour24(value: Int): CalendarEditTimeState = setTime(
-    selectedEndpoint,
-    selectedTime().withHour(value.coerceIn(0, 23)),
-  )
-
-  fun setHour12(value: Int): CalendarEditTimeState {
-    val hour12 = value.coerceIn(1, 12) % 12
-    val period = if (selectedTime().hour >= 12) 12 else 0
-    return setHour24(hour12 + period)
-  }
-
-  fun setPeriod(value: Int): CalendarEditTimeState {
-    val period = value.coerceIn(0, 1)
-    val hour12 = selectedTime().hour % 12
-    return setHour24(hour12 + period * 12)
-  }
-
-  fun setMinuteIndex(value: Int): CalendarEditTimeState = setTime(
-    selectedEndpoint,
-    selectedTime().withMinute(value.coerceIn(0, MINUTE_ITEM_COUNT - 1) * MINUTE_STEP),
-  )
+  fun setDayOfMonth(value: Int): CalendarEditTimeState = setDate(selectedEndpoint,
+    selectedDate().withDayOfMonth(value.coerceIn(1, YearMonth.from(selectedDate()).lengthOfMonth())))
+  fun setHour24(value: Int): CalendarEditTimeState = setTime(selectedTime().withHour(value.coerceIn(0, 23)))
+  fun setMinuteIndex(value: Int): CalendarEditTimeState = setTime(selectedTime().withMinute(value.coerceIn(0, 59)))
+  private fun setTime(value: LocalTime): CalendarEditTimeState =
+    if (selectedEndpoint == CalendarEditEndpoint.START) copy(startTime = value.withSecond(0).withNano(0), timeChanged = true)
+    else copy(endTime = value.withSecond(0).withNano(0), timeChanged = true)
 
   fun completedDraft(): CalendarEditDraft {
-    val safe = enforceBoundary(CalendarEditEndpoint.END)
-    return when {
-      safe.allDay -> safe.baseDraft.copy(
-        startDate = safe.startDate.toString(),
-        endDate = safe.endDate.toString(),
-        startTime = null,
-        endTime = null,
-        allDay = true,
-        reminderMinutes = null,
-      ).normalized()
-      !safe.timedEnabled -> safe.baseDraft.copy(
-        startDate = safe.startDate.toString(),
-        endDate = safe.endDate.toString(),
-        startTime = null,
-        endTime = null,
-        allDay = false,
-        reminderMinutes = null,
-      ).normalized()
-      else -> safe.baseDraft.copy(
-        startDate = safe.startDate.toString(),
-        endDate = safe.endDate.toString(),
-        startTime = safe.startTime.format(TIME_FORMATTER),
-        endTime = safe.endTime.takeIf { safe.endTimedEnabled }?.format(TIME_FORMATTER),
-        allDay = false,
-      ).normalized()
-    }
-  }
-
-  private fun setTime(endpoint: CalendarEditEndpoint, value: LocalTime): CalendarEditTimeState {
-    val minute = (value.minute / MINUTE_STEP) * MINUTE_STEP
-    val snapped = value.withMinute(minute).withSecond(0).withNano(0)
-    val changed = when (endpoint) {
-      CalendarEditEndpoint.START -> copy(startTime = snapped)
-      CalendarEditEndpoint.END -> copy(endTime = snapped)
-    }
-    return changed.enforceBoundary(endpoint)
-  }
-
-  private fun enforceBoundary(changedEndpoint: CalendarEditEndpoint): CalendarEditTimeState {
-    if (endDate.isBefore(startDate)) {
-      return when (changedEndpoint) {
-        CalendarEditEndpoint.START -> copy(endDate = startDate).enforceBoundary(changedEndpoint)
-        CalendarEditEndpoint.END -> copy(endDate = startDate).enforceBoundary(changedEndpoint)
-      }
-    }
-    if (!hasTime || !endTimedEnabled) return this
-
-    val start = LocalDateTime.of(startDate, startTime)
-    val end = LocalDateTime.of(endDate, endTime)
-    if (end.isAfter(start)) return this
-
-    val minimumEnd = start.plusMinutes(
-      if (changedEndpoint == CalendarEditEndpoint.START) DEFAULT_DURATION_MINUTES else MINUTE_STEP.toLong(),
-    )
-    return copy(endDate = minimumEnd.toLocalDate(), endTime = minimumEnd.toLocalTime())
+    val dates = if (dateOnly || dateChanged) baseDraft.copy(
+      startDate = startDate.toString(), endDate = endDate.toString()) else baseDraft
+    if (dateOnly || !timeChanged) return dates.normalized()
+    return dates.copy(
+      timePrecision = precision.wireName,
+      timePeriod = if (precision == CalendarTimePrecision.PERIOD) period.wireName else null,
+      startTime = if (hasTime) startTime.format(TIME_FORMATTER) else null,
+      endTime = if (hasTime && endTimedEnabled) endTime.format(TIME_FORMATTER) else null,
+      allDay = false,
+      reminderMinutes = if (hasTime) baseDraft.reminderMinutes else null,
+    ).normalized()
   }
 
   companion object {
     const val MIN_YEAR = CalendarEditDateRange.MIN_YEAR
     const val MAX_YEAR = CalendarEditDateRange.MAX_YEAR
-    const val MINUTE_STEP = 5
-    const val MINUTE_ITEM_COUNT = 60 / MINUTE_STEP
-    const val DEFAULT_DURATION_MINUTES = 60L
-
-    private val DATE_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE
+    const val MINUTE_ITEM_COUNT = 60
     private val TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm")
-
-    fun fromDraft(
-      draft: CalendarEditDraft,
-      selectedEndpoint: CalendarEditEndpoint,
-    ): CalendarEditTimeState {
+    fun fromDraft(draft: CalendarEditDraft, selectedEndpoint: CalendarEditEndpoint,
+      dateOnly: Boolean = false): CalendarEditTimeState {
       val normalized = draft.normalized()
-      val startDate = requireNotNull(parseDate(normalized.startDate)?.takeIf(CalendarEditDateRange::contains)) {
-        "start date is outside the visible wheel range"
-      }
-      val parsedEndDate = requireNotNull(parseDate(normalized.endDate)?.takeIf(CalendarEditDateRange::contains)) {
-        "end date is outside the visible wheel range"
-      }
-      val endDate = if (parsedEndDate.isBefore(startDate)) startDate else parsedEndDate
-      val parsedStartTime = parseTime(normalized.startTime)
-      val parsedEndTime = parseTime(normalized.endTime)
-      val hasTime = !normalized.allDay && parsedStartTime != null
-      val hasEndTime = hasTime && parsedEndTime != null
-      val snappedStart = snapDown(startDate, parsedStartTime ?: LocalTime.of(10, 0))
-      val snappedEnd = snapUp(endDate, parsedEndTime ?: LocalTime.of(11, 0))
-      return CalendarEditTimeState(
-        baseDraft = normalized,
-        startDate = snappedStart.toLocalDate(),
-        endDate = snappedEnd.toLocalDate(),
-        startTime = snappedStart.toLocalTime(),
-        endTime = snappedEnd.toLocalTime(),
-        allDay = normalized.allDay,
-        timedEnabled = hasTime,
-        endTimedEnabled = hasEndTime,
-        selectedEndpoint = selectedEndpoint,
-      ).enforceBoundary(CalendarEditEndpoint.END)
-    }
-
-    private fun parseDate(value: String?): LocalDate? = try {
-      value?.let { LocalDate.parse(it, DATE_FORMATTER) }
-    } catch (_: DateTimeParseException) {
-      null
-    }
-
-    private fun parseTime(value: String?): LocalTime? = try {
-      value?.let { LocalTime.parse(it, TIME_FORMATTER) }
-    } catch (_: DateTimeParseException) {
-      null
-    }
-
-    private fun snapDown(date: LocalDate, value: LocalTime): LocalDateTime = LocalDateTime.of(date, value)
-      .withMinute((value.minute / MINUTE_STEP) * MINUTE_STEP)
-      .withSecond(0)
-      .withNano(0)
-
-    private fun snapUp(date: LocalDate, value: LocalTime): LocalDateTime {
-      val dateTime = LocalDateTime.of(date, value).withSecond(0).withNano(0)
-      val remainder = value.minute % MINUTE_STEP
-      if (remainder == 0) return dateTime
-      return dateTime.plusMinutes((MINUTE_STEP - remainder).toLong())
+      // An empty date has a visible candidate, not an accepted default.
+      val startDate = if (normalized.startDate.isBlank()) LocalDate.now()
+        else LocalDate.parse(normalized.startDate)
+      val endDate = if (normalized.endDate.isBlank()) startDate else LocalDate.parse(normalized.endDate)
+      require(CalendarEditDateRange.contains(startDate) && CalendarEditDateRange.contains(endDate))
+      val startTime = normalized.startTime?.let(LocalTime::parse) ?: LocalTime.of(10, 0)
+      val endTime = normalized.endTime?.let(LocalTime::parse) ?: startTime.plusHours(1)
+      val precision = requireNotNull(normalized.precision)
+      val hasEnd = precision == CalendarTimePrecision.EXACT && normalized.endTime != null
+      return CalendarEditTimeState(normalized, startDate, endDate, startTime, endTime,
+        precision, CalendarTimePeriod.fromWire(normalized.timePeriod) ?: CalendarTimePeriod.MORNING,
+        hasEnd, if (selectedEndpoint == CalendarEditEndpoint.END && (hasEnd || dateOnly)) selectedEndpoint
+          else CalendarEditEndpoint.START, dateOnly)
     }
   }
 }
 
 internal object CalendarEditTimeFormatter {
   private val weekdays = listOf("一", "二", "三", "四", "五", "六", "日")
-
   fun dateLabel(value: LocalDate): String =
     "${value.year}年${value.monthValue}月${value.dayOfMonth}日 周${weekdays[value.dayOfWeek.value - 1]}"
-
   fun dateWheelLabel(value: LocalDate): String =
     "${value.monthValue}月${value.dayOfMonth}日 周${weekdays[value.dayOfWeek.value - 1]}"
-
-  fun timeLabel(value: LocalTime?, is24Hour: Boolean): String {
-    if (value == null) return "未设置"
-    return if (is24Hour) {
-      String.format(Locale.CHINA, "%02d:%02d", value.hour, value.minute)
-    } else {
-      val period = if (value.hour < 12) "上午" else "下午"
-      val hour = value.hour % 12
-      String.format(Locale.CHINA, "%s %d:%02d", period, if (hour == 0) 12 else hour, value.minute)
-    }
+  fun timeLabel(value: LocalTime?, is24Hour: Boolean): String = when {
+    value == null -> "未设置"
+    is24Hour -> String.format(Locale.CHINA, "%02d:%02d", value.hour, value.minute)
+    else -> String.format(Locale.CHINA, "%s %d:%02d", if (value.hour < 12) "上午" else "下午",
+      if (value.hour % 12 == 0) 12 else value.hour % 12, value.minute)
   }
-
   fun yearWheelLabel(value: Int): String = "${value}年"
-
   fun monthWheelLabel(value: Int): String = "${value}月"
-
   fun dayWheelLabel(value: Int): String = "${value}日"
-
-  fun dayWithWeekdayWheelLabel(value: LocalDate): String =
-    "${value.dayOfMonth}日(周${weekdays[value.dayOfWeek.value - 1]})"
-
-  fun periodWheelLabel(value: Int): String = if (value == 0) "上午" else "下午"
-
-  fun hourWheelLabel(value: Int, is24Hour: Boolean): String = if (is24Hour) {
-    String.format(Locale.CHINA, "%02d时", value)
-  } else {
-    "${value}时"
-  }
-
-  fun minuteWheelLabel(value: Int): String =
-    String.format(Locale.CHINA, "%02d分", value * CalendarEditTimeState.MINUTE_STEP)
+  fun dayWithWeekdayWheelLabel(value: LocalDate): String = "${value.dayOfMonth}日(周${weekdays[value.dayOfWeek.value - 1]})"
+  fun hourWheelLabel(value: Int, is24Hour: Boolean): String = if (is24Hour)
+    String.format(Locale.CHINA, "%02d时", value) else "${value}时"
+  fun minuteWheelLabel(value: Int): String = String.format(Locale.CHINA, "%02d分", value)
 }
-
-private fun LocalDate.coerceCalendarRange(): LocalDate = CalendarEditDateRange.clamp(this)

@@ -8,6 +8,8 @@ import type { CalEvent, EventRef } from '../types';
 import type { ScopeKey } from '../domain/meeting';
 import { expandEventsForMonths } from '../utils/eventRecurrence';
 import { eventRefForEvent, eventRefKey, sourceEventId } from '../utils/eventIdentity';
+import { scheduleTimeForEvent } from '../utils/scheduleEventTime';
+import { schedulePeriodLabel } from '../domain/scheduleTime';
 
 const DAY_MS = 86_400_000;
 const DEFAULT_TIMED_DURATION_MS = 60 * 60 * 1_000;
@@ -75,8 +77,10 @@ function occurrenceTimes(event: CalEvent): {
   startAtMs: number;
   endAtMs: number;
   allDay: boolean;
+  timePeriodLabel: string | null;
 } | null {
-  const allDay = Boolean(event.isAllDay || (!event.startTime && !event.endTime));
+  const time = scheduleTimeForEvent(event);
+  const allDay = time.precision !== 'exact';
   const startAtMs = localTimestamp(event.startDate, allDay ? undefined : event.startTime);
   if (startAtMs === null) return null;
   const endDate = event.endDate ?? event.startDate;
@@ -86,7 +90,7 @@ function occurrenceTimes(event: CalEvent): {
   if (endAtMs === null || endAtMs <= startAtMs) {
     endAtMs = allDay ? startAtMs + DAY_MS : startAtMs + DEFAULT_TIMED_DURATION_MS;
   }
-  return { startAtMs, endAtMs, allDay };
+  return { startAtMs, endAtMs, allDay, timePeriodLabel: schedulePeriodLabel(time.period) };
 }
 
 function displayTitle(value: string): string {

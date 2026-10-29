@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UI_MOTION } from '../theme/uiTokens';
 import { useTheme } from '../theme/ThemeProvider';
 import { meetingActionReminderAtForDue } from '../services/notifications';
+import { KeyboardFrame } from './KeyboardFrame';
 
 export interface MeetingActionEditorValue {
   mode: 'create' | 'edit';
@@ -226,9 +226,8 @@ export function MeetingActionEditorSheet({
             accessibilityLabel="关闭待办事项编辑"
           />
         </Animated.View>
-        <KeyboardAvoidingView
+        <KeyboardFrame
           style={styles.keyboardHost}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           pointerEvents={closing ? 'none' : 'auto'}
         >
           <Animated.View
@@ -396,6 +395,8 @@ export function MeetingActionEditorSheet({
               <View style={styles.errorSlot}>
                 {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
               </View>
+            </ScrollView>
+            <View style={styles.footer}>
               <Pressable
                 style={({ pressed }) => [
                   styles.save,
@@ -424,9 +425,9 @@ export function MeetingActionEditorSheet({
                   </Text>
                 )}
               </Pressable>
-            </ScrollView>
+            </View>
           </Animated.View>
-        </KeyboardAvoidingView>
+        </KeyboardFrame>
       </View>
     </Modal>
   );
@@ -442,6 +443,7 @@ const createStyles = (fontFamily: string) => StyleSheet.create({
   titleActionText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
   title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '500' },
   form: { paddingHorizontal: 16, paddingBottom: 4 },
+  footer: { paddingHorizontal: 16, paddingBottom: 4 },
   label: { fontFamily, fontSize: 13, lineHeight: 20, marginBottom: 6 },
   sectionLabel: { marginTop: 14 },
   contentInput: { minHeight: 88, maxHeight: 160, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, fontFamily, fontSize: 16, lineHeight: 23 },

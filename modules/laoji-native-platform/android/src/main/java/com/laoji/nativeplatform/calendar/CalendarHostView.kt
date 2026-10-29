@@ -120,8 +120,8 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     content.addView(
       createFab,
       FrameLayout.LayoutParams(
-        CalendarUi.dp(context, CalendarShellContract.FAB_GESTURE_SURFACE_DP).toInt(),
-        CalendarUi.dp(context, CalendarShellContract.FAB_GESTURE_SURFACE_DP).toInt(),
+        CalendarUi.dp(context, CalendarShellContract.FAB_SIZE_DP).toInt(),
+        CalendarUi.dp(context, CalendarShellContract.FAB_SIZE_DP).toInt(),
         android.view.Gravity.END or android.view.Gravity.BOTTOM
       ).apply {
         marginEnd = CalendarUi.dp(context, CalendarShellContract.FAB_EDGE_MARGIN_DP).toInt()
@@ -343,8 +343,8 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     emitSemantic("search-open", emptyMap())
   }
 
-  override fun onCreateAction(action: CalendarCreateAction) {
-    emitSemantic(action.semanticType, emptyMap())
+  override fun onCreateAction() {
+    emitSemantic("create", emptyMap())
   }
 
   // CAL-PICKER-001: wheel/date settle commits immediately while QuickChoose remains open.
@@ -406,7 +406,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     if (selectedEpochDay != epochDay) {
       selectDate(epochDay, source = "month-empty-create", emit = true)
     }
-    emitSemantic("create-manual", mapOf("epochDay" to epochDay))
+    emitSemantic("create-date", mapOf("epochDay" to epochDay))
   }
 
   override fun onCreateRequested(draft: CalendarDraft) {

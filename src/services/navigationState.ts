@@ -1,6 +1,7 @@
 import type { InitialState } from '@react-navigation/native';
 import { EVENT_CATEGORIES } from '../utils/eventColors';
 import type { RootStackParamList } from '../types';
+import { isScheduleTimeValue } from '../domain/scheduleTime';
 
 export const NAVIGATION_STATE_SCHEMA = 'laoji.navigation-state';
 export const NAVIGATION_STATE_VERSION = 1;
@@ -161,6 +162,8 @@ function validDraftInput(value: unknown): value is PlainRecord {
     'startTime',
     'endTime',
     'isAllDay',
+    'timePrecision',
+    'timePeriod',
     'repeat',
     'recurrenceUntilDate',
     'description',
@@ -177,6 +180,10 @@ function validDraftInput(value: unknown): value is PlainRecord {
     && optional(value.startTime, isTimeKey)
     && optional(value.endTime, isTimeKey)
     && typeof value.isAllDay === 'boolean'
+    && (value.timePrecision === undefined ? value.timePeriod == null : isScheduleTimeValue({
+      precision: value.timePrecision, period: value.timePeriod ?? null,
+      startTime: value.startTime ?? null, endTime: value.endTime ?? null,
+    }))
     && optional(value.repeat, candidate => typeof candidate === 'string' && REPEAT_VALUES.has(candidate))
     && optional(value.recurrenceUntilDate, isDateKey)
     && optional(value.description, isBoundedString)
@@ -213,6 +220,7 @@ function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] 
   if (value === undefined) return {};
   if (!isPlainRecord(value) || !hasOnlyKeys(value, [
     'date',
+    'editorDraftId',
     'endDate',
     'startTime',
     'endTime',
@@ -221,7 +229,8 @@ function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] 
     'draft',
     'followup',
   ])) return null;
-  if (!optional(value.date, isDateKey)
+  if (!optional(value.editorDraftId, isBoundedString)
+    || !optional(value.date, isDateKey)
     || !optional(value.endDate, isDateKey)
     || !optional(value.startTime, isTimeKey)
     || !optional(value.endTime, isTimeKey)) return null;
@@ -237,6 +246,7 @@ function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] 
   if (value.followup !== undefined && !followup) return null;
   if (eventRef) return followup ? null : {
     eventRef,
+    ...(value.editorDraftId ? { editorDraftId: value.editorDraftId as string } : {}),
     ...(value.recurrenceScope !== undefined
       ? { recurrenceScope: value.recurrenceScope as NonNullable<RootStackParamList['AddEvent']['recurrenceScope']> }
       : {}),
@@ -248,6 +258,7 @@ function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] 
   const startTime = value.startTime ?? draft?.startTime;
   const endTime = value.endTime ?? draft?.endTime;
   return {
+    ...(value.editorDraftId ? { editorDraftId: value.editorDraftId as string } : {}),
     ...(date !== undefined ? { date: date as string } : {}),
     ...(endDate !== undefined ? { endDate: endDate as string } : {}),
     ...(startTime !== undefined ? { startTime: startTime as string } : {}),

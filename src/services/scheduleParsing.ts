@@ -29,6 +29,8 @@ export interface ParseResult {
   recurrence_weekdays?: number[] | null;
   recurrence_until_date?: string | null;
   start_date: string;        // YYYY-MM-DD
+  /** Same semantic observation distinguishes omitted from explicitly unresolved dates. */
+  date_resolution?: 'resolved' | 'omitted' | 'unresolved' | null;
   end_date?: string | null;  // YYYY-MM-DD, for multi-day events
   color?: string | null;
   spanning?: boolean | null;
@@ -277,6 +279,7 @@ function graphParseResult(
     start_date: startDate,
     end_date: endDate,
     spanning: Boolean(startDate && endDate && endDate !== startDate),
+    date_resolution: slots.date_resolution,
     start_time: startTime,
     end_time: endTime,
     time_period: period,

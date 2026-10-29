@@ -208,7 +208,7 @@ const CONSECUTIVE_RELATIVE_PAIR_TOKEN =
 
 const TIME_TOKEN =
   '(?:[01]?\\d|2[0-3])[:：][0-5]\\d' +
-  '|(?:凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?';
+  '|(?:凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9零〇一二两三四五六七八九十]{1,3}分?)?';
 
 const LAOJI_WAKE_WORD = '(?:老记|老纪|老计|老季|牢记|小记)';
 const IMPLICIT_CROSS_YEAR_CONFIRM_DAYS = 183;
@@ -874,7 +874,7 @@ function parseTimeToken(token: string, defaultPeriod = ''): string | null {
   const clean = token.trim();
   const digital = clean.match(/^([01]?\d|2[0-3])[:：]([0-5]\d)$/);
   if (digital) return `${String(Number(digital[1])).padStart(2, '0')}:${digital[2]}`;
-  const match = clean.match(/^(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?$/);
+  const match = clean.match(/^(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9零〇一二两三四五六七八九十]{1,3})分?)?$/);
   if (!match) return null;
   let period = match[1] ?? defaultPeriod;
   if (['明早', '明晨', '今早', '今晨'].includes(period)) period = '早上';
@@ -916,7 +916,7 @@ function parseTime(text: string): string | null {
   if (text.includes('中午') && !/(?:凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点/.test(text)) {
     return '12:00';
   }
-  const match = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?/);
+  const match = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9零〇一二两三四五六七八九十]{1,3})分?)?/);
   if (!match) return null;
   const minute = match[3] ? 30 : (match[4] ? cnToInt(match[4]) : 0);
   return formatTimeParts(match[1] ?? inferTimePeriod(text, match.index ?? 0), cnToInt(match[2]), minute);
@@ -1115,7 +1115,7 @@ function stripScheduleMarkers(text: string): string {
     '(?:下个月|下月|本月|这个月)[0-9一二两三四五六七八九十]{1,3}(?:号|日)',
     '(?:下个月|下月|本月|这个月)',
     '(?:(?:下下|下|本|这)?(?:周|星期|礼拜))[一二三四五六日天1-7]',
-    '(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?',
+    '(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9零〇一二两三四五六七八九十]{1,3}分?)?',
     '([01]?\\d|2[0-3])[:：]([0-5]\\d)',
     '^(?:凌晨|早上|上午|中午|下午(?!茶)|傍晚|晚上|晚间)(?=[^，,。.!！?？]{1,})',
     '(提醒我|记一下|安排|日程|待办|需要|完成)',
@@ -1124,6 +1124,8 @@ function stripScheduleMarkers(text: string): string {
     .reduce((cleaned, pattern) => cleaned.replace(new RegExp(pattern, 'g'), ''), text)
     .replace(/^[，,。.!！?？的]+|[，,。.!！?？的]+$/g, '');
 }
+
+const TITLE_SUFFIX_BOUNDARY_RE = /[，,。.!！?？]|(?:地点|(?:地点)?在|用(?=[^，,。.!！?？；;]{0,40}(?:会议室|办公室|图书馆|健身房|咖啡馆|咖啡店|实验室|教室|报告厅|写字楼|大厦|商场|超市|机场|车站|公司|学校|医院|公园|餐厅|饭店|酒店|园区|小区|广场|中心|工作室|体育馆|体育场|球场|码头|港口|校区|现场|路|街|巷|室|厅|楼|馆|院|门|站|店|家)))[^，,。.!！?？]{0,40}$|需要通知|和[^，,。.!！?？]{1,16}一起|重点是|主要确认|这件事和|带上/;
 
 function normalizeTitle(title: string): string {
   let normalized = title
@@ -1149,7 +1151,7 @@ function normalizeTitle(title: string): string {
   }
 
   return normalized
-    .split(/[，,。.!！?？]|(?:地点|(?:地点)?在|用(?=[^，,。.!！?？；;]{0,40}(?:会议室|办公室|图书馆|健身房|咖啡馆|咖啡店|实验室|教室|报告厅|写字楼|大厦|商场|超市|机场|车站|公司|学校|医院|公园|餐厅|饭店|酒店|园区|小区|广场|中心|工作室|体育馆|体育场|球场|码头|港口|校区|现场|路|街|巷|室|厅|楼|馆|院|门|站|店|家)))[^，,。.!！?？]{0,40}$|需要通知|和[^，,。.!！?？]{1,16}一起|重点是|主要确认|这件事和|带上/, 1)[0]
+    .split(TITLE_SUFFIX_BOUNDARY_RE, 1)[0]
     .replace(/(持续处理|处理|完成|提交|整理|跟进|准备)?完$/, '')
     .replace(/^在[^，,。.!！?？]{1,30}(?=开会|会议|见面|上课|办事)/, '')
     .replace(/^(开(?!会)|召开|举行|进行)(?=.{2,})/, '')
@@ -1222,6 +1224,18 @@ function extractTitleAndDescription(text: string): [string, string | null] {
   let title = normalizeTitle(stripScheduleMarkers(titleText));
   if (!title && description) title = description;
   return [title.slice(0, 20), description];
+}
+
+/** The bounded title extractor cannot certify a result after discarding
+ * another content clause, or an alleged metadata suffix with no destination.
+ * Send that input to the existing graph producer; do not guess a replacement
+ * title or classify a command shell using a business-word blacklist. */
+function hasUnrepresentedTitleTail(text: string, parsed: ParseResult): boolean {
+  const residual = stripScheduleMarkers(selectCorrectionTail(text));
+  const clauses = residual.split(/[，,。.!！?？；;]/).map(normalizeTitle).filter(Boolean);
+  if (clauses.length > 1) return true;
+  const boundary = TITLE_SUFFIX_BOUNDARY_RE.exec(residual);
+  return !!boundary && boundary.index > 0 && !parsed.location && !parsed.description && !parsed.detail;
 }
 
 function quickClarificationQuestion(hasDate: boolean, hasTime: boolean): string | null {
@@ -1618,12 +1632,10 @@ export function classifyScheduleParseRoute(
   }
 
   if (!parsed) {
-    const hasScheduleSignal = hasScheduleDateSignal(normalized, referenceDate, timezone)
-      || new RegExp(TIME_TOKEN).test(normalized)
-      || LOW_INFORMATION_SCHEDULE_INTENT_RE.test(normalized);
-    return hasScheduleSignal
-      ? { route: 'server_required', result: null }
-      : { route: 'reject', result: null, code: 'not_schedule', message: '这段内容不是日程安排' };
+    // A miss is not negative intent evidence. Creation may omit dates or use
+    // an action this bounded grammar does not recognize. Explicit controls
+    // were rejected above; let the sole model producer judge the remainder.
+    return { route: 'server_required', result: null };
   }
 
   if (parsed.needs_clarification) {
@@ -1636,6 +1648,10 @@ export function classifyScheduleParseRoute(
         message: question || '需要补充具体日期',
       };
     }
+    return { route: 'server_required', result: parsed };
+  }
+
+  if (hasUnrepresentedTitleTail(normalized, parsed)) {
     return { route: 'server_required', result: parsed };
   }
 

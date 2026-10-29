@@ -18,7 +18,8 @@ import { eventRefForEvent, eventRefKey } from '../utils/eventIdentity';
 import { labelForReminder } from '../services/notifications';
 import { eventDetailTitle, eventListTitle } from '../utils/eventTitle';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
-import { scheduleTimePeriodFromText, scheduleTimePeriodLabel } from '../services/localScheduleParser';
+import { eventTimeLabel, scheduleTimeForEvent } from '../utils/scheduleEventTime';
+import type { ScheduleEditorChanges, ScheduleEditorDraft } from '../domain/scheduleEditor';
 
 // CAL-SEARCH-001 / CAL-DETAIL-001 / CAL-EDIT-001: pure builders keep native pages deterministic.
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -104,15 +105,6 @@ function searchMatches(events: readonly CalEvent[], query: string, today: Date):
   return sortEventsForSearch(projected, today);
 }
 
-function eventTimeLabel(event: CalEvent): string {
-  if (event.isAllDay) return '全天';
-  const fuzzyTime = scheduleTimePeriodLabel(scheduleTimePeriodFromText(event.rawText ?? ''));
-  if (!event.startTime && !event.endTime && fuzzyTime) return fuzzyTime;
-  if (!event.startTime && !event.endTime) return '无具体时间';
-  if (event.startTime && event.endTime) return `${event.startTime} - ${event.endTime}`;
-  return event.startTime ?? event.endTime ?? '';
-}
-
 export function buildNativeCalendarSearchSnapshot(
   events: readonly CalEvent[],
   query: string,
@@ -159,11 +151,10 @@ function conciseDate(value: string): string {
 export function nativeCalendarDetailTimeLabel(event: CalEvent): string {
   const start = conciseDate(event.startDate);
   const end = event.endDate && event.endDate !== event.startDate ? conciseDate(event.endDate) : undefined;
-  if (event.isAllDay) return end ? `${start} - ${end}` : start;
-  if (!event.startTime && !event.endTime) {
-    const fuzzyTime = scheduleTimePeriodLabel(scheduleTimePeriodFromText(event.rawText ?? ''));
+  const time = scheduleTimeForEvent(event);
+  if (time.precision !== 'exact') {
     const dateRange = end ? `${start} - ${end}` : start;
-    return fuzzyTime ? `${dateRange} ${fuzzyTime}` : dateRange;
+    return `${dateRange} ${eventTimeLabel(event)}`;
   }
   const startWithTime = event.startTime ? `${start} ${event.startTime}` : start;
   if (end) return `${startWithTime} - ${end}${event.endTime ? ` ${event.endTime}` : ''}`;
@@ -273,6 +264,7 @@ export function buildNativeCalendarDetailSnapshot(
 // CAL-EDIT-001 / CAL-REPEAT-RRULE-001: preserve the recurrence end across the native page boundary.
 export function nativeCalendarEditDraft(event: Partial<CalEvent> & Pick<CalEvent, 'startDate'>): NativeCalendarEditDraftSnapshot {
   const allDay = Boolean(event.isAllDay);
+  const time = scheduleTimeForEvent(event);
   return {
     title: event.title ?? '',
     startDate: event.startDate,
@@ -280,6 +272,8 @@ export function nativeCalendarEditDraft(event: Partial<CalEvent> & Pick<CalEvent
     startTime: allDay ? null : event.startTime ?? null,
     endTime: allDay ? null : event.endTime ?? null,
     isAllDay: allDay,
+    timePrecision: time.precision,
+    timePeriod: time.period,
     repeat: event.repeat ?? 'once',
     recurrenceUntilDate: event.repeat && event.repeat !== 'once'
       ? event.recurrenceUntilDate ?? null
@@ -301,6 +295,8 @@ export function buildNativeCalendarEditSnapshot(input: {
   locating?: boolean;
   state?: NativeCalendarEditSnapshot['state'];
   message?: string;
+  input?: NativeCalendarEditSnapshot['input'];
+  nativeEditAck?: string | null;
 }): NativeCalendarEditSnapshot {
   return {
     schemaVersion: CALENDAR_PAGE_SNAPSHOT_SCHEMA_VERSION,
@@ -314,5 +310,29 @@ export function buildNativeCalendarEditSnapshot(input: {
     saving: Boolean(input.saving),
     dirty: Boolean(input.dirty),
     locating: Boolean(input.locating),
+    input: input.input,
+    nativeEditAck: input.nativeEditAck ?? null,
+  };
+}
+
+export function nativeDraftFromScheduleEditor(draft: ScheduleEditorDraft): NativeCalendarEditDraftSnapshot {
+  return {
+    title: draft.title, startDate: draft.startDate ?? '', endDate: draft.endDate ?? draft.startDate ?? '',
+    startTime: draft.time.startTime, endTime: draft.time.endTime,
+    isAllDay: draft.legacyIsAllDay, timePrecision: draft.time.precision, timePeriod: draft.time.period,
+    repeat: draft.repeat, recurrenceUntilDate: draft.recurrenceUntilDate,
+    reminderMinutes: draft.reminderMinutes, location: draft.location, notes: draft.notes,
+  };
+}
+
+export function scheduleEditorChangesFromNative(value: NativeCalendarEditDraftSnapshot): ScheduleEditorChanges {
+  return {
+    title: value.title, startDate: value.startDate || null,
+    endDate: value.endDate && value.endDate !== value.startDate ? value.endDate : null,
+    time: scheduleTimeForEvent({
+      ...value, startTime: value.startTime ?? undefined, endTime: value.endTime ?? undefined,
+    }),
+    repeat: value.repeat, recurrenceUntilDate: value.recurrenceUntilDate,
+    reminderMinutes: value.reminderMinutes, location: value.location, notes: value.notes,
   };
 }

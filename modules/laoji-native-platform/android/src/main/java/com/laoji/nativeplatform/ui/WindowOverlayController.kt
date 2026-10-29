@@ -15,13 +15,11 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.view.ViewCompat
 import androidx.lifecycle.Lifecycle
 import com.laoji.nativeplatform.calendarpages.CalendarSearchPageView
-import com.laoji.nativeplatform.schedulevoice.ScheduleVoiceHostView
 import expo.modules.kotlin.AppContext
 import java.util.concurrent.CountDownLatch
 
 internal enum class WindowOverlayKind(val wireName: String) {
   CALENDAR_SEARCH("calendar-search"),
-  SCHEDULE_VOICE("schedule-voice"),
   ACTION_SHEET("action-sheet"),
   DIALOG("dialog"),
   TOAST("toast");
@@ -95,15 +93,6 @@ internal class WindowOverlayController(
     }
     ensureHost()
 
-    if (kind == WindowOverlayKind.ACTION_SHEET || kind == WindowOverlayKind.SCHEDULE_VOICE) {
-      val conflictingKind = if (kind == WindowOverlayKind.ACTION_SHEET) {
-        WindowOverlayKind.SCHEDULE_VOICE
-      } else {
-        WindowOverlayKind.ACTION_SHEET
-      }
-      entries[conflictingKind]?.let { removeEntry(it, "replaced", notify = true) }
-    }
-
     var entry = entries[kind]
     if (entry != null && (entry.ownerId != ownerId || closing.contains(kind))) {
       removeEntry(entry, "replaced", notify = true)
@@ -129,7 +118,6 @@ internal class WindowOverlayController(
     when (val view = entry.view) {
       is LaojiNativeDialogHostView -> view.setSnapshot(mapOf("visible" to false))
       is LaojiNativeActionSheetHostView -> view.setSnapshot(mapOf("visible" to false))
-      is ScheduleVoiceHostView -> animateDismiss(entry, reason) { callback -> view.dismiss(callback) }
       is CalendarSearchPageView -> animateDismiss(entry, reason) { callback -> view.dismiss(callback) }
       is NativeToastHostView -> view.dismiss(reason)
       else -> removeEntry(entry, reason, notify = true)
@@ -226,16 +214,7 @@ internal class WindowOverlayController(
       backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
           val top = topModalEntry() ?: return
-          if (
-            top.kind == WindowOverlayKind.SCHEDULE_VOICE &&
-            (top.view as? ScheduleVoiceHostView)?.hideImeIfVisible() == true
-          ) {
-            return
-          }
-          if (
-            top.kind == WindowOverlayKind.SCHEDULE_VOICE ||
-            top.kind == WindowOverlayKind.CALENDAR_SEARCH
-          ) {
+          if (top.kind == WindowOverlayKind.CALENDAR_SEARCH) {
             emitAction(top.kind, top.ownerId, mapOf("type" to "close"))
           }
           dismiss(top.ownerId, top.kind.wireName, "system-back")
@@ -268,10 +247,6 @@ internal class WindowOverlayController(
         setItemListener { emitAction(kind, ownerId, it) }
         setDismissListener { finishNativeDismiss(kind, ownerId, it) }
       }
-      WindowOverlayKind.SCHEDULE_VOICE -> ScheduleVoiceHostView(currentActivity, appContext).apply {
-        setBridgeEventsEnabled(false)
-        setActionListener { emitAction(kind, ownerId, it) }
-      }
       WindowOverlayKind.CALENDAR_SEARCH -> CalendarSearchPageView(currentActivity, appContext).apply {
         setBridgeEventsEnabled(false)
         setActionListener { emitAction(kind, ownerId, it) }
@@ -288,7 +263,6 @@ internal class WindowOverlayController(
     when (val view = entry.view) {
       is LaojiNativeDialogHostView -> view.setSnapshot(snapshot)
       is LaojiNativeActionSheetHostView -> view.setSnapshot(snapshot)
-      is ScheduleVoiceHostView -> view.setSnapshot(snapshot)
       is CalendarSearchPageView -> {
         view.setSnapshot(snapshot)
         view.commitProps()
@@ -337,7 +311,6 @@ internal class WindowOverlayController(
 
   private fun slotFor(kind: WindowOverlayKind): FrameLayout = when (kind) {
     WindowOverlayKind.CALENDAR_SEARCH -> requireNotNull(pageSlot)
-    WindowOverlayKind.SCHEDULE_VOICE,
     WindowOverlayKind.ACTION_SHEET -> requireNotNull(sheetSlot)
     WindowOverlayKind.DIALOG -> requireNotNull(dialogSlot)
     WindowOverlayKind.TOAST -> requireNotNull(toastSlot)
@@ -390,7 +363,6 @@ internal class WindowOverlayController(
   private fun topModalEntry(): Entry? =
     entries[WindowOverlayKind.DIALOG]
       ?: entries[WindowOverlayKind.ACTION_SHEET]
-      ?: entries[WindowOverlayKind.SCHEDULE_VOICE]
       ?: entries[WindowOverlayKind.CALENDAR_SEARCH]
 
   private fun restoreActivityAccessibility() {

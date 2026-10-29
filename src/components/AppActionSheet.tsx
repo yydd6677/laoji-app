@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ColorPalette } from '../theme/colors';
 import { useTheme } from '../theme/ThemeProvider';
@@ -159,6 +159,7 @@ export function AppActionSheet({
                 <View style={s.headerDivider} testID="app-action-sheet-header-divider" />
               </>
             ) : null}
+            <ScrollView style={{ maxHeight: windowHeight / 2 }} bounces={false} showsVerticalScrollIndicator={false}>
             {presented.items.map((item, index) => {
               const color = item.disabled ? C.disabled : item.destructive ? C.red : C.text;
               return (
@@ -183,6 +184,7 @@ export function AppActionSheet({
                 </Pressable>
               );
             })}
+            </ScrollView>
           </View>
           <Pressable
             style={({ pressed }) => [s.cancel, pressed && s.itemPressed]}

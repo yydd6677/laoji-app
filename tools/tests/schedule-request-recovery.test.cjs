@@ -64,6 +64,7 @@ test('v2 provider outage stays unavailable while v2 content errors stay content 
   for (const [status, code, expected] of [
     [503, 'SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE', 'parser_unavailable'],
     [422, 'SCHEDULE_GRAPH_INVALID', 'invalid_schedule'],
+    [422, 'SCHEDULE_MODEL_NO_RESULT', 'invalid_schedule'],
     [422, 'MISSING_DATE', 'missing_date'],
   ]) {
     const p = parser(async () => ({ scheduleGraphV2: true }), () => { throw new V2Error('rejected', status, code); });

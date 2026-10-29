@@ -85,6 +85,8 @@ class RecorderEngine(
   private var recordingThread: Thread? = null
   private var fileSession: RecordingFileSession? = null
   private var asrSocket: RealtimeAsrTransport? = null
+  private var asrConnection: CompletableFuture<Unit>? = null
+  private var asrConnectionDeadlineMs = 0L
   private var stopFuture: CompletableFuture<RecorderStopResult>? = null
   private var capturedAudioBars: List<Float>? = null
 
@@ -471,6 +473,8 @@ class RecorderEngine(
   }
 
   private fun observeRealtimeAsrConnection(connection: CompletableFuture<Unit>) {
+    asrConnection = connection
+    asrConnectionDeadlineMs = SystemClock.elapsedRealtime() + config.connectionTimeoutMs + 500L
     Thread({
       val failure = try {
         connection.get(config.connectionTimeoutMs + 500L, TimeUnit.MILLISECONDS)
@@ -490,9 +494,9 @@ class RecorderEngine(
     }
   }
 
-  private fun finishRealtimeAsrConnection(failure: Throwable?) {
+  private fun finishRealtimeAsrConnection(failure: Throwable?, draining: Boolean = false) {
     if (!asrConnectionHandled.compareAndSet(false, true)) return
-    if (stopRequested || state == RecorderState.LOCAL_SAVED || state == RecorderState.FAILED) {
+    if ((!draining && stopRequested) || state == RecorderState.LOCAL_SAVED || state == RecorderState.FAILED) {
       asrSocket?.close()
       return
     }
@@ -668,6 +672,23 @@ class RecorderEngine(
       // Finalization writes a complete journal after the WAV has been synced and renamed.
     }
     stopCapture()
+
+    // A short utterance may finish before the existing handshake. Stop the
+    // microphone first, then drain that SAME connection within its remaining
+    // original budget. Do not discard its queued PCM and open a second socket
+    // merely because the user released before onOpen reached the command queue.
+    if (waitForAsr && !asrConnected && !asrConnectionHandled.get()) {
+      asrConnection?.let { connection ->
+        val connectFailure = try {
+          connection.get((asrConnectionDeadlineMs - SystemClock.elapsedRealtime()).coerceAtLeast(1L), TimeUnit.MILLISECONDS)
+          null
+        } catch (error: Exception) {
+          asrSocket?.cancel()
+          error
+        }
+        finishRealtimeAsrConnection(connectFailure, draining = true)
+      }
+    }
 
     val finalized = try {
       requireNotNull(fileSession).finalizeRecording(

@@ -90,6 +90,12 @@ class CalendarEventRecord : Record {
   var timePeriodLabel: String? = null
 
   @Field
+  var timePrecision: String? = null
+
+  @Field
+  var timePeriod: String? = null
+
+  @Field
   var timeZoneId: String = ""
 
   @Field
@@ -118,6 +124,8 @@ class CalendarEventRecord : Record {
     startMinutes = startMinutes,
     endMinutes = endMinutes,
     timePeriodLabel = timePeriodLabel,
+    timePrecision = timePrecision,
+    timePeriod = timePeriod,
     timeZoneId = timeZoneId,
     allDay = allDay,
     editable = editable,

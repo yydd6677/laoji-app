@@ -15,6 +15,23 @@ from app.services.schedule_graph_service import (
 REFERENCE = datetime(2026, 8, 18, 9, 0)
 
 
+@pytest.mark.parametrize("resolution", ["omitted", "unresolved", None])
+def test_graph_carries_observed_date_resolution_without_applying_product_default(resolution):
+    graph = produce_schedule_graph("取快递", REFERENCE, "Asia/Shanghai",
+        parsed={"title": "取快递", "date_resolution": resolution, "needs_clarification": True, "parse_source": "local_llm"})
+    assert graph.slots.date_resolution == resolution
+    assert graph.slots.start_date is None
+    assert graph.state == "needs_clarification"
+    assert graph.provenance.engine == "server-model"
+
+
+@pytest.mark.parametrize("resolution,start_date", [("resolved", None), ("omitted", "2026-10-28"), ("unresolved", "2026-10-28")])
+def test_graph_rejects_contradictory_date_default_metadata(resolution, start_date):
+    with pytest.raises(ValueError, match="schedule_date_resolution_mismatch"):
+        produce_schedule_graph("取快递", REFERENCE, "Asia/Shanghai", parsed={"title": "取快递",
+            "date_resolution": resolution, "start_date": start_date, "needs_clarification": True})
+
+
 def _parsed(**overrides):
     value = {
         "title": "开会",

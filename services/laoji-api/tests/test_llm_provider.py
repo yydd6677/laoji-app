@@ -14,6 +14,64 @@ from app.services import llm_provider
 Config = namedtuple("Config", "base_url model provider api_key chat_path")
 
 
+def test_ollama_decoding_schema_preserves_shape_and_literal_data_without_large_string_expansion():
+    import copy
+    schema = {"type": "object", "maxLength": 65536, "properties": {
+        "maxLength": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "value": {"anyOf": [{"type": "string", "maxLength": 65536}, {"type": "null"}]},
+        "literal": {"const": {"maxLength": 12}, "default": {"maxLength": 9}},
+    }, "$defs": {"Text": {"type": "string", "maxLength": 65536}}, "required": ["maxLength", "value"],
+        "additionalProperties": False, "oneOf": [{"properties": {"op": {"enum": ["set", "clear"]}}}],
+        "items": {"$ref": "#/$defs/Text"}, "maxItems": 4}
+    before = copy.deepcopy(schema)
+    result = llm_provider._ollama_decoding_schema(schema)
+    assert schema == before
+    assert "maxLength" not in result
+    assert result["properties"]["maxLength"] == {"type": "string", "minLength": 1}
+    assert result["properties"]["value"]["anyOf"] == [{"type": "string"}, {"type": "null"}]
+    assert result["properties"]["literal"] == schema["properties"]["literal"]
+    assert result["required"] == schema["required"] and result["additionalProperties"] is False
+    assert result["oneOf"] == schema["oneOf"]
+    assert result["items"] == schema["items"] and result["maxItems"] == 4
+    assert result["$defs"]["Text"] == {"type": "string"}
+    assert llm_provider._ollama_decoding_schema("json") == "json"
+
+
+def test_decoding_adaptation_does_not_relax_canonical_schedule_validation():
+    from app.schemas.schedule_edit import TextEdit
+    canonical = TextEdit.model_json_schema()
+    assert canonical["properties"]["value"]["anyOf"][0]["maxLength"] == 65536
+    decoded = llm_provider._ollama_decoding_schema(canonical)
+    assert "maxLength" not in decoded["properties"]["value"]["anyOf"][0]
+    with pytest.raises(ValueError):
+        TextEdit(op="set", value="x" * 65537, evidence="原话")
+    with pytest.raises(ValueError):
+        TextEdit(op="set", value="有效", evidence="x" * 2001)
+
+
+def test_structured_ollama_transport_uses_decoding_schema_not_mutated_application_schema(monkeypatch):
+    from app.schemas.schedule_edit import ScheduleEditModelObservation
+    captured = {}
+    class Response:
+        def raise_for_status(self): pass
+        def json(self): return {"response": "{}", "done": True}
+    def post(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return Response()
+    monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    canonical = ScheduleEditModelObservation.model_json_schema()
+    before = json.dumps(canonical, ensure_ascii=False, sort_keys=True)
+    result = llm_provider._call_ollama_transport(
+        Config("http://127.0.0.1:21434", "qwen3.5:9b", "ollama", "", "/api/chat"),
+        "system", "input", response_format=canonical, max_tokens=2048)
+    assert result == "{}"
+    assert captured["url"].endswith("/api/generate")
+    assert captured["json"]["format"] == llm_provider._ollama_decoding_schema(canonical)
+    assert captured["json"]["options"]["num_predict"] == 2048
+    assert captured["json"]["options"]["num_ctx"] == llm_provider.canonical_generation_num_ctx()
+    assert json.dumps(canonical, ensure_ascii=False, sort_keys=True) == before
+
+
 def test_chat_forces_single_21434_provider_and_generation_model(monkeypatch):
     captured = {}
 

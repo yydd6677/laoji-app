@@ -11,7 +11,8 @@ import { eventEffectiveEndDate, eventEndsAtExclusiveMidnight } from '../utils/ev
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { isValidEventDate } from '../utils/eventDraftValidation';
 import { normalizeEventCategory } from '../utils/eventColors';
-import { scheduleTimePeriodFromText, scheduleTimePeriodLabel } from '../services/localScheduleParser';
+import { schedulePeriodLabel } from '../domain/scheduleTime';
+import { scheduleTimeForEvent } from '../utils/scheduleEventTime';
 
 const DAY_MS = 86_400_000;
 
@@ -40,7 +41,7 @@ export function localCalendarDate(value = new Date()): string {
 /** CAL-DAY-DRAG-001: convert a native semantic mutation back to repository fields. */
 export function nativeCalendarMutationChanges(
   mutation: NativeCalendarMutationRequest,
-): Pick<CalEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime'> {
+): Pick<CalEvent, 'startDate' | 'endDate' | 'startTime' | 'endTime' | 'timePrecision' | 'timePeriod' | 'isAllDay'> {
   if (mutation.startMinutes == null || mutation.endMinutes == null) {
     throw new Error('Timed calendar mutations require start and end minutes.');
   }
@@ -51,6 +52,9 @@ export function nativeCalendarMutationChanges(
     ),
     startTime: calendarTimeFromMinutes(mutation.startMinutes),
     endTime: calendarTimeFromMinutes(mutation.endMinutes),
+    timePrecision: 'exact',
+    timePeriod: null,
+    isAllDay: false,
   };
 }
 
@@ -69,14 +73,14 @@ export function nativeCalendarEventSnapshot(
   timeZoneId = deviceTimeZoneId(),
 ): NativeCalendarEventSnapshot {
   const ref = eventRefForEvent(event);
+  const time = scheduleTimeForEvent(event);
   const exclusiveMidnight = eventEndsAtExclusiveMidnight(event);
-  const startMinutes = event.isAllDay ? null : timeToMinutes(event.startTime);
-  const parsedEndMinutes = event.isAllDay ? null : timeToMinutes(event.endTime);
+  const startMinutes = time.precision === 'exact' ? timeToMinutes(time.startTime) : null;
+  const parsedEndMinutes = time.precision === 'exact' ? timeToMinutes(time.endTime ?? undefined) : null;
   const endEpochDay = calendarEpochDay(eventEffectiveEndDate(event));
-  const allDay = event.isAllDay === true || startMinutes === null;
-  const timePeriodLabel = !event.isAllDay && startMinutes === null
-    ? scheduleTimePeriodLabel(scheduleTimePeriodFromText(event.rawText ?? ''))
-    : null;
+  // Existing native allDay is a layout lane, not a business precision.
+  const allDay = time.precision !== 'exact';
+  const timePeriodLabel = schedulePeriodLabel(time.period);
   return {
     sourceEventId: ref.sourceEventId,
     occurrenceDate: ref.occurrenceDate,
@@ -89,6 +93,8 @@ export function nativeCalendarEventSnapshot(
     startMinutes,
     endMinutes: exclusiveMidnight ? 24 * 60 : parsedEndMinutes,
     timePeriodLabel,
+    timePrecision: time.precision,
+    timePeriod: time.period,
     timeZoneId,
     allDay,
     editable: true,

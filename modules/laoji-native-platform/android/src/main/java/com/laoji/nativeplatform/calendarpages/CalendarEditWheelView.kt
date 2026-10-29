@@ -194,6 +194,12 @@ internal class CalendarEditWheelView(context: Context) : View(context) {
     invalidate()
   }
 
+  /** A peer wheel settling must not cancel this wheel's active gesture. */
+  fun synchronizeValueIfIdle(value: Int) {
+    if (isPressed || inertiaRunning || snapAnimator?.isRunning == true) return
+    if (selectedValue != normalizeValue(value)) setValue(value)
+  }
+
   fun dispose() {
     cancelMotion()
     velocityTracker?.recycle()

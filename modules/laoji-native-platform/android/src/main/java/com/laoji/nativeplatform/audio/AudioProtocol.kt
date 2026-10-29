@@ -12,6 +12,26 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sqrt
 
+/** Privacy-safe transport attribution. Never return an exception message,
+ * URL, credential, session identity or server response body. */
+internal fun asrTransportFailureKind(error: Throwable): String {
+  val chain = mutableListOf<Throwable>()
+  var current: Throwable? = error
+  while (current != null && chain.size < 8 && chain.none { it === current }) {
+    chain.add(current)
+    current = current.cause
+  }
+  return when {
+    chain.any { it is javax.net.ssl.SSLException || it is java.security.cert.CertificateException } -> "tls"
+    chain.any { it is java.net.UnknownHostException } -> "dns"
+    chain.any { it is java.net.ConnectException || it is java.net.NoRouteToHostException } -> "connect"
+    chain.any { it is java.net.SocketTimeoutException } -> "timeout"
+    chain.any { it is java.net.ProtocolException } -> "protocol"
+    chain.any { it is java.io.IOException } -> "io"
+    else -> "unknown"
+  }
+}
+
 data class PcmLevel(
   val peak: Int,
   val rms: Int,

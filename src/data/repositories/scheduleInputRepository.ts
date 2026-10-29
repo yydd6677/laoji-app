@@ -45,10 +45,23 @@ export async function deferScheduleInput(id: string): Promise<void> {
       retry_at_ms=?, updated_at_ms=? WHERE id=? AND state='pending'`, Date.now() + 30_000, Date.now(), id);
   });
 }
+/** An explicit retry reuses the durable source and identity, not a new input. */
+export async function retryScheduleInput(id: string): Promise<void> {
+  await withScheduleDatabaseTransaction(async db => {
+    await db.runAsync("UPDATE schedule_input_jobs SET state='pending', attempts=0, retry_at_ms=0, updated_at_ms=? WHERE id=? AND state='failed'",
+      Date.now(), id);
+  });
+}
 export async function finishScheduleInput(id: string, state: 'saved' | 'dismissed'): Promise<void> {
   await withScheduleDatabaseTransaction(async db => {
+    if (state === 'dismissed') {
+      const draft = await db.getFirstAsync<{ state: string }>('SELECT state FROM schedule_editor_drafts WHERE input_job_id=?', id);
+      if (draft?.state === 'saving') throw new Error('日程正在保存，请稍后重试');
+      if (draft?.state === 'saved') return;
+      await db.runAsync("DELETE FROM schedule_editor_drafts WHERE input_job_id=? AND state NOT IN ('saving','saved')", id);
+    }
     // Keep a content-free idempotency receipt across board refresh/rename/re-receive.
-    await db.runAsync('UPDATE schedule_input_jobs SET state=?, draft_json=NULL, source_json=\'{}\', updated_at_ms=? WHERE id=?', state, Date.now(), id);
+    await db.runAsync('UPDATE schedule_input_jobs SET state=?, draft_json=NULL, source_json=\'{}\', updated_at_ms=? WHERE id=? AND state!=\'saved\'', state, Date.now(), id);
   });
 }
 export async function receivedScheduleInputIds(): Promise<string[]> {

@@ -1,4 +1,5 @@
 import type { CalEvent } from '../../types';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import { openScheduleDatabase, withScheduleDatabaseTransaction } from '../db/openScheduleDatabase';
 
 type LocalScheduleRow = {
@@ -25,7 +26,8 @@ export async function loadLocalScheduleEvents(): Promise<CalEvent[]> {
   });
 }
 
-export async function replaceLocalScheduleEvents(events: readonly CalEvent[]): Promise<void> {
+export async function replaceLocalScheduleEvents(events: readonly CalEvent[],
+  afterWrite?: (database: SQLiteDatabase) => Promise<void>): Promise<void> {
   const normalized = events.map(normalize);
   await withScheduleDatabaseTransaction(async database => {
     await database.runAsync('DELETE FROM local_schedule_events');
@@ -55,6 +57,7 @@ export async function replaceLocalScheduleEvents(events: readonly CalEvent[]): P
         now,
       );
     }
+    if (afterWrite) await afterWrite(database);
   });
 }
 

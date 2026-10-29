@@ -133,6 +133,7 @@ def _slots_from_result(result: Mapping[str, Any] | None) -> ScheduleGraphSlots:
     return ScheduleGraphSlots(
         title=text_value("title"),
         start_date=text_value("start_date"),
+        date_resolution=result.get("date_resolution"),
         end_date=text_value("end_date"),
         start_time=text_value("start_time"),
         end_time=text_value("end_time"),
@@ -196,7 +197,7 @@ def produce_schedule_graph(
     parsed_result = dict(parsed)
     intent_value, route, state = _intent_and_route(parsed_result, intent)
     source_key = source_id or source_id_for(text, reference, timezone)
-    engine = "server-model" if route == "server_required" else "recognizers"
+    engine = "server-model" if parsed_result.get("parse_source") in {"llm", "local_llm"} else "recognizers"
     graph = ScheduleMentionGraph(
         source=ScheduleGraphSource(
             text=text,
@@ -234,6 +235,9 @@ def validate_schedule_graph(graph: ScheduleMentionGraph | Mapping[str, Any]) -> 
                 raise ValueError(f"schedule_span_not_in_source:{field}")
     if candidate.state == "complete" and not candidate.slots.start_date:
         raise ValueError("schedule_complete_without_start_date")
+    resolution = candidate.slots.date_resolution
+    if resolution is not None and (resolution == "resolved") != bool(candidate.slots.start_date):
+        raise ValueError("schedule_date_resolution_mismatch")
     if candidate.route == "clarify" and candidate.state not in {"needs_clarification", "incomplete"}:
         raise ValueError("schedule_clarify_state_mismatch")
     if candidate.route == "reject" and candidate.state != "reject":

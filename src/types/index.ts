@@ -6,6 +6,7 @@ import type {
   MeetingSummaryDocument,
 } from '../domain/meeting';
 import type { EventCategory } from '../utils/eventColors';
+import type { SchedulePeriod, ScheduleTimePrecision } from '../domain/scheduleTime';
 
 export interface CalEvent {
   id: string;
@@ -38,6 +39,9 @@ export interface CalEvent {
   endDate?: string;
   startTime?: string;
   endTime?: string;
+  /** Absent only on legacy records; explicit values never reparse rawText. */
+  timePrecision?: ScheduleTimePrecision;
+  timePeriod?: SchedulePeriod | null;
   color: string;
   spanning?: boolean;
   category?: EventCategory;
@@ -155,6 +159,8 @@ export interface EventDraftParams {
   endDate?: string;
   startTime?: string;
   endTime?: string;
+  timePrecision?: ScheduleTimePrecision;
+  timePeriod?: SchedulePeriod | null;
   isAllDay: boolean;
   repeat?: CalEvent['repeat'];
   recurrenceInterval?: number;
@@ -213,6 +219,7 @@ export type RootStackParamList = {
   HardwareDevices: undefined;
   Legal: { kind: 'terms' | 'privacy' | 'help' | 'guide' | 'version' | 'contact' };
   AddEvent: {
+    editorDraftId?: string;
     date?: string;
     endDate?: string;
     startTime?: string;

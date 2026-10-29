@@ -4,7 +4,7 @@ import {
   ToastAndroid,
   View,
 } from 'react-native';
-import { useFocusEffect, type RouteProp } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   LaojiMinutesView,
@@ -26,6 +26,8 @@ import {
   type MeetingActionEditorValue,
 } from '../components/MeetingActionEditorSheet';
 import { MeetingActionsSheet } from '../components/MeetingActionsSheet';
+import { ScheduleEditorResumeSheet } from '../components/ScheduleEditorResumeSheet';
+import { useScheduleEditorEntry } from '../hooks/useScheduleEditorEntry';
 import {
   MeetingSummaryVersionSheet,
   type MeetingSummaryVersionChoice,
@@ -444,6 +446,7 @@ function meetingActionFailureCode(reason: unknown): string {
 /** MIN-DETAIL-001 / MIN-SUMMARY-001 / MIN-GUEST-001 / MIN-PLAYER-001. */
 export function TranscriptionScreen({ navigation, route }: Props) {
   const { colors: C } = useTheme();
+  const editorEntry = useScheduleEditorEntry(navigation, useIsFocused(), false);
   const currentProjectionRef = useRef<NativeProjectionEnvelope | null>(null);
   const {
     meetings,
@@ -3121,13 +3124,15 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     }
 
     openingFollowupRef.current = true;
+    const requestedMeetingId = meeting.id;
     try {
       const canonical = await loadMeetingActions(meetingScopeKey, meeting.id);
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId || !navigation.isFocused()) return;
       const canonicalAction = meetingAction(canonical.actions, actionId);
       if (!canonicalAction?.canonicalId) {
         throw new Error('meeting action canonical projection is unavailable');
       }
-      navigation.navigate('AddEvent', {
+      await editorEntry.create({
         draft: meetingActionFollowupDraft(canonicalAction),
         followup: {
           meetingId: meeting.id,
@@ -3137,6 +3142,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         },
       });
     } catch {
+      if (!mountedRef.current || routeMeetingIdRef.current !== requestedMeetingId || !navigation.isFocused()) return;
       showDialog({
         title: '暂时无法创建后续日程',
         message: '这条待办事项尚未完成本机保存，请稍后重试。',
@@ -3145,7 +3151,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
     } finally {
       openingFollowupRef.current = false;
     }
-  }, [displayedActionCandidates, events, meeting, meetingScopeKey, navigation, searchableEvents, showDialog]);
+  }, [displayedActionCandidates, editorEntry.create, events, meeting, meetingScopeKey, navigation, searchableEvents, showDialog]);
 
   const openMeetingActionFollowupFromList = useCallback((actionId: string) => {
     const requestedMeetingId = meeting?.id;
@@ -4222,6 +4228,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
 
   return (
     <ScreenContainer edges={['bottom']} bg={C.body}>
+      <ScheduleEditorResumeSheet selection={editorEntry.resume} onChoose={editorEntry.chooseResume} onClose={editorEntry.dismissResume} />
       <View
         style={styles.root}
         testID="meeting-detail-native-root"

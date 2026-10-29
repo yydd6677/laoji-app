@@ -371,7 +371,7 @@ private class MonthWeekRowView(context: Context) : View(context) {
       val borderRadius = (radius - borderInset).coerceAtLeast(0f)
       canvas.drawRoundRect(borderRect, borderRadius, borderRadius, eventBorderPaint)
       val title = CalendarUi.ellipsize(
-        CalendarUi.eventDisplayTitle(segment.event),
+        CalendarUi.eventChipTitle(segment.event),
         eventTextPaint,
         rect.width() - CalendarUi.dp(context, 12f),
       )
@@ -940,7 +940,7 @@ private class SelectedDayPageView(context: Context) : FrameLayout(context) {
 
   private fun eventTimeLabel(epochDay: Int, event: CalendarEvent): String {
     event.timePeriodLabel?.takeIf(String::isNotBlank)?.let { return it }
-    if (event.allDay) return "全天"
+    if (event.allDay) return "未设置"
     val bounds = MonthExpandedLayoutContract.eventTimeBounds(epochDay, event)
     return timeFormatter.range(bounds.startMinute, bounds.endMinute)
   }

@@ -36,7 +36,9 @@ private fun asList(value: Any?): List<Any?> = value as? List<Any?> ?: emptyList(
 
 private class MaxHeightScrollView(context: Context, private val maxHeightPx: Int) : ScrollView(context) {
   override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-    val bounded = MeasureSpec.makeMeasureSpec(maxHeightPx, MeasureSpec.AT_MOST)
+    val available = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) maxHeightPx
+      else min(maxHeightPx, MeasureSpec.getSize(heightMeasureSpec))
+    val bounded = MeasureSpec.makeMeasureSpec(available.coerceAtLeast(1), MeasureSpec.AT_MOST)
     super.onMeasure(widthMeasureSpec, bounded)
   }
 }
@@ -489,6 +491,14 @@ class LaojiNativeActionSheetHostView(
       }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, 52f).toInt()))
       addDivider(panel)
     }
+    // Keep title and cancel outside a bounded item lane, even with many drafts.
+    val itemScroll = MaxHeightScrollView(context, resources.displayMetrics.heightPixels / 2).apply {
+      isFillViewport = false
+      isVerticalScrollBarEnabled = false
+    }
+    val itemColumn = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+    itemScroll.addView(itemColumn, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    panel.addView(itemScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     items.forEachIndexed { index, item ->
       val itemView = TextView(context).apply {
         text = item.label
@@ -503,6 +513,9 @@ class LaojiNativeActionSheetHostView(
         isClickable = !item.disabled
         isFocusable = !item.disabled
         contentDescription = item.label
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        setPadding(NativeUiTokens.dp(context, 12f).toInt(), 0, NativeUiTokens.dp(context, 12f).toInt(), 0)
         accessibilityRoleCompat("menuitem")
         if (!item.disabled) {
           setOnClickListener {
@@ -512,8 +525,8 @@ class LaojiNativeActionSheetHostView(
           }
         }
       }
-      panel.addView(itemView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, NativeUiTokens.SHEET_ITEM_HEIGHT_DP).toInt()))
-      if (index < items.lastIndex) addDivider(panel)
+      itemColumn.addView(itemView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, NativeUiTokens.SHEET_ITEM_HEIGHT_DP).toInt()))
+      if (index < items.lastIndex) addDivider(itemColumn)
     }
 
     val cancel = TextView(context).apply {

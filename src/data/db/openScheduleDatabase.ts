@@ -1,8 +1,9 @@
-import { deleteDatabaseAsync, openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
+import { backupDatabaseAsync, deleteDatabaseAsync, openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import { diagnosticAudit } from '../../services/diagnostics';
 
 const SCHEDULE_DATABASE_NAME = 'laoji-schedule.db';
-const SCHEDULE_DATABASE_SCHEMA_VERSION = 3;
+const SCHEDULE_DATABASE_SCHEMA_VERSION = 4;
+const SCHEDULE_PRE_EDITOR_BACKUP_NAME = 'laoji-schedule.pre-editor-v4.db';
 
 export const SCHEDULE_DATABASE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS schedule_database_meta (
@@ -74,6 +75,31 @@ CREATE TABLE IF NOT EXISTS schedule_input_jobs (
   updated_at_ms INTEGER NOT NULL,
   created_at_ms INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schedule_editor_drafts (
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL CHECK(state IN ('editing','recording','parsing','saving','saved')),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  state_revision INTEGER NOT NULL CHECK(state_revision >= 1),
+  draft_json TEXT NOT NULL,
+  input_job_id TEXT UNIQUE,
+  event_ref_json TEXT,
+  pending_input_json TEXT,
+  last_undo_json TEXT,
+  save_request_id TEXT NOT NULL UNIQUE,
+  saved_event_ref_json TEXT,
+  updated_at_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_schedule_editor_unfinished
+  ON schedule_editor_drafts(state, updated_at_ms DESC);
+
+CREATE TABLE IF NOT EXISTS schedule_database_migrations (
+  target_version INTEGER PRIMARY KEY,
+  source_version INTEGER NOT NULL,
+  backup_path TEXT NOT NULL,
+  event_count INTEGER NOT NULL,
+  completed_at_ms INTEGER NOT NULL
+);
 `;
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
@@ -87,6 +113,52 @@ async function currentSchemaVersion(database: SQLiteDatabase): Promise<number> {
     throw new Error('schedule database schema version is invalid');
   }
   return version;
+}
+
+async function integrityCheck(database: SQLiteDatabase): Promise<void> {
+  const rows = await database.getAllAsync<{ integrity_check: string }>('PRAGMA integrity_check');
+  if (rows.length !== 1 || rows[0]?.integrity_check !== 'ok') {
+    throw new Error('schedule database integrity check failed');
+  }
+}
+
+async function scheduleRows(database: SQLiteDatabase): Promise<string> {
+  return JSON.stringify(await database.getAllAsync<{ id: string; event_json: string }>(
+    'SELECT id, event_json FROM local_schedule_events ORDER BY id',
+  ));
+}
+
+/** Called before the opening promise resolves: every queued writer awaits it. */
+async function snapshotBeforeEditorMigration(source: SQLiteDatabase, sourceVersion: number) {
+  await integrityCheck(source);
+  const before = await scheduleRows(source);
+  const destination = await openDatabaseAsync(SCHEDULE_PRE_EDITOR_BACKUP_NAME, { useNewConnection: true });
+  try {
+    const receiptTable = await destination.getFirstAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='schedule_pre_editor_backup_receipt'",
+    );
+    if (!receiptTable) {
+      // Retry an incomplete copy in the same file, never create rolling copies.
+      await backupDatabaseAsync({ sourceDatabase: source, destDatabase: destination });
+    }
+    await integrityCheck(destination);
+    if (await currentSchemaVersion(destination) !== sourceVersion
+      || await scheduleRows(destination) !== before || await scheduleRows(source) !== before) {
+      throw new Error('schedule migration snapshot does not match the source');
+    }
+    const eventCount = (JSON.parse(before) as unknown[]).length;
+    await destination.execAsync(`CREATE TABLE IF NOT EXISTS schedule_pre_editor_backup_receipt (
+      singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
+      source_version INTEGER NOT NULL, event_count INTEGER NOT NULL, verified_at_ms INTEGER NOT NULL
+    )`);
+    await destination.runAsync(
+      'INSERT OR IGNORE INTO schedule_pre_editor_backup_receipt VALUES (1, ?, ?, ?)',
+      sourceVersion, eventCount, Date.now(),
+    );
+    return { path: destination.databasePath, eventCount };
+  } finally {
+    await destination.closeAsync();
+  }
 }
 
 async function initializeScheduleDatabase(): Promise<SQLiteDatabase> {
@@ -106,13 +178,32 @@ async function initializeScheduleDatabase(): Promise<SQLiteDatabase> {
         `schedule database schema ${installedVersion} is newer than supported ${SCHEDULE_DATABASE_SCHEMA_VERSION}`,
       );
     }
-    await database.execAsync(SCHEDULE_DATABASE_SCHEMA_SQL);
-    await database.runAsync(
-      'UPDATE schedule_database_meta SET schema_version = ? WHERE singleton_id = 1',
-      SCHEDULE_DATABASE_SCHEMA_VERSION,
-    );
     if (installedVersion < SCHEDULE_DATABASE_SCHEMA_VERSION) {
-      await database.execAsync(`PRAGMA user_version = ${SCHEDULE_DATABASE_SCHEMA_VERSION};`);
+    const snapshot = installedVersion > 0 && installedVersion < 4
+      ? await snapshotBeforeEditorMigration(database, installedVersion) : null;
+    await database.execAsync('BEGIN IMMEDIATE;');
+    try {
+      await database.execAsync(SCHEDULE_DATABASE_SCHEMA_SQL);
+      await database.runAsync(
+        'UPDATE schedule_database_meta SET schema_version = ? WHERE singleton_id = 1',
+        SCHEDULE_DATABASE_SCHEMA_VERSION,
+      );
+      if (snapshot) {
+        await database.runAsync(
+          `INSERT INTO schedule_database_migrations
+            (target_version, source_version, backup_path, event_count, completed_at_ms) VALUES (4, ?, ?, ?, ?)`,
+          installedVersion, snapshot.path, snapshot.eventCount, Date.now(),
+        );
+      }
+      if (installedVersion < SCHEDULE_DATABASE_SCHEMA_VERSION) {
+        await database.execAsync(`PRAGMA user_version = ${SCHEDULE_DATABASE_SCHEMA_VERSION};`);
+      }
+      await integrityCheck(database);
+      await database.execAsync('COMMIT;');
+    } catch (error) {
+      await database.execAsync('ROLLBACK;').catch(() => undefined);
+      throw error;
+    }
     }
 
     const metadata = await database.getFirstAsync<{ schema_version: number }>(
@@ -223,10 +314,12 @@ export async function deleteScheduleDatabase(): Promise<void> {
       readDatabase?.closeAsync(),
       writeDatabase?.closeAsync(),
     ]);
-    try {
-      await deleteDatabaseAsync(SCHEDULE_DATABASE_NAME);
-    } catch (error) {
-      if (!(error instanceof Error) || !/not found/i.test(error.message)) throw error;
+    for (const name of [SCHEDULE_DATABASE_NAME, SCHEDULE_PRE_EDITOR_BACKUP_NAME]) {
+      try {
+        await deleteDatabaseAsync(name);
+      } catch (error) {
+        if (!(error instanceof Error) || !/not found/i.test(error.message)) throw error;
+      }
     }
   });
   writeTail = operation.then(() => undefined, () => undefined);
@@ -236,4 +329,5 @@ export async function deleteScheduleDatabase(): Promise<void> {
 export {
   SCHEDULE_DATABASE_NAME,
   SCHEDULE_DATABASE_SCHEMA_VERSION,
+  SCHEDULE_PRE_EDITOR_BACKUP_NAME,
 };

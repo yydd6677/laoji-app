@@ -1,6 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
+import type { SQLiteDatabase } from 'expo-sqlite';
+import type { ScheduleEditorSaveRequest, ScheduleEditorSaveReceipt } from '../domain/scheduleEditor';
+import { completeScheduleEditorSaveInTransaction, completeStoredScheduleEditorSave, findCommittedScheduleEditorSave } from '../data/repositories/scheduleEditorRepository';
 import { useLinkedActionCompletion } from '../services/linkedActionCompletion';
+import { reconcileSavedScheduleFollowups } from '../services/meetingActionFollowup';
 import { CalEvent, EventRecurrenceScope, EventRef } from '../types';
 import { colorForEvent, normalizeEventCategory } from '../utils/eventColors';
 import {
@@ -276,12 +280,13 @@ interface EventsContextType {
   monthStates: Record<string, EventMonthLoadState>;
   cacheRecoveryNotice: null;
   hydratedScope: string | null;
-  addEvent: (ev: Omit<CalEvent, 'id'>) => Promise<EventCreateResult>;
+  addEvent: (ev: Omit<CalEvent, 'id'>, editor?: ScheduleEditorSaveRequest) => Promise<EventCreateResult>;
   deleteEvent: (ref: EventRef, scope?: EventRecurrenceScope) => Promise<void>;
   updateEvent: (
     ref: EventRef,
     changes: Partial<CalEvent>,
     scope?: EventRecurrenceScope,
+    editor?: ScheduleEditorSaveRequest,
   ) => Promise<EventMutationResult>;
   refreshEvents: (year: number, month: number) => Promise<EventRefreshResult>;
   findConflicts: (
@@ -305,6 +310,7 @@ export type EventReminderDelivery = 'not-required' | 'scheduled' | 'unavailable'
 
 export interface EventMutationResult {
   reminderDelivery: EventReminderDelivery;
+  editorReceipt?: ScheduleEditorSaveReceipt;
 }
 
 export interface EventCreateResult extends EventMutationResult {
@@ -458,11 +464,11 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     // Account cache recovery no longer exists; kept as a stable context action.
   }, []);
 
-  const persistGuestEvents = useCallback((next: CalEvent[]) => {
+  const persistGuestEvents = useCallback((next: CalEvent[], afterWrite?: (database: SQLiteDatabase) => Promise<void>) => {
     // Calendar CRUD is device-primary.  AsyncStorage is read only once below
     // as a compatibility migration for older installs; all subsequent writes
     // go through the WAL-backed SQLite store.
-    return replaceLocalScheduleEvents(next);
+    return replaceLocalScheduleEvents(next, afterWrite);
   }, []);
 
   const enqueueGuestMutation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
@@ -630,7 +636,33 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     };
   }, [hydratedScope, refreshEventCatalog, refreshEvents, scope]);
 
-  const addEvent = useCallback(async (input: Omit<CalEvent, 'id'>): Promise<EventCreateResult> => {
+  // Retry only outstanding source completions, never recreate an event or
+  // make the calendar wait for another domain's projection.
+  useEffect(() => {
+    if (hydratedScope !== scope) return undefined;
+    let active = true;
+    let running = false, rerun = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const run = async () => {
+      if (!active || AppState.currentState !== 'active') return;
+      if (running) { rerun = true; return; }
+      running = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      let delay: number | null = 30_000;
+      try { delay = (await reconcileSavedScheduleFollowups()).retryInMs; } catch { /* Keep the durable receipt. */ }
+      running = false;
+      if (active && (rerun || delay !== null)) {
+        const nextDelay = rerun ? 250 : Math.max(250, delay!);
+        rerun = false;
+        timer = setTimeout(() => { void run(); }, nextDelay);
+      }
+    };
+    const listener = AppState.addEventListener('change', value => { if (value === 'active') void run(); });
+    void run();
+    return () => { active = false; if (timer) clearTimeout(timer); listener.remove(); };
+  }, [hydratedScope, scope, searchableEvents]);
+
+  const addEvent = useCallback(async (input: Omit<CalEvent, 'id'>, editor?: ScheduleEditorSaveRequest): Promise<EventCreateResult> => {
     const validation = validateEventDraft(input);
     if (!validation.valid || !validation.value) throw new EventDraftValidationError(validation.issues);
     const ev = validation.value;
@@ -642,8 +674,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         }
         const replay = eventWithClientRequestId(guestBaseEventsRef.current, ev.clientRequestId);
         if (replay) {
+          const editorReceipt = editor ? await completeStoredScheduleEditorSave(editor, eventRefForEvent(replay), ev) : undefined;
           return {
             eventRef: eventRefForEvent(replay),
+            editorReceipt,
             reminderDelivery: reminderDeliveryForEvent(replay, replay.notificationId),
           };
         }
@@ -664,10 +698,15 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           graphSchemaRevision: ev.graphSchemaRevision ?? 'mention-graph-v1',
         };
         const nextGuestEvents = [...guestBaseEventsRef.current, baseEvent];
-        await persistGuestEvents(nextGuestEvents);
+        let editorReceipt: ScheduleEditorSaveReceipt | undefined;
+        await persistGuestEvents(nextGuestEvents, editor ? async database => {
+          editorReceipt = await completeScheduleEditorSaveInTransaction(database, editor, eventRefForEvent(baseEvent), baseEvent);
+        } : undefined);
+        try {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
           return {
             eventRef: eventRefForEvent(baseEvent),
+            editorReceipt,
             reminderDelivery: reminderDeliveryForEvent(baseEvent, null, true),
           };
         }
@@ -685,12 +724,18 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
         const persisted = eventsRef.current.find(event => sourceEventId(event) === baseId) ?? baseEvent;
         return {
           eventRef: eventRefForEvent(persisted),
+          editorReceipt,
           reminderDelivery: reminderDeliveryForEvent(
             persisted,
             persisted.notificationId,
             !refreshResult.dataLoaded || !refreshResult.reminderSyncConfirmed || !horizonConfirmed,
           ),
         };
+        } catch (error) {
+          // A projection/notification read cannot negate an accepted commit.
+          if (!editorReceipt) throw error;
+          return { eventRef: eventRefForEvent(baseEvent), editorReceipt, reminderDelivery: 'unconfirmed' };
+        }
     });
   }, [enqueueGuestMutation, persistGuestEvents, refreshEvents, scope]);
 
@@ -894,25 +939,21 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
     ref: EventRef,
     changes: Partial<CalEvent>,
     recurrenceScope: EventRecurrenceScope = 'series',
+    editor?: ScheduleEditorSaveRequest,
   ): Promise<EventMutationResult> => {
     const operationGeneration = generationRef.current;
     if (activeScopeRef.current !== scope) throw new Error('event scope changed');
-    const currentEvents = eventsRef.current;
-    const previous = resolveEventReference(
-      [...currentEvents, ...searchableEventsRef.current],
-      ref,
-    );
-    if (!previous) throw new Error('event occurrence not found');
-    const { id: _ignoredId, ...candidate } = {
-      ...previous,
-      ...changes,
-    } as CalEvent;
-    const validation = validateEventDraft(candidate);
-    if (!validation.valid || !validation.value) throw new EventDraftValidationError(validation.issues);
-    const validated = validation.value;
     return enqueueGuestMutation(async () => {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
           throw new Error('event scope changed');
+        }
+        // A committed edit may have moved the old occurrence. Reconcile its
+        // durable receipt before trying to resolve that now-obsolete address.
+        const committedEditorReceipt = editor ? await findCommittedScheduleEditorSave(editor, changes) : null;
+        if (committedEditorReceipt) {
+          const committed = resolveEventReference(guestBaseEventsRef.current, committedEditorReceipt.eventRef);
+          return { editorReceipt: committedEditorReceipt,
+            reminderDelivery: committed ? reminderDeliveryForEvent(committed, committed.notificationId) : 'unconfirmed' };
         }
         const guestCurrentEvents = eventsRef.current;
         const guestPrevious = resolveEventReference(
@@ -920,6 +961,12 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           ref,
         );
         if (!guestPrevious) throw new Error('event occurrence not found');
+        // Compose partial changes against the current queued version, not a
+        // snapshot taken before another local writer completed.
+        const { id: _ignoredId, ...candidate } = { ...guestPrevious, ...changes } as CalEvent;
+        const validation = validateEventDraft(candidate);
+        if (!validation.valid || !validation.value) throw new EventDraftValidationError(validation.issues);
+        const validated = validation.value;
         const targetSourceId = ref.sourceEventId;
         const relatedEvents = guestCurrentEvents.filter(event => sourceEventId(event) === targetSourceId);
         const effectiveScope = !guestPrevious.repeat || guestPrevious.repeat === 'once'
@@ -927,7 +974,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           : guestPrevious.isRecurrenceException && recurrenceScope === 'following'
             ? 'occurrence'
             : recurrenceScope;
-        const nextGuestEvents = applyGuestRecurrenceEdit({
+        const mutation = applyGuestRecurrenceEdit({
           events: guestBaseEventsRef.current,
           target: guestPrevious,
           ref,
@@ -946,9 +993,15 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           },
           segmentId: createGuestId(),
         });
-        await persistGuestEvents(nextGuestEvents);
+        const nextGuestEvents = mutation.events;
+        let editorReceipt: ScheduleEditorSaveReceipt | undefined;
+        await persistGuestEvents(nextGuestEvents, editor ? async database => {
+          editorReceipt = await completeScheduleEditorSaveInTransaction(database, editor, ref, validated,
+            guestPrevious.eventRevision ?? guestPrevious.revision ?? 1, mutation.eventRef);
+        } : undefined);
+        try {
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-          return { reminderDelivery: 'unconfirmed' };
+          return { reminderDelivery: 'unconfirmed', editorReceipt };
         }
         guestBaseEventsRef.current = nextGuestEvents;
         searchableEventsRef.current = nextGuestEvents;
@@ -966,14 +1019,14 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           reminderUnconfirmed = true;
         }
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-          return { reminderDelivery: 'unconfirmed' };
+          return { reminderDelivery: 'unconfirmed', editorReceipt };
         }
         const nextMetadata = { ...eventMetadataRef.current };
         removeMutationMetadata(nextMetadata, ref, effectiveScope, relatedEvents);
         eventMetadataRef.current = nextMetadata;
         await persistMetadata(nextMetadata);
         if (generationRef.current !== operationGeneration || activeScopeRef.current !== scope) {
-          return { reminderDelivery: 'unconfirmed' };
+          return { reminderDelivery: 'unconfirmed', editorReceipt };
         }
         const months = new Set(loadedGuestMonthsRef.current);
         for (const key of monthKeysForRange(
@@ -994,6 +1047,7 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
           ?? nextGuestEvents.find(event => sourceEventId(event) === targetSourceId)
           ?? guestPrevious;
         return {
+          editorReceipt,
           reminderDelivery: reminderDeliveryForUpdatedEvents(
             updatedEvents,
             fallback,
@@ -1002,6 +1056,10 @@ export function EventsProvider({ children }: { children: React.ReactNode }) {
             )),
           ),
         };
+        } catch (error) {
+          if (!editorReceipt) throw error;
+          return { editorReceipt, reminderDelivery: 'unconfirmed' };
+        }
     });
   }, [enqueueGuestMutation, persistGuestEvents, persistMetadata, refreshEvents, scope]);
 

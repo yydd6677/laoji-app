@@ -1,0 +1,301 @@
+[
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "weekend-period",
+    "text": "挪到周六上午",
+    "expected": {
+      "date": {
+        "start_date": "2026-10-31",
+        "end_date": null
+      },
+      "time": {
+        "precision": "period",
+        "period": "morning",
+        "start_time": null,
+        "end_time": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "period-not-clock",
+    "text": "下午吧，不用定死几点",
+    "expected": {
+      "time": {
+        "precision": "period",
+        "period": "afternoon",
+        "start_time": null,
+        "end_time": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "half-hour-shift",
+    "text": "往后顺延半小时",
+    "expected": {
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "09:53",
+        "end_time": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "quarter-earlier",
+    "text": "提前一刻钟",
+    "expected": {
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "09:08",
+        "end_time": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "next-week-date",
+    "text": "换到下周三",
+    "expected": {
+      "date": {
+        "start_date": "2026-11-04",
+        "end_date": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "remove-notification",
+    "text": "这次不用提醒",
+    "expected": {
+      "reminder": null
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "location-preserves-date",
+    "text": "在学校门口碰头",
+    "expected": {
+      "location": "学校门口"
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "rename-selected",
+    "text": "名字改成团队周报讨论",
+    "expected": {
+      "title": "团队周报讨论"
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "undetermined-date",
+    "text": "日期先空着吧",
+    "expected": {
+      "date": null
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "remove-end-only",
+    "text": "结束时间去掉",
+    "draft_overrides": {
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "09:23",
+        "end_time": "10:07"
+      }
+    },
+    "expected": {
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "09:23",
+        "end_time": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "tomorrow-evening-minutes",
+    "text": "明晚七点二十三分",
+    "expected": {
+      "date": {
+        "start_date": "2026-10-29",
+        "end_date": null
+      },
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "19:23",
+        "end_time": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "late-range",
+    "text": "后天晚上十点到十一点半",
+    "expected": {
+      "date": {
+        "start_date": "2026-10-30",
+        "end_date": null
+      },
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "22:00",
+        "end_time": "23:30"
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "keep-current",
+    "text": "还按原来的来",
+    "expected": "no_change"
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "global-query",
+    "text": "下周都有些什么安排",
+    "expected": "unsupported"
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "midnight-rollover",
+    "text": "再推迟两小时",
+    "draft_overrides": {
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "23:23",
+        "end_time": null
+      }
+    },
+    "expected": {
+      "date": {
+        "start_date": "2026-10-30",
+        "end_date": null
+      },
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "01:23",
+        "end_time": null
+      }
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "no-exact-base",
+    "text": "晚半小时呢",
+    "precision": "period",
+    "expected": "ambiguous"
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "unresolved-future",
+    "text": "下个月找个时间再说",
+    "expected": {
+      "date": null
+    }
+  },
+  {
+    "corpus_role": "authored_boundary",
+    "natural_benchmark": false,
+    "source_kind": "engineer_authored",
+    "source_license": "internal-diagnostic",
+    "label_source": "frozen_manual_protocol_expectations_before_inference",
+    "id": "new-start-keeps-end",
+    "text": "改成上午九点四十",
+    "draft_overrides": {
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "09:23",
+        "end_time": "10:07"
+      }
+    },
+    "expected": {
+      "time": {
+        "precision": "exact",
+        "period": null,
+        "start_time": "09:40",
+        "end_time": "10:07"
+      }
+    }
+  }
+]

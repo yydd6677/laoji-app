@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { acknowledgeHardwareRecording, addHardwareRecordingListener, hasNativeHardwareSupport,
   listPendingHardwareRecordings } from 'laoji-native-platform';
@@ -15,6 +15,8 @@ export const useScheduleInputs = () => useContext(Context);
 export function ScheduleInputProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<ScheduleInputJob[]>([]);
   const refresh = useRef<() => void>(() => {});
+  const requestRefresh = useCallback(() => refresh.current(), []);
+  const value = useMemo(() => ({ jobs, refresh: requestRefresh }), [jobs, requestRefresh]);
   useEffect(() => {
     if (!hasNativeHardwareSupport()) return;
     let active = true, running = false, rerun = false;
@@ -55,7 +57,7 @@ export function ScheduleInputProvider({ children }: { children: React.ReactNode 
     void run();
     return () => { active = false; received.remove(); foreground.remove(); clearInterval(timer); };
   }, []);
-  return <Context.Provider value={{ jobs, refresh: () => refresh.current() }}>{children}</Context.Provider>;
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
 export async function discardScheduleInput(job: ScheduleInputJob): Promise<void> {

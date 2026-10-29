@@ -215,14 +215,15 @@ def _with_context_metadata(result: Optional[dict]) -> Optional[dict]:
 _SYSTEM_PROMPT_TEMPLATE = """你是日程解析器。当前日期 __TODAY__，星期__WEEKDAY__，当前时间 __NOW_TIME__。相对日映射：今天=__TODAY__、明天=__TOMORROW__、后天=__DAY_AFTER_TOMORROW__；本周=__THIS_WEEK_START__至__THIS_WEEK_END__，下周=__NEXT_WEEK_START__至__NEXT_WEEK_END__；本周星期映射：__THIS_WEEK_MAP__；下周星期映射：__NEXT_WEEK_MAP__；不带“本/下”的最近星期映射：__UPCOMING_WEEKDAY_MAP__；本月底=__THIS_MONTH_END__，下月底=__NEXT_MONTH_END__。相对日期和相对时间必须直接使用映射换算。若原文出现“改到、改成、更正为、后来调整到”，日期和时间只采用更正词之后的最终值。
 
 只输出一个 JSON 对象或 null，不要解释、不要 Markdown。
-JSON 必须包含：title、event_type、category、needs_clarification、date_phrase、time_phrase、recurrence_phrase。
+JSON 必须包含：title、event_type、category、needs_clarification、date_phrase、time_phrase、recurrence_phrase、date_status。
 仅在原文明确存在或确实需要时输出：end_date_phrase、end_time_phrase、description、location、detail、clarification_question。
 不要输出 start_date、end_date、start_time、end_time、recurrence_interval、recurrence_weekdays、recurrence_until_date；服务会从原话证据短语换算。
 
 字段规则：
 - title：20 字以内的事项名，不含日期、钟点、口语填充、操作指令。
 - event_type：once、daily、weekly、monthly、yearly 之一。
-- date_phrase/end_date_phrase：只复制原文中对应的日期短语，不含钟点；没有则为 null。日期范围要拆成起点和终点。
+- date_phrase/end_date_phrase：只复制原文中对应的日期短语，不含钟点；明确日期未定或延期的表达也要保留原话，只有完全没提日期才为 null。日期范围要拆成起点和终点。
+- date_status：stated表示指定了日期或相对日期，omitted表示完全未谈日期，unresolved表示表达了日期未定、延期或取决于尚未确定的条件。日期短语为空不等于省略，必须独立判断这三种语义。
 - time_phrase/end_time_phrase：只复制原文中对应的连续证据短语；时间范围中间若夹有事项文字，time_phrase 必须复制从起始钟点到结束钟点之间的完整原文（例如“下午三点半开会到五点”），不得压缩成原文不存在的短语。没有则为 null。禁止把“上午”等模糊时段改写成 09:00。
 - recurrence_phrase：只复制原文中完整的重复短语；一次性日程为 null。
 - recurrence_interval：重复间隔，默认 1；例如“每隔两周”是 2。
@@ -237,8 +238,8 @@ JSON 必须包含：title、event_type、category、needs_clarification、date_p
 2. 日期先后矛盾时仍要返回对象：保留用户说的开始日期，省略 end_date，needs_clarification=true；不要返回 null。
 3. 更正、否定或重复说明时以用户最终确认的事项、日期和时间为准。
 4. 有明确日期但没有具体钟点时，时间可空，needs_clarification=false，不要追问几点；只有出现未限定上午/下午/晚上、且可能对应两个生活时段的钟点（如“五点”）时，才保留日期并追问时段。
-5. 缺少具体日期但有明确事项时，用当前日期作候选，needs_clarification=true，并追问日期。
-6. “下个月/下月”未给具体日期时按下月 1 日候选，event_type=once，并追问日期。
+5. 缺少具体日期但有明确事项时仍返回事项，日期留空，不代替用户选择日期。
+6. 只有宽泛日期或明确未定时保留对应date_phrase，不补某月第一天或当前日期。
 7. 只有“每、每隔、隔周、重复”等明确重复词才能生成重复事件；“本周五/下周日/下周一到周三/本月25号”都是 once。“每隔两周周三”必须是 event_type=weekly、recurrence_interval=2、recurrence_weekdays=[3]。多星期、隔周和截止日期必须保留在重复字段中。
 8. 提醒中的“提前两小时/一天”等数字不是事件钟点；参与者、备注、附件、提醒和未指定的地点都不需要追问。
 9. 地点只在“地点在/地址在/在/用”等原文明说时输出；“带上某物”不是地点。只有原文明说地点未定时才追问最终地点。
@@ -1244,7 +1245,7 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
     allowed_event_types = {"once", "daily", "weekly", "monthly", "yearly"}
     event_type = str(result.get("event_type") or "once").strip().lower()
     if event_type not in allowed_event_types:
-        event_type = "once"
+        return None
 
     def clean_date(value: object) -> str:
         candidate = str(value or "").strip()
@@ -1259,6 +1260,8 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
     time_phrase = _verified_model_surface_phrase(result, "time_phrase", raw_text)
     end_time_phrase = _verified_model_surface_phrase(result, "end_time_phrase", raw_text)
     recurrence_phrase = _verified_model_surface_phrase(result, "recurrence_phrase", raw_text)
+    if result.get("recurrence_phrase") is not None and not recurrence_phrase:
+        return None
 
     # The model decides which surface spans carry calendar meaning. Absolute
     # dates, clocks and recurrence fields are then canonicalized only from
@@ -1328,10 +1331,9 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
             start_time = model_time
         elif not (spoken_day_period and start_time):
             start_time = None
-    # Generic model evidence such as “上午” stays an all-day candidate in
-    # model-only mode. Only explicit aliases such as “明早/明晚” carry a
-    # relative period that should be preserved without a numeric clock.
-    time_period = None if start_time else spoken_period
+    # A model-selected period is a complete time precision, not an all-day
+    # event or an invitation to invent a numeric clock.
+    time_period = None if start_time else spoken_period or (_parse_fuzzy_time_period(time_phrase) if time_phrase else None)
     model_time_range = _parse_time_range(time_phrase) if time_phrase else None
     end_time = (
         _parse_time_token(
@@ -1396,10 +1398,10 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
         recurrence_weekdays = cleaned_weekdays or None
 
     recurrence_until_date = clean_date(result.get("recurrence_until_date")) or None
-    recurrence_unsupported = False
     if recurrence_phrase:
         recurrence_rule = _parse_recurrence_rule(recurrence_phrase)
-        recurrence_unsupported = bool(recurrence_rule["unsupported"])
+        if recurrence_rule["unsupported"]:
+            return None
         event_type = recurrence_rule["event_type"]
         recurrence_interval = recurrence_rule["interval"]
         recurrence_weekdays = recurrence_rule["weekdays"]
@@ -1416,12 +1418,10 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
             elif event_type == "daily":
                 start_date = _current_date().strftime("%Y-%m-%d")
     elif event_type != "once":
-        # A recurrence without an exact source span is not safe to save as a
-        # repeated event. Keep it as a draft instead of trusting invented data.
-        event_type = "once"
-        recurrence_interval = 1
-        recurrence_weekdays = None
-        recurrence_until_date = None
+        # Missing evidence is an invalid observation, not a different event.
+        # A one-off substitute could become saveable after the user sets a
+        # date, silently losing the recurrence they originally requested.
+        return None
     if recurrence_until_date and start_date and recurrence_until_date < start_date:
         recurrence_until_date = None
         needs_clarification = True
@@ -1474,12 +1474,23 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
     elif location_uncertain:
         needs_clarification = True
         clarification_question = "地点还不确定，需要确认最终地点。"
-    elif recurrence_unsupported:
-        needs_clarification = True
-        clarification_question = "这个重复规则较复杂，需要进入详细编辑确认。"
     else:
         needs_clarification = False
         clarification_question = None
+
+    # Omission and an unresolved date have different product defaults. Keep
+    # that distinction from this same semantic observation, never from a
+    # keyword pass over the utterance or the time the response arrives.
+    if result.get("date_status") == "unresolved":
+        start_date, end_date = "", None
+        needs_clarification = True
+        clarification_question = clarification_question or "这条日程是哪一天？"
+    date_resolution = "resolved" if start_date else (
+        "unresolved" if result.get("date_status") == "unresolved" else
+        "unresolved" if date_phrase or end_date_phrase or recurrence_phrase else
+        "omitted" if "date_phrase" in result and "recurrence_phrase" in result
+        and result.get("date_status") == "omitted"
+        and all(result.get(key) is None for key in ("date_phrase", "end_date_phrase", "recurrence_phrase")) else None)
 
     return {
         "title": title[:100],
@@ -1488,6 +1499,7 @@ def _normalize_model_only_result(result: object, raw_text: str) -> Optional[dict
         "recurrence_weekdays": recurrence_weekdays,
         "recurrence_until_date": recurrence_until_date,
         "start_date": start_date,
+        "date_resolution": date_resolution,
         "end_date": end_date,
         "color": color,
         "spanning": bool(end_date and end_date != start_date),
@@ -3606,7 +3618,7 @@ def _parse_explicit_month_end(text: str, context: Optional[date] = None) -> Opti
 
 _TIME_TOKEN_PATTERN = (
     r"(?:[01]?\d|2[0-3])[:：][0-5]\d"
-    r"|(?:凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?"
+    r"|(?:凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9零〇一二两三四五六七八九十]{1,3}分?)?"
 )
 
 
@@ -3659,7 +3671,7 @@ def _parse_time(text: str) -> Optional[str]:
         return "12:00"
 
     match = re.search(
-        r"(凌晨|早上|上午|中午|下午|晚上|晚间|傍晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?",
+        r"(凌晨|早上|上午|中午|下午|晚上|晚间|傍晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9零〇一二两三四五六七八九十]{1,3})分?)?",
         text,
     )
     if not match:
@@ -3683,11 +3695,11 @@ def _has_unqualified_clock_ambiguity(text: str) -> bool:
     qualified_range_pattern = re.compile(
         r"(?:凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)"
         r"[0-9一二两三四五六七八九十]{1,3}点"
-        r"(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?"
+        r"(?:半|[0-9零〇一二两三四五六七八九十]{1,3}分?)?"
         r"(?P<middle>[^，,。.!！?？；;]{0,30}?)"
         r"(?:到|至|直到|[-—~～])"
         r"(?P<end>[0-9一二两三四五六七八九十]{1,3}点"
-        r"(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?)"
+        r"(?:半|[0-9零〇一二两三四五六七八九十]{1,3}分?)?)"
     )
     for range_match in qualified_range_pattern.finditer(normalized):
         middle = range_match.group("middle")
@@ -3701,7 +3713,7 @@ def _has_unqualified_clock_ambiguity(text: str) -> bool:
     for match in re.finditer(
         r"(?P<period>凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?"
         r"(?P<hour>[0-9一二两三四五六七八九十]{1,3})点"
-        r"(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?",
+        r"(?:半|[0-9零〇一二两三四五六七八九十]{1,3}分?)?",
         normalized,
     ):
         if any(start <= match.start() < end for start, end in inherited_range_end_spans):
@@ -3748,7 +3760,7 @@ def _parse_time_token(token: str, default_period: str = "") -> Optional[str]:
     if match := re.fullmatch(r"([01]?\d|2[0-3])[:：]([0-5]\d)", token):
         return f"{int(match.group(1)):02d}:{int(match.group(2)):02d}"
     match = re.fullmatch(
-        r"(凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9一二两三四五六七八九十]{1,2})分?)?",
+        r"(凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?([0-9一二两三四五六七八九十]{1,3})点(?:(半)|([0-9零〇一二两三四五六七八九十]{1,3})分?)?",
         token,
     )
     if not match:
@@ -3782,13 +3794,13 @@ def _parse_fuzzy_time_period(text: str) -> Optional[str]:
     """Return a stable spoken period without inventing an HH:mm value."""
     normalized = _normalize_schedule_text(text)
     normalized = re.sub(r"下午茶|早茶|中午饭|午饭|午餐|晚饭|晚餐", "", normalized)
-    matches = list(re.finditer(r"凌晨|早上|上午|中午|下午|午后|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今晚|今夜", normalized))
+    matches = list(re.finditer(r"凌晨|早上|早晨|上午|中午|下午|午后|傍晚|晚上|晚间|明早|明晨|明晚|明夜|今早|今晨|今晚|今夜", normalized))
     if not matches:
         return None
     spoken = matches[-1].group(0)
     if spoken == "凌晨":
         return "early_morning"
-    if spoken in {"早上", "上午", "明早", "明晨", "今早", "今晨"}:
+    if spoken in {"早上", "早晨", "上午", "明早", "明晨", "今早", "今晨"}:
         return "morning"
     if spoken == "中午":
         return "noon"
@@ -4298,7 +4310,7 @@ def _strip_schedule_markers(text: str) -> str:
         # "月初下午两点" becomes "月初" after the clock is stripped and the
         # date token is mistaken for title text.
         r"(?:下个月初|下月初|本月初|这个月初|月初)(?=(?:[，,。.!！?？；;]|早上|上午|中午|下午|傍晚|晚上|凌晨|[0-9一二三四五六七八九十]{1,3}点|前|的|可以|留给|放到|排在|定在|安排|做|处理|完成|提交|整理|跟进|准备|复盘|讨论|沟通|确认|评审|汇报|学习|复习|上课|考试|培训|阅读|跑步|健身|体检|看病|预约|出发|参加|进行|$))",
-        r"(凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9一二两三四五六七八九十]{1,2}分?)?",
+        r"(凌晨|早上|上午|中午|下午|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)?[0-9一二两三四五六七八九十]{1,3}点(?:半|[0-9零〇一二两三四五六七八九十]{1,3}分?)?",
         r"(?:下个月初|下月初|本月初|这个月初|月初)(?=(?:[，,。.!！?？；;]|早上|上午|中午|下午|傍晚|晚上|凌晨|[0-9一二三四五六七八九十]{1,3}点|前|的|可以|留给|放到|排在|定在|安排|做|处理|完成|提交|整理|跟进|准备|复盘|讨论|沟通|确认|评审|汇报|学习|复习|上课|考试|培训|阅读|跑步|健身|体检|看病|预约|出发|参加|进行|$))",
         r"周末(?=(?:凌晨|早上|上午|中午|下午|傍晚|晚上|[0-9一二三四五六七八九十]{1,3}点|安排|做|处理|留给|加个|在|去|参加))",
         r"(?:凌晨|早上|上午|中午|下午(?!茶)|晚上|晚间|傍晚|明早|明晨|明晚|明夜|今早|今晨|今夜|今晚)",

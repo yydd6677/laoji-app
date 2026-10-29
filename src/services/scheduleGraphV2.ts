@@ -25,6 +25,7 @@ export interface ScheduleGraphV1 {
   slots: {
     title: string | null;
     start_date: string | null;
+    date_resolution?: 'resolved' | 'omitted' | 'unresolved' | null;
     end_date: string | null;
     start_time: string | null;
     end_time: string | null;
@@ -104,6 +105,12 @@ function normalizeGraph(value: unknown): ScheduleGraphV1 {
     });
   }
   const provenance = value.provenance;
+  const resolution = value.slots.date_resolution;
+  if (resolution !== undefined && resolution !== null
+    && (!['resolved', 'omitted', 'unresolved'].includes(String(resolution))
+      || (resolution === 'resolved') !== Boolean(value.slots.start_date))) {
+    throw new Error('日程日期状态无效');
+  }
   if (!isRecord(provenance) || !Number.isInteger(provenance.draft_revision)
     || Number(provenance.draft_revision) < 1 || typeof provenance.producer_revision !== 'string') {
     throw new Error('日程图 revision 无效');

@@ -323,6 +323,8 @@ class ScheduleGraphSource(VNextModel):
 class ScheduleGraphSlots(VNextModel):
     title: str | None = Field(default=None, max_length=100)
     start_date: str | None = Field(default=None, max_length=32)
+    # None means an older producer did not observe omission vs uncertainty.
+    date_resolution: Literal["resolved", "omitted", "unresolved"] | None = None
     end_date: str | None = Field(default=None, max_length=32)
     start_time: str | None = Field(default=None, max_length=16)
     end_time: str | None = Field(default=None, max_length=16)

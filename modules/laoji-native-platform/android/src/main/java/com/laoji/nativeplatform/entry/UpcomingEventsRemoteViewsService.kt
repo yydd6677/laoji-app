@@ -84,7 +84,7 @@ private class UpcomingEventsFactory(
   }
 
   private fun displayTime(event: UpcomingEventProjectionItem): String {
-    if (event.allDay) return "全天"
+    if (event.allDay) return event.timePeriodLabel ?: "未设置"
     val now = Calendar.getInstance()
     val start = Calendar.getInstance().apply { timeInMillis = event.startAtMs }
     val prefix = when {

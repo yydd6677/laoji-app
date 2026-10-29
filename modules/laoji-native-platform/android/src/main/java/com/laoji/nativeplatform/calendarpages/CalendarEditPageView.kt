@@ -34,6 +34,7 @@ import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import com.laoji.nativeplatform.ui.LaojiThemeTypography
+import com.laoji.nativeplatform.ui.installImeOverlapBottomPadding
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -51,6 +52,7 @@ class CalendarEditPageView(
 
   private val paletteReady = CalendarPagePalette.configure(context)
   private val onAction by EventDispatcher<Map<String, Any?>>()
+  private val editEchoFence = CalendarEditEchoFence()
   private var bridgeEventsEnabled = true
   private var actionListener: ((Map<String, Any?>) -> Unit)? = null
   private val root = FrameLayout(context)
@@ -147,7 +149,7 @@ class CalendarEditPageView(
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
     background = null
     gravity = Gravity.TOP
-    minLines = 3
+    minLines = 1
     maxLines = 10
     inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
       InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -172,10 +174,12 @@ class CalendarEditPageView(
   }
   private var pendingSnapshot: Map<String, Any?> = emptyMap()
   private var state = CalendarEditPageState()
+  private val inputDock = CalendarEditInputDock(context, ::dispatchAction).apply { visibility = View.GONE }
+  private var lastSaveType: CalendarTitleSaveType? = null
+  private var saveAction: TextView? = null
   private var draft = CalendarEditDraft()
   private var applyingSnapshot = false
   private var hasCommittedSnapshot = false
-  private var hasRequestedInitialTitleFocus = false
   private var lastMessage: String? = null
   private var timePage: CalendarEditTimePageView? = null
   private var repeatEndPage: CalendarRepeatEndPageView? = null
@@ -201,12 +205,14 @@ class CalendarEditPageView(
         CalendarCommonTitleBarContract.fullScreenHeightPx(context),
       ))
       addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+      addView(inputDock, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
     root.addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     root.addView(stateView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT).apply {
       topMargin = CalendarCommonTitleBarContract.fullScreenHeightPx(context)
     })
     root.addView(busyOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    root.installImeOverlapBottomPadding()
     addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     buildForm()
     bindInputs()
@@ -228,21 +234,22 @@ class CalendarEditPageView(
     val nextState = CalendarPageSnapshotParser.edit(pendingSnapshot)
     hasCommittedSnapshot = true
     state = nextState
-    if (timePage == null && repeatEndPage == null) draft = nextState.draft
+    if (timePage == null && repeatEndPage == null && editEchoFence.accepts(nextState.nativeEditAck)) {
+      draft = nextState.draft
+    }
     render()
-    requestInitialTitleFocusIfNeeded()
   }
 
   private fun buildForm() {
     content.addView(titleInput, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     addSectionDivider()
-    startDateRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_outline, "开始日期", startDateValue) {
-      showTimePage(CalendarEditEndpoint.START)
+    startDateRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_outline, "日期", startDateValue) {
+      showTimePage(CalendarEditEndpoint.START, dateOnly = true)
     }
     endDateRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_outline, "结束日期", endDateValue) {
-      showTimePage(CalendarEditEndpoint.END)
+      showTimePage(CalendarEditEndpoint.END, dateOnly = true)
     }
-    startTimeRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, "开始时间", startTimeValue) {
+    startTimeRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, "时间", startTimeValue) {
       showTimePage(CalendarEditEndpoint.START)
     }
     endTimeRow = valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, "结束时间", endTimeValue) {
@@ -274,7 +281,7 @@ class CalendarEditPageView(
       locateAction,
     ))
     addSectionDivider()
-    content.addView(inputRow(com.laoji.nativeplatform.R.drawable.laoji_ic_note_outline, notesInput, context.pageDp(88)))
+    content.addView(inputRow(com.laoji.nativeplatform.R.drawable.laoji_ic_note_outline, notesInput, context.pageDp(48)))
     addSectionDivider()
     content.addView(valueRow(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline, "提醒", reminderValue) {
       if (draft.allDay || !draft.hasTime) {
@@ -293,38 +300,30 @@ class CalendarEditPageView(
     notesInput.watch { updateDraft(draft.copy(notes = it)) }
   }
 
-  private fun requestInitialTitleFocusIfNeeded() {
-    if (!hasCommittedSnapshot || hasRequestedInitialTitleFocus || state.editing ||
-      state.loadState != CalendarPageLoadState.READY) return
-    if (!isAttachedToWindow) return
-    hasRequestedInitialTitleFocus = true
-    titleInput.post {
-      if (!isAttachedToWindow || state.editing || state.loadState != CalendarPageLoadState.READY) return@post
-      titleInput.requestFocus()
-      titleInput.setSelection(titleInput.text.length)
-      context.getSystemService(InputMethodManager::class.java)
-        ?.showSoftInput(titleInput, InputMethodManager.SHOW_IMPLICIT)
-    }
-  }
-
   private fun render() {
     applyingSnapshot = true
-    titleBar.clearActions()
-    // UI-TITLE-COMMON-001: ordinary calendar edit has no center title.
-    titleBar.setCenterTitle("")
-    titleBar.setDividerVisible(false)
-    titleBar.setLeftTextAction("取消", debounce = true) { emit("cancel") }
-    val saveType = CalendarTitleSaveContract.resolve(
+    val inputBusy = state.input?.phase in setOf("recording", "parsing")
+    val saveType = if (inputBusy) CalendarTitleSaveType.DISABLE_SAVE_TOTALLY else CalendarTitleSaveContract.resolve(
       loadState = state.loadState,
       saving = state.saving,
       draftValid = CalendarEditValidator.validate(draft).valid,
     )
-    titleBar.addRightTextAction("保存", { CalendarTitleSaveContract.color(saveType) }, debounce = true) {
-      when (saveType) {
-        CalendarTitleSaveType.ENABLE_SAVE,
-        CalendarTitleSaveType.DISABLE_SAVE_WITH_FEEDBACK -> requestSave()
-        CalendarTitleSaveType.DISABLE_SAVE_TOTALLY -> Unit
+    if (saveAction == null) {
+      titleBar.clearActions()
+      titleBar.setCenterTitle("")
+      titleBar.setDividerVisible(false)
+      titleBar.setLeftTextAction("取消", debounce = true) { emit("cancel") }
+      saveAction = titleBar.addRightTextAction("保存", { CalendarTitleSaveContract.color(lastSaveType ?: saveType) }, debounce = true) {
+        when (lastSaveType ?: saveType) {
+          CalendarTitleSaveType.ENABLE_SAVE,
+          CalendarTitleSaveType.DISABLE_SAVE_WITH_FEEDBACK -> requestSave()
+          CalendarTitleSaveType.DISABLE_SAVE_TOTALLY -> Unit
+        }
       }
+    }
+    if (lastSaveType != saveType) {
+      lastSaveType = saveType
+      saveAction?.pageTextColor { CalendarTitleSaveContract.color(lastSaveType ?: saveType) }
     }
 
     syncText(titleInput, draft.title)
@@ -335,6 +334,10 @@ class CalendarEditPageView(
     applyingSnapshot = false
 
     val ready = state.loadState == CalendarPageLoadState.READY
+    inputDock.visibility = if (ready && state.input != null) View.VISIBLE else View.GONE
+    if (ready) state.input?.let {
+      inputDock.render(it, acceptTextSnapshot = editEchoFence.accepts(state.nativeEditAck))
+    }
     locateAction.isEnabled = ready && !state.saving && !state.locating
     locateAction.contentDescription = if (state.locating) "正在获取当前位置" else "获取当前位置"
     locateIcon.visibility = if (state.locating) View.INVISIBLE else View.VISIBLE
@@ -362,7 +365,9 @@ class CalendarEditPageView(
     applyingSnapshot = true
     startDateValue.text = formatDate(draft.startDate)
     endDateValue.text = formatDate(draft.endDate)
-    startTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.startTime), true)
+    startTimeValue.text = if (draft.precision == CalendarTimePrecision.PERIOD)
+      CalendarTimePeriod.fromWire(draft.timePeriod)?.label ?: "未设置"
+      else CalendarEditTimeFormatter.timeLabel(parseTime(draft.startTime), true)
     endTimeValue.text = CalendarEditTimeFormatter.timeLabel(parseTime(draft.endTime), true)
     val recurrenceMode = state.recurrenceRuleMode
     repeatValue.text = if (recurrenceMode == CalendarRecurrenceControlMode.DISABLED) {
@@ -387,13 +392,14 @@ class CalendarEditPageView(
     repeatArrow.pageIconTint { ColorStateList.valueOf(repeatIconColor()) }
     repeatEndArrow.pageIconTint { ColorStateList.valueOf(repeatIconColor()) }
     reminderValue.text = reminderLabel(draft.reminderMinutes)
-    val showTime = !draft.allDay && draft.hasTime
-    startTimeRow.visibility = if (showTime) View.VISIBLE else View.GONE
-    endTimeRow.visibility = if (showTime) View.VISIBLE else View.GONE
+    val showTime = draft.hasTime
+    startTimeRow.visibility = View.VISIBLE
+    endTimeRow.visibility = if (showTime && draft.endTime != null) View.VISIBLE else View.GONE
+    endDateRow.visibility = if (draft.endDate.isNotBlank() && draft.endDate != draft.startDate) View.VISIBLE else View.GONE
     reminderValue.parentView().alpha = if (showTime) 1f else 0.45f
-    syncValueRowDescription(startDateRow, "开始日期", startDateValue)
+    syncValueRowDescription(startDateRow, "日期", startDateValue)
     syncValueRowDescription(endDateRow, "结束日期", endDateValue)
-    syncValueRowDescription(startTimeRow, "开始时间", startTimeValue)
+    syncValueRowDescription(startTimeRow, "时间", startTimeValue)
     syncValueRowDescription(endTimeRow, "结束时间", endTimeValue)
     syncValueRowDescription(repeatRow, "重复", repeatValue)
     syncValueRowDescription(repeatEndRow, "截止时间", repeatEndValue)
@@ -424,9 +430,9 @@ class CalendarEditPageView(
     ))
   }
 
-  private fun showTimePage(endpoint: CalendarEditEndpoint) {
+  private fun showTimePage(endpoint: CalendarEditEndpoint, dateOnly: Boolean = false) {
     if (timePage != null || repeatEndPage != null || state.saving || state.loadState != CalendarPageLoadState.READY) return
-    val initial = runCatching { CalendarEditTimeState.fromDraft(draft, endpoint) }.getOrElse {
+    val initial = runCatching { CalendarEditTimeState.fromDraft(draft, endpoint, dateOnly) }.getOrElse {
       emitFeedback("请选择有效的日期")
       return
     }
@@ -539,8 +545,11 @@ class CalendarEditPageView(
   }
 
   private fun dispatchAction(payload: Map<String, Any?>) {
-    actionListener?.invoke(payload)
-    if (bridgeEventsEnabled) onAction(payload)
+    val action = if (payload["type"] == "draftChange" || payload["type"] == "inputTextChange") {
+      payload + ("nativeEditToken" to editEchoFence.edited())
+    } else payload
+    actionListener?.invoke(action)
+    if (bridgeEventsEnabled) onAction(action)
   }
 
   private fun valueRow(iconRes: Int, label: String, value: TextView, onClick: () -> Unit): View =
@@ -637,8 +646,8 @@ class CalendarEditPageView(
       LayoutParams.MATCH_PARENT,
       context.pageDp(0.5f).coerceAtLeast(1),
     ).apply {
-      topMargin = context.pageDp(14)
-      bottomMargin = context.pageDp(14)
+      topMargin = context.pageDp(8)
+      bottomMargin = context.pageDp(8)
     })
   }
 
@@ -669,7 +678,6 @@ class CalendarEditPageView(
     super.onAttachedToWindow()
     componentActivity()?.onBackPressedDispatcher?.addCallback(backCallback)
     backCallback.isEnabled = timePage != null || repeatEndPage != null
-    requestInitialTitleFocusIfNeeded()
   }
 
   override fun onDetachedFromWindow() {
@@ -775,8 +783,11 @@ private fun CalendarEditTimeState.toStateBundle(): Bundle = Bundle().apply {
   putString("endDate", endDate.toString())
   putString("startTime", startTime.format(eventTimeFormatter))
   putString("endTime", endTime.format(eventTimeFormatter))
-  putBoolean("allDay", allDay)
-  putBoolean("timedEnabled", timedEnabled)
+  putString("precision", precision.wireName)
+  putString("period", period.wireName)
+  putBoolean("dateOnly", dateOnly)
+  putBoolean("timeChanged", timeChanged)
+  putBoolean("dateChanged", dateChanged)
   putBoolean("endTimedEnabled", endTimedEnabled)
   putString("selectedEndpoint", selectedEndpoint.name)
 }
@@ -794,6 +805,8 @@ private fun CalendarEditDraft.toStateBundle(): Bundle = Bundle().apply {
   putString("startTime", startTime)
   putString("endTime", endTime)
   putBoolean("allDay", allDay)
+  putString("timePrecision", timePrecision)
+  putString("timePeriod", timePeriod)
   putString("repeat", repeat)
   putString("recurrenceUntilDate", recurrenceUntilDate)
   putString("reminderMinutes", reminderMinutes?.toString())
@@ -812,8 +825,11 @@ private fun Bundle.toTimeState(): CalendarEditTimeState? = runCatching {
     endDate = requireNotNull(parseDate(getString("endDate"))),
     startTime = requireNotNull(parseTime(getString("startTime"))),
     endTime = requireNotNull(parseTime(getString("endTime"))),
-    allDay = getBoolean("allDay"),
-    timedEnabled = getBoolean("timedEnabled"),
+    precision = CalendarTimePrecision.fromWire(getString("precision")) ?: fallback.precision,
+    period = CalendarTimePeriod.fromWire(getString("period")) ?: fallback.period,
+    dateOnly = getBoolean("dateOnly"),
+    timeChanged = getBoolean("timeChanged"),
+    dateChanged = getBoolean("dateChanged"),
     endTimedEnabled = if (containsKey("endTimedEnabled")) {
       getBoolean("endTimedEnabled")
     } else {
@@ -840,6 +856,8 @@ private fun Bundle.toEditDraft(): CalendarEditDraft = CalendarEditDraft(
   startTime = getString("startTime"),
   endTime = getString("endTime"),
   allDay = getBoolean("allDay"),
+  timePrecision = getString("timePrecision"),
+  timePeriod = getString("timePeriod"),
   repeat = getString("repeat") ?: "once",
   recurrenceUntilDate = getString("recurrenceUntilDate"),
   reminderMinutes = getString("reminderMinutes")?.toIntOrNull(),

@@ -2,6 +2,9 @@ const path = require('path');
 const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
+// expo-sqlite's existing web worker imports a Wasm asset. Register the asset
+// instead of treating its filename as a missing JS source module.
+config.resolver.assetExts = [...new Set([...config.resolver.assetExts, 'wasm'])];
 // Keep the cold-start module graph limited to the shell. Screens and service
 // providers are evaluated when their route is first used, rather than during
 // the first React instance frame.

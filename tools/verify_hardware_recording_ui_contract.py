@@ -87,7 +87,7 @@ def main() -> int:
         ROOT / "src/screens",
         ROOT / "src/components",
         ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/minutes",
-        ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/schedulevoice",
+        ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages",
         ROOT / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/ui",
     ]
     forbidden_fragments = ("call to function", "has been rejected", "codedexception")

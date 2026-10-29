@@ -92,6 +92,8 @@ def _verify_native_version(apk: Path, config: dict[str, object]) -> list[str]:
     if package is None:
         return ["APK 原生清单缺少版本信息"]
     failures: list[str] = []
+    if re.search(r"^application-debuggable(?:\s|$)", result.stdout, re.MULTILINE):
+        failures.append("APK 允许调试，仅可用于隔离诊断，禁止作为更新包发布")
     native_package, native_code, native_name = package.groups()
     android = config.get("android")
     config_code = android.get("versionCode") if isinstance(android, dict) else None

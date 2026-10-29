@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from app.api import device_v2
 from app.services.device_v2_identity import DeviceV2Context
+from app.services.schedule_parser_service import ScheduleParserUnavailable
 
 
 def client() -> TestClient:
@@ -62,3 +64,30 @@ def test_device_schedule_graph_operation_does_not_call_model(monkeypatch) -> Non
     assert response.status_code == 200
     assert response.json()["state"] == "operation"
     assert response.json()["intent"] == "query"
+
+
+@pytest.mark.parametrize("clarifying", [False, True])
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_model_content_failure_is_distinct_from_provider_outage(monkeypatch, clarifying, unavailable):
+    api = client()
+    async def valid(*_args, **_kwargs):
+        return {"title": "取快递", "event_type": "once", "parse_source": "local_llm", "needs_clarification": True}
+    monkeypatch.setattr(device_v2, "parse_schedule_text", valid)
+    graph = api.post("/api/device/v2/schedule/graph", json=request_body("去取快递")).json()
+    calls = []
+    async def outcome(*_args, **_kwargs):
+        calls.append(1)
+        if unavailable:
+            raise ScheduleParserUnavailable("private-provider-detail")
+        return None
+    monkeypatch.setattr(device_v2, "parse_schedule_text", outcome)
+    path = "/api/device/v2/schedule/graph"
+    payload = request_body()
+    if clarifying:
+        path += "/clarify"
+        payload = {"schema_version": 1, "graph": graph, "answer": "再说一次", "client_request_id": "content-boundary-probe"}
+    response = api.post(path, json=payload)
+    assert response.status_code == (503 if unavailable else 422)
+    assert response.json()["detail"]["code"] == ("SCHEDULE_GRAPH_PROVIDER_UNAVAILABLE" if unavailable else "SCHEDULE_MODEL_NO_RESULT")
+    assert "private-provider" not in response.text
+    assert len(calls) == 1

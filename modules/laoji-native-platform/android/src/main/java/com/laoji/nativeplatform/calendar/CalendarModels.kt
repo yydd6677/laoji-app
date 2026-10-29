@@ -59,6 +59,8 @@ data class CalendarEvent(
   val startMinutes: Int?,
   val endMinutes: Int?,
   val timePeriodLabel: String? = null,
+  val timePrecision: String? = null,
+  val timePeriod: String? = null,
   val timeZoneId: String,
   val allDay: Boolean,
   val editable: Boolean,
@@ -387,18 +389,4 @@ object CalendarShellContract {
   const val ICON_HIT_SIZE_DP = 40f
   const val FAB_SIZE_DP = 48f
   const val FAB_EDGE_MARGIN_DP = 16f
-  // Product interaction retained from the original LaoJi radial-create design.
-  const val FAB_GESTURE_SURFACE_DP = 236f
-  const val FAB_OPTION_SIZE_DP = 60f
-  const val FAB_ARC_RADIUS_DP = 116f
-  const val FAB_TARGET_HIT_RADIUS_DP = 42f
-  const val FAB_LONG_PRESS_DELAY_MS = 350L
-  const val FAB_EXPANSION_DURATION_MS = 180L
-  const val FAB_COLLAPSE_DURATION_MS = 120L
-  const val FAB_OPEN_ROTATION_DEGREES = 45f
-  const val FAB_HOVER_SCALE = 1.12f
-  const val FAB_VOICE_OFFSET_X_DP = -98f
-  const val FAB_VOICE_OFFSET_Y_DP = -58f
-  const val FAB_MANUAL_OFFSET_X_DP = -34f
-  const val FAB_MANUAL_OFFSET_Y_DP = -112f
 }

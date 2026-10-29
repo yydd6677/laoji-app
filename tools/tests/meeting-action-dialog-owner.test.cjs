@@ -52,3 +52,40 @@ test('navigation away never presents a stale deletion decision', () => {
   const o = owner(); o.run('dismissed'); o.state.current = 'other'; o.timers[0]();
   assert.equal(o.dialog, undefined);
 });
+
+test('action editing uses the measured keyboard owner and keeps commit outside scrolling fields', async () => {
+  const React = require('react');
+  const { create, act } = require('react-test-renderer');
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const native = { ActivityIndicator: 'spinner', KeyboardAvoidingView: 'unmeasured-keyboard-frame', Modal: 'modal',
+    Platform: { OS: 'android' }, Pressable: 'button', ScrollView: 'scroll', Text: 'text', TextInput: 'input', View: 'view',
+    StyleSheet: { create: value => value, absoluteFill: {}, absoluteFillObject: {} },
+    useWindowDimensions: () => ({ height: 800, width: 400 }),
+    Animated: { Value: class { stopAnimation() {} setValue() {} interpolate() { return 0; } }, View: 'animated',
+      timing: () => ({ start: fn => fn?.({ finished: true }) }) }, Easing: { inOut: x => x, ease: 0 },
+  };
+  const modules = { react: React, 'react-native': native, '@react-native-community/datetimepicker': 'date-picker',
+    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 16 }) },
+    '../theme/uiTokens': { UI_MOTION: {} },
+    '../theme/ThemeProvider': { useTheme: () => ({ appearance: { fontFamily: 'system' }, tokens: { colors: {} } }) },
+    '../services/notifications': { meetingActionReminderAtForDue: value => value },
+    './KeyboardFrame': { KeyboardFrame: 'keyboard-frame' },
+  };
+  const m = { exports: {} };
+  const code = ts.transpileModule(fs.readFileSync(path.resolve(__dirname, '../../src/components/MeetingActionEditorSheet.tsx'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React, esModuleInterop: true },
+  }).outputText;
+  new Function('require', 'module', 'exports', code)(name => {
+    if (!(name in modules)) throw Error(name); return modules[name];
+  }, m, m.exports);
+  let tree, saved;
+  await act(async () => { tree = create(React.createElement(m.exports.MeetingActionEditorSheet, { visible: true,
+    action: { mode: 'create', id: 'owned-action', content: '发送议程', status: 'pending', dueAtMs: null, reminderAtMs: null },
+    saving: false, error: '', onClose() {}, onStatusChange() {}, onSave: value => { saved = value; } })); });
+  try {
+    assert.equal(tree.root.findAllByType('keyboard-frame').length, 1);
+    const commit = tree.root.findByProps({ accessibilityLabel: '创建待办事项' });
+    for (let parent = commit.parent; parent; parent = parent.parent) assert.notEqual(parent.type, 'scroll');
+    await act(async () => { commit.props.onPress(); }); assert.equal(saved.content, '发送议程');
+  } finally { await act(async () => { tree.unmount(); }); }
+});

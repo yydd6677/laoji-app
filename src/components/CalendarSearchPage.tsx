@@ -24,6 +24,7 @@ import { eventRefForEvent, eventRefKey } from '../utils/eventIdentity';
 import { Colors as C } from '../theme/colors';
 import type { CalEvent } from '../types';
 import { eventListTitle } from '../utils/eventTitle';
+import { eventTimeLabel as scheduleEventTimeLabel } from '../utils/scheduleEventTime';
 
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
@@ -466,9 +467,7 @@ function SearchEventRow({
 }
 
 function eventTimeLabel(event: CalEvent): string {
-  const time = event.startTime && event.endTime
-    ? `${event.startTime} - ${event.endTime}`
-    : event.startTime || '全天';
+  const time = scheduleEventTimeLabel(event);
   if (!event.spanning || !event.endDate || event.endDate === event.startDate) return time;
   const end = dateFromKey(event.endDate);
   return `${time} · 至${end.getMonth() + 1}月${end.getDate()}日`;

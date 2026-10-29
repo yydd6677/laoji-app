@@ -15,8 +15,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Avatar } from '../components/Common';
 import { BOTTOM_TAB_BAR_GEOMETRY } from '../components/BottomTabBar';
-import { VoiceInputModal } from '../components/VoiceInputModal';
-import { AppActionSheet } from '../components/AppActionSheet';
+import { ScheduleEditorResumeSheet } from '../components/ScheduleEditorResumeSheet';
+import { useScheduleEditorEntry } from '../hooks/useScheduleEditorEntry';
 import { useAppDialog } from '../components/AppDialog';
 import { ScheduleCreateButton } from '../components/ScheduleCreateButton';
 import { MonthCalendarView } from '../components/MonthCalendarView';
@@ -59,6 +59,7 @@ function isCalendarViewMode(value: string | null): value is CalendarViewMode {
 export function ScheduleScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
+  const editorEntry = useScheduleEditorEntry(navigation, isFocused);
   const {
     events,
     searchableEvents,
@@ -75,9 +76,7 @@ export function ScheduleScreen({ navigation }: Props) {
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(initialDate));
   const [restoredViewMode, setRestoredViewMode] = useState<RestoredCalendarViewMode | null>(null);
   const [searching, setSearching] = useState(false);
-  const [createSheetVisible, setCreateSheetVisible] = useState(false);
   const [quickDateVisible, setQuickDateVisible] = useState(false);
-  const [voiceVisible, setVoiceVisible] = useState(false);
   const quickDateProgress = useRef(new Animated.Value(0)).current;
   const dataScope = initializing ? null : 'guest';
   const viewMode = dataScope && restoredViewMode?.scope === dataScope
@@ -173,11 +172,11 @@ export function ScheduleScreen({ navigation }: Props) {
   }), [isFocused, navigation]);
 
   const openManualCreate = () => {
-    navigation.navigate('AddEvent', { date: dateKey(selectedDate) });
+    void editorEntry.create();
   };
 
   const openManualCreateForDate = (date: Date) => {
-    navigation.navigate('AddEvent', { date: dateKey(date) });
+    void editorEntry.create({ date: dateKey(date) });
   };
 
   const openManualCreateForSlot = (
@@ -186,7 +185,7 @@ export function ScheduleScreen({ navigation }: Props) {
     endDate: Date,
     endTime: string,
   ) => {
-    navigation.navigate('AddEvent', {
+    void editorEntry.create({
       date: dateKey(startDate),
       endDate: dateKey(endDate),
       startTime,
@@ -410,29 +409,12 @@ export function ScheduleScreen({ navigation }: Props) {
 
       <ScheduleCreateButton
         bottom={BOTTOM_TAB_BAR_GEOMETRY.sceneActionBottom}
-        onPress={() => setCreateSheetVisible(true)}
-        onVoice={() => setVoiceVisible(true)}
-        onManual={openManualCreate}
+        onPress={openManualCreate}
       />
       </View>
 
-      <AppActionSheet
-        visible={createSheetVisible}
-        title="新建日程"
-        onClose={() => setCreateSheetVisible(false)}
-        items={[
-          {
-            key: 'voice',
-            label: '语音输入',
-            onPress: () => setVoiceVisible(true),
-          },
-          {
-            key: 'manual',
-            label: '手动新建',
-            onPress: openManualCreate,
-          },
-        ]}
-      />
+      <ScheduleEditorResumeSheet selection={editorEntry.resume} onChoose={editorEntry.chooseResume}
+        onClose={editorEntry.dismissResume} />
 
       <QuickDatePanel
         visible={quickDatePanelVisible}
@@ -454,11 +436,6 @@ export function ScheduleScreen({ navigation }: Props) {
         onClose={closeSearch}
       />
 
-      <VoiceInputModal
-        visible={voiceVisible}
-        onClose={() => setVoiceVisible(false)}
-        onSaved={() => setVoiceVisible(false)}
-      />
     </ScreenContainer>
   );
 }

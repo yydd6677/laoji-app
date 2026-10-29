@@ -2,6 +2,7 @@ package com.laoji.nativeplatform.audio
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.CompletableFuture
@@ -29,8 +30,11 @@ internal object AudioFileTranscriber {
         override fun onServerError(error: AsrServerEvent.Error) { failure.set(IllegalStateException("语音转写暂时不可用")) }
         override fun onTransportFailure(code: RecorderErrorCode, message: String) { failure.set(IllegalStateException("语音转写暂时不可用")) }
       })
+      var phase = "connect"
+      val started = System.nanoTime()
       try {
         socket.connect().get(20, TimeUnit.SECONDS)
+        phase = "send"
         RandomAccessFile(file, "r").use { input ->
           input.seek(layout.audioOffset)
           val bytes = ByteArray(6400); var left = layout.audioBytes
@@ -44,12 +48,17 @@ internal object AudioFileTranscriber {
           }
         }
         failure.get()?.let { throw it }
+        phase = "drain"
         check(socket.sendEndFrame()) { "语音转写未完成" }
         check(socket.awaitReadyToStop(maxOf(60_000L, layout.audioBytes / 32L * 2L)) == ReadyToStopOutcome.READY) { "语音转写未完成" }
         failure.get()?.let { throw it }
         synchronized(parts) { parts.values.joinToString("").trim() }.also {
           check(it.isNotBlank()) { "未识别到语音内容，请重新录音。" }
         }
+      } catch (error: Exception) {
+        Log.i("LaojiAsrTransport", "file_failure phase=$phase kind=${asrTransportFailureKind(error)}" +
+          " elapsed_ms=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)}")
+        throw error
       } finally { socket.cancel() }
     }, executor)
 }

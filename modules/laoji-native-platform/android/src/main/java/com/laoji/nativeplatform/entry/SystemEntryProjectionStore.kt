@@ -36,6 +36,7 @@ data class UpcomingEventProjectionItem(
   val endAtMs: Long,
   val allDay: Boolean,
   val meetingAction: UpcomingMeetingAction,
+  val timePeriodLabel: String? = null,
 )
 
 data class UpcomingEventsProjection(
@@ -151,7 +152,7 @@ object SystemEntryProjectionStore {
         "endAtMs",
         "allDay",
         "meetingAction",
-      ),
+      ) + if (json.has("timePeriodLabel")) setOf("timePeriodLabel") else emptySet(),
     )
     val sourceEventId = json.getString("sourceEventId")
     require(sourceEventId.length in 1..512 && !controlCharacterPattern.containsMatchIn(sourceEventId)) {
@@ -167,6 +168,8 @@ object SystemEntryProjectionStore {
     val startAtMs = json.getLong("startAtMs")
     val endAtMs = json.getLong("endAtMs")
     require(startAtMs >= 0L && endAtMs > startAtMs) { "invalid event time" }
+    val periodLabel = if (json.has("timePeriodLabel") && !json.isNull("timePeriodLabel")) json.getString("timePeriodLabel") else null
+    require(periodLabel == null || periodLabel in setOf("凌晨", "上午", "中午", "下午", "傍晚", "晚上")) { "invalid period label" }
     return UpcomingEventProjectionItem(
       sourceEventId = sourceEventId,
       occurrenceDate = occurrenceDate,
@@ -175,6 +178,7 @@ object SystemEntryProjectionStore {
       endAtMs = endAtMs,
       allDay = json.getBoolean("allDay"),
       meetingAction = UpcomingMeetingAction.fromWireValue(json.getString("meetingAction")),
+      timePeriodLabel = periodLabel,
     )
   }
 

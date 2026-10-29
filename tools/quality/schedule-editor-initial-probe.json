@@ -1,0 +1,22 @@
+[
+  {"id":"parcel-without-date","text":"帮我记一下去取快递","expected":{"date_resolution":"omitted","start_date":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"afternoon-eyeglasses","text":"下午去修眼镜","expected":{"date_resolution":"omitted","start_date":null,"time_period":"afternoon","start_time":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"car-maintenance","text":"记一下给车做保养","expected":{"date_resolution":"omitted","start_date":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"evening-call","text":"晚上给奶奶打电话","expected":{"date_resolution":"omitted","start_date":null,"time_period":"night","start_time":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"tomorrow-return","text":"明天去还书","expected":{"date_resolution":"resolved","start_date":"2026-10-29"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"friday-results","text":"周五下午取化验单","expected":{"date_resolution":"resolved","start_date":"2026-10-30","time_period":"afternoon"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"next-week-tyres","text":"下周二上午九点换轮胎","expected":{"date_resolution":"resolved","start_date":"2026-11-03","start_time":"09:00"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"november-exam","text":"十一月六号去体检","expected":{"date_resolution":"resolved","start_date":"2026-11-06"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"defer-glasses","text":"改天去配眼镜","expected":{"date_resolution":"unresolved","start_date":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"date-not-set","text":"日期没定，陪爸爸去医院","expected":{"date_resolution":"unresolved","start_date":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"month-undecided","text":"下个月找时间保养车","expected":{"date_resolution":"unresolved","start_date":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"free-time-errand","text":"有空再去取衣服","expected":{"date_resolution":"unresolved","start_date":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"holiday-not-set","text":"等放假了再去办护照","expected":{"date_resolution":"unresolved","start_date":null},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"weekend-moving","text":"周末给朋友搬家","expected":{"date_resolution":"resolved","start_date":"2026-10-31"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"relative-stove","text":"十分钟后关火","expected":{"date_resolution":"resolved","start_date":"2026-10-28","start_time":"18:10"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"clock-only-haircut","text":"下午三点半去理发","expected":{"date_resolution":"omitted","start_date":null,"start_time":"15:30"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"month-end-bill","text":"月底去缴燃气费","expected":{"date_resolution":"resolved","start_date":"2026-10-31"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"daily-walk","text":"每天晚上散步","expected":{"date_resolution":"resolved","start_date":"2026-10-28","time_period":"night","event_type":"daily"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"date-correction","text":"周二去换驾照，不是，是周四","expected":{"date_resolution":"resolved","start_date":"2026-10-29"},"natural_benchmark":false,"source_kind":"engineer_authored"},
+  {"id":"today-flowers","text":"今天给花浇水","expected":{"date_resolution":"resolved","start_date":"2026-10-28"},"natural_benchmark":false,"source_kind":"engineer_authored"}
+]

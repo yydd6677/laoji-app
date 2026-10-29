@@ -9,8 +9,20 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.util.UUID
 
 internal const val CALENDAR_PAGE_SCHEMA_VERSION = 2
+
+/** Bridge acknowledgement, not a second business revision or persisted draft. */
+internal class CalendarEditEchoFence(private val viewId: String = UUID.randomUUID().toString()) {
+  private var sequence = 0L
+  private var latestToken: String? = null
+
+  fun edited(): String = "$viewId:${++sequence}".also { latestToken = it }
+
+  // Keep the fence after acknowledgement: a reordered older echo is still old.
+  fun accepts(ack: String?): Boolean = latestToken == null || latestToken == ack
+}
 
 internal data class CalendarPageEventRef(
   val sourceEventId: String,
@@ -134,14 +146,20 @@ internal data class CalendarEditDraft(
   val startTime: String? = null,
   val endTime: String? = null,
   val allDay: Boolean = false,
+  val timePrecision: String? = null,
+  val timePeriod: String? = null,
   val repeat: String = "once",
   val recurrenceUntilDate: String? = null,
   val reminderMinutes: Int? = null,
   val location: String = "",
   val notes: String = "",
 ) {
+  val precision: CalendarTimePrecision?
+    get() = if (timePrecision == null) {
+      if (!allDay && startTime != null) CalendarTimePrecision.EXACT else CalendarTimePrecision.UNSPECIFIED
+    } else CalendarTimePrecision.fromWire(timePrecision)
   val hasTime: Boolean
-    get() = startTime != null || endTime != null
+    get() = precision == CalendarTimePrecision.EXACT && startTime != null
 
   fun normalized(): CalendarEditDraft {
     val normalizedStartDate = startDate.trim()
@@ -178,6 +196,8 @@ internal data class CalendarEditDraft(
     "startTime" to startTime,
     "endTime" to endTime,
     "isAllDay" to allDay,
+    "timePrecision" to precision?.wireName,
+    "timePeriod" to timePeriod,
     "repeat" to repeat,
     "recurrenceUntilDate" to recurrenceUntilDate,
     "reminderMinutes" to reminderMinutes,
@@ -185,6 +205,15 @@ internal data class CalendarEditDraft(
     "notes" to notes,
   )
 }
+
+internal data class CalendarEditInputState(
+  val phase: String = "editing",
+  val text: String = "",
+  val error: String = "",
+  val level: Float = 0f,
+  val durationMs: Long = 0,
+  val canUndo: Boolean = false,
+)
 
 internal data class CalendarEditPageState(
   val loadState: CalendarPageLoadState = CalendarPageLoadState.READY,
@@ -197,6 +226,8 @@ internal data class CalendarEditPageState(
   val saving: Boolean = false,
   val dirty: Boolean = false,
   val locating: Boolean = false,
+  val input: CalendarEditInputState? = null,
+  val nativeEditAck: String? = null,
 ) {
   // RepeatViewModel distinguishes a normal one-off edit from an existing exception.
   val recurrenceRuleMode: CalendarRecurrenceControlMode
@@ -224,13 +255,16 @@ internal object CalendarEditValidator {
   private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
   // CAL-EDIT-001: date is mandatory, while a non-all-day event may intentionally have no time.
-  fun validate(value: CalendarEditDraft): CalendarEditValidation {
+  fun validate(value: CalendarEditDraft, requireDate: Boolean = true): CalendarEditValidation {
     val draft = value.normalized()
     val startDate = parseDate(draft.startDate)?.takeIf(CalendarEditDateRange::contains)
-      ?: return CalendarEditValidation(false, "请选择有效的开始日期")
     val endDate = parseDate(draft.endDate)?.takeIf(CalendarEditDateRange::contains)
-      ?: return CalendarEditValidation(false, "请选择有效的结束日期")
-    if (endDate.isBefore(startDate)) return CalendarEditValidation(false, "结束日期不能早于开始日期")
+    if (startDate == null && (requireDate || draft.startDate.isNotBlank()))
+      return CalendarEditValidation(false, "请选择有效的开始日期")
+    if (endDate == null && (requireDate || draft.endDate.isNotBlank()))
+      return CalendarEditValidation(false, "请选择有效的结束日期")
+    if (startDate != null && endDate != null && endDate.isBefore(startDate))
+      return CalendarEditValidation(false, "结束日期不能早于开始日期")
     if (draft.repeat !in repeatValues) return CalendarEditValidation(false, "重复规则不受支持")
     val recurrenceUntilDate = draft.recurrenceUntilDate
       ?.let(::parseDate)
@@ -238,11 +272,20 @@ internal object CalendarEditValidator {
     if (draft.recurrenceUntilDate != null && recurrenceUntilDate == null) {
       return CalendarEditValidation(false, "请选择有效的截止时间")
     }
-    if (draft.repeat != "once" && recurrenceUntilDate != null && recurrenceUntilDate.isBefore(startDate)) {
+    if (draft.repeat != "once" && recurrenceUntilDate != null && startDate != null && recurrenceUntilDate.isBefore(startDate)) {
       return CalendarEditValidation(false, "截止日期需晚于开始日期")
     }
     if (draft.reminderMinutes != null && draft.reminderMinutes < 0) {
       return CalendarEditValidation(false, "提醒时间必须为非负分钟数")
+    }
+    when (draft.precision) {
+      CalendarTimePrecision.UNSPECIFIED -> if (draft.startTime != null || draft.endTime != null || draft.timePeriod != null)
+        return CalendarEditValidation(false, "日程时间精度与内容不一致")
+      CalendarTimePrecision.PERIOD -> if (CalendarTimePeriod.fromWire(draft.timePeriod) == null ||
+        draft.startTime != null || draft.endTime != null) return CalendarEditValidation(false, "请选择有效的时段")
+      CalendarTimePrecision.EXACT -> if (draft.timePeriod != null || draft.startTime == null)
+        return CalendarEditValidation(false, "请选择有效的开始时间")
+      null -> return CalendarEditValidation(false, "日程时间精度不受支持")
     }
     if (draft.allDay) return CalendarEditValidation(true)
 
@@ -258,7 +301,7 @@ internal object CalendarEditValidator {
     if (!hasEnd) return CalendarEditValidation(true)
     val endTime = parseTime(draft.endTime)
       ?: return CalendarEditValidation(false, "结束时间格式不正确")
-    if (!LocalDateTime.of(endDate, endTime).isAfter(LocalDateTime.of(startDate, startTime))) {
+    if (startDate != null && endDate != null && !LocalDateTime.of(endDate, endTime).isAfter(LocalDateTime.of(startDate, startTime))) {
       return CalendarEditValidation(false, "结束时间需要晚于开始时间")
     }
     return CalendarEditValidation(true)
@@ -347,6 +390,12 @@ internal object CalendarPageSnapshotParser {
       saving = snapshot.boolean("saving"),
       dirty = snapshot.boolean("dirty"),
       locating = snapshot.boolean("locating"),
+      nativeEditAck = snapshot.stringOrNull("nativeEditAck"),
+      input = snapshot.map("input")?.let { input -> CalendarEditInputState(
+        phase = input.string("phase"), text = input.string("text"), error = input.string("error"),
+        level = ((input["level"] as? Number)?.toFloat() ?: 0f).coerceIn(0f, 1f),
+        durationMs = input.longOrNull("durationMs") ?: 0L, canUndo = input.boolean("canUndo"),
+      ) },
     )
   }
 
@@ -371,6 +420,8 @@ internal object CalendarPageSnapshotParser {
     startTime = value.stringOrNull("startTime"),
     endTime = value.stringOrNull("endTime"),
     allDay = value.boolean("isAllDay"),
+    timePrecision = value.stringOrNull("timePrecision"),
+    timePeriod = value.stringOrNull("timePeriod"),
     repeat = value.stringOrNull("repeat") ?: "once",
     recurrenceUntilDate = value.stringOrNull("recurrenceUntilDate"),
     reminderMinutes = value.intOrNull("reminderMinutes"),

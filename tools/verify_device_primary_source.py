@@ -61,7 +61,7 @@ def main() -> int:
         "media_picker_bridge": root / "modules/laoji-native-platform/src/mediaImport.ts",
         "media_picker_contract": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/mediaimport/MeetingMediaPicker.kt",
         "media_import_support": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/mediaimport/MediaImportSupport.kt",
-        "voice_host": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceHostView.kt",
+        "calendar_input": root / "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendarpages/CalendarEditInputDock.kt",
     }
     failures: list[str] = []
     for name, path in required.items():
@@ -135,12 +135,16 @@ def main() -> int:
             failures.append(f"地址反查请求缺少设备数据域鉴权头: {marker}")
     for marker in (
         "parseScheduleRemotely(",
-        "parseScheduleAudioRemotely(",
         "parseScheduleGraphV2(",
         "clarifyScheduleGraphV2(",
     ):
         if marker not in source["schedule"]:
             failures.append(f"设备日程解析链缺失: {marker}")
+    # Audio is captured/transcribed by the native owner, then follows the same
+    # text parser. Do not require the retired second audio parsing transport.
+    for marker in ("transcribeNativeAudioFile(", "return await parseText("):
+        if marker not in source["schedule"]:
+            failures.append(f"设备日程音频共用解析链缺失: {marker}")
     if "@laoji:deviceSpeakerNames:v1" not in source["speakers"]:
         failures.append("讲话人显示名称没有本机映射存储")
     if "generateMeetingSummaryViaSourceStream(" not in source["summary"]:
@@ -196,8 +200,9 @@ def main() -> int:
 
     # Voice input is an authored capture surface, not a demo form. Examples
     # belong in tests and onboarding, never as a prefilled-looking field hint.
-    if re.search(r'input\.hint\s*=\s*"[^"\\n]+"', source["voice_host"]):
-        failures.append("语音新建输入框重新出现示例句占位")
+    hints = re.findall(r'\bhint\s*=\s*"([^"\n]*)"', source["calendar_input"])
+    if any(hint not in {"", "输入日程"} for hint in hints):
+        failures.append("日程输入占位不再仅标识输入对象，需审阅是否重新加入示例或教学")
 
     return report(failures)
 

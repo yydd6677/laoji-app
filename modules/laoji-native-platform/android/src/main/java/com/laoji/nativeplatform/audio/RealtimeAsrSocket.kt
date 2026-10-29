@@ -2,7 +2,9 @@ package com.laoji.nativeplatform.audio
 
 // MIN-ASR-001 / MIN-AUDIO-001: Header-authenticated realtime ASR transports binary PCM directly.
 
+import android.util.Log
 import okhttp3.OkHttpClient
+import okhttp3.Dns
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -54,7 +56,15 @@ class RealtimeAsrSocket(
   private val clientClosing = AtomicBoolean(false)
   private val stopHandshake = AsrStopHandshake()
   private val connection = CompletableFuture<Unit>()
+  @Volatile private var connectStage = "queued"
+  private var connectStartedNanos = 0L
   private val client = sharedClient.newBuilder()
+    .dns(object : Dns {
+      override fun lookup(hostname: String): List<java.net.InetAddress> {
+        connectStage = "dns"
+        return sharedClient.dns.lookup(hostname).also { connectStage = "connect_tls_upgrade" }
+      }
+    })
     .connectTimeout(config.connectionTimeoutMs, TimeUnit.MILLISECONDS)
     .readTimeout(0L, TimeUnit.MILLISECONDS)
     .build()
@@ -70,6 +80,7 @@ class RealtimeAsrSocket(
     val requestBuilder = Request.Builder().url(websocketUrl)
     credentials.headers.forEach { (name, value) -> requestBuilder.header(name, value) }
     val request = requestBuilder.build()
+    connectStartedNanos = System.nanoTime()
     webSocket = client.newWebSocket(request, SocketListener())
     return connection
   }
@@ -114,8 +125,7 @@ class RealtimeAsrSocket(
   }
 
   override fun close() {
-    clientClosing.set(true)
-    opened.set(false)
+    closePendingConnection("close")
     val socket = webSocket
     if (socket != null && !socket.close(1000, "recording complete")) {
       socket.cancel()
@@ -123,19 +133,42 @@ class RealtimeAsrSocket(
   }
 
   override fun cancel() {
-    clientClosing.set(true)
-    opened.set(false)
+    closePendingConnection("cancel")
     webSocket?.cancel()
     stopHandshake.markClosed()
   }
 
+  private fun closePendingConnection(reason: String) {
+    synchronized(connection) {
+      if (!connection.isDone) {
+        if (connectStartedNanos != 0L) Log.i("LaojiAsrTransport",
+          "connect_cancel stage=$connectStage reason=$reason elapsed_ms=${connectElapsedMs()}")
+        connection.completeExceptionally(RecorderRuntimeException(
+          RecorderErrorCode.WEBSOCKET_CONNECT_FAILED, "realtime transcription connection closed before opening"))
+      }
+      clientClosing.set(true)
+      opened.set(false)
+    }
+  }
+
+  private fun connectElapsedMs(): Long = if (connectStartedNanos == 0L) 0L
+    else TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - connectStartedNanos).coerceAtLeast(0L)
+
   private inner class SocketListener : WebSocketListener() {
     override fun onOpen(webSocket: WebSocket, response: Response) {
-      opened.set(true)
-      connection.complete(Unit)
+      synchronized(connection) {
+        if (clientClosing.get()) {
+          webSocket.cancel()
+          return
+        }
+        connectStage = "open"
+        opened.set(true)
+        connection.complete(Unit)
+      }
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
+      if (clientClosing.get()) return
       when (val event = AsrProtocol.parse(text)) {
         is AsrServerEvent.Config -> {
           stopHandshake.observeConfig(event.stopCapability)
@@ -149,6 +182,8 @@ class RealtimeAsrSocket(
     }
 
     override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+      if (!connection.isDone && !clientClosing.get() && connectStartedNanos != 0L) Log.i("LaojiAsrTransport",
+        "connect_closed stage=$connectStage close_code=$code elapsed_ms=${connectElapsedMs()}")
       opened.set(false)
       signalClosed()
       webSocket.close(code, null)
@@ -166,16 +201,16 @@ class RealtimeAsrSocket(
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+      val connecting = !connection.isDone
       opened.set(false)
       signalClosed()
-      if (!connection.isDone) {
-        connection.completeExceptionally(
-          RecorderRuntimeException(
-            RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
-            "unable to connect to realtime transcription",
-          ),
-        )
-      } else if (!clientClosing.get()) {
+      if (!clientClosing.get()) {
+        // Keep the cause at the native transport boundary: JS intentionally
+        // receives a stable Chinese error, not platform exception prose.
+        Log.i("LaojiAsrTransport", "failure phase=${if (connecting) "connect" else "stream"} stage=$connectStage" +
+          " kind=${asrTransportFailureKind(t)} http_status=${response?.code ?: 0} elapsed_ms=${connectElapsedMs()}")
+      }
+      if (!connecting && !clientClosing.get()) {
         listener.onTransportFailure(
           RecorderErrorCode.WEBSOCKET_DISCONNECTED,
           "realtime transcription connection failed",
@@ -185,6 +220,8 @@ class RealtimeAsrSocket(
 
     private fun signalClosed() {
       stopHandshake.markClosed()
+      connection.completeExceptionally(RecorderRuntimeException(
+        RecorderErrorCode.WEBSOCKET_CONNECT_FAILED, "realtime transcription connection closed before opening"))
     }
   }
 

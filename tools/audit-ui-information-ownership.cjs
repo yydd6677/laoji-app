@@ -36,7 +36,7 @@ function isUiSource(relative) {
   if (!/\.(?:tsx?|kt)$/.test(relative)) return false;
   if (/^src\/(?:components|screens|navigation)\//.test(relative)) return true;
   if (/^modules\/laoji-native-platform\/android\/src\/main\/java\/com\/laoji\/nativeplatform\/media\/(?:MinutesPlayerView|MinutesPlaybackSpeedSheet)\.kt$/.test(relative)) return true;
-  return /^modules\/laoji-native-platform\/android\/src\/main\/java\/com\/laoji\/nativeplatform\/(?:calendar|calendarpages|minutes|schedulevoice|speaker|ui|hardware)\//.test(relative);
+  return /^modules\/laoji-native-platform\/android\/src\/main\/java\/com\/laoji\/nativeplatform\/(?:calendar|calendarpages|minutes|speaker|ui|hardware)\//.test(relative);
 }
 
 function lineNumber(source, offset) {

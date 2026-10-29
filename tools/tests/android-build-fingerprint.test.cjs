@@ -75,3 +75,13 @@ test('a native source input change triggers clean prebuild', t => {
   assert.equal(state.rebuild, true);
   assert.equal(state.reason, 'native_inputs_changed');
 });
+
+test('the owned emulator launch cannot silently restore a historical snapshot', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8'));
+  const args = pkg.scripts['android:emulator'].split(/\s+/);
+  assert.equal(args[args.indexOf('-port') + 1], '5562');
+  assert.equal(args[args.indexOf('-avd') + 1], 'LaoJi_API_35');
+  // -no-snapshot-save alone still restores old disk/RAM state at startup.
+  assert.ok(args.includes('-no-snapshot') || args.includes('-no-snapshot-load'));
+  assert.ok(!args.includes('-wipe-data'));
+});

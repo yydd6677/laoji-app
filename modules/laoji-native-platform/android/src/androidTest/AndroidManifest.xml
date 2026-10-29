@@ -1,7 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <uses-permission android:name="android.permission.INTERNET" />
   <queries><package android:name="com.laoji.app" /></queries>
     <!-- Library test host: the real app declares this service via its Expo plugin. -->
-    <application>
+    <application android:usesCleartextTraffic="true">
         <activity android:name="com.laoji.nativeplatform.minutes.ExperienceHostActivity"
             android:exported="false" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <service

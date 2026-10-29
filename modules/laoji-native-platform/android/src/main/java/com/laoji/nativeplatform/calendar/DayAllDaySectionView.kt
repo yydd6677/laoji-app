@@ -424,7 +424,7 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
     this.onEventOpened = onEventOpened
     this.onExpandRequested = onExpandRequested
     contentDescription = buildString {
-      append("全天日程")
+      append("无具体时间日程")
       if (events.isNotEmpty()) append("，${events.size}项")
       if (this@DayAllDayInstanceCanvasView.overflowCount > 0) append("，还有${this@DayAllDayInstanceCanvasView.overflowCount}项，点击展开")
     }
@@ -433,7 +433,7 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
   }
 
   internal fun labelsForTest(): List<String> = buildList {
-    addAll(events.map { CalendarUi.listEventTitle(it.title) })
+    addAll(events.map { CalendarUi.eventChipTitle(it) })
     if (overflowCount > 0) add("还有 $overflowCount 项")
   }
 
@@ -451,7 +451,7 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
       eventPaint.color = visual.fill
       textPaint.color = visual.text
       pressedPaint.color = visual.pressedOverlay
-      drawChip(canvas, index, rowWidth, CalendarUi.eventDisplayTitle(event), eventPaint, textPaint, false)
+      drawChip(canvas, index, rowWidth, CalendarUi.eventChipTitle(event), eventPaint, textPaint, false)
     }
     if (overflowCount > 0) {
       pressedPaint.color = Color.argb(

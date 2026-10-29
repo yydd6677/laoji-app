@@ -14,12 +14,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from requests import RequestException
 
 from app.services import (
     generation_retention,
     question_inline_sources,
     device_v2_identity,
     schedule_graph_service,
+    schedule_edit_service,
     vnext_purge_store,
     vnext_import_transcript_store,
     vnext_import_transcription_pipeline,
@@ -39,6 +41,8 @@ from app.schemas.vnext_contracts import (
     SourceManifestDescriptorV2,
     SourceStreamSnapshotV2,
 )
+from app.schemas.schedule_edit import ScheduleEditRequest, ScheduleEditResponse
+from app.services.llm_provider import LlmProviderError
 
 
 router = APIRouter(prefix="/device/v2", tags=["device-v2"])
@@ -438,6 +442,8 @@ async def capabilities(context: device_v2_identity.DeviceV2Context = Depends(req
         "import_transcript_events_v2": media_upload_v2,
         "realtime_asr_v2": True,
         "schedule_graph_v2": True,
+        "schedule_edit_v1": schedule_edit_service.enabled(),
+        "schedule_time_precision_v1": schedule_edit_service.enabled(),
         "source_stream_v2": True,
         "question_reader_v2": True,
         "question_inline_sources_v1": True,
@@ -486,7 +492,10 @@ async def create_schedule_graph(
                 model_only=True,
             )
             if not parsed:
-                raise ScheduleParserUnavailable("模型未返回日程观察")
+                raise HTTPException(status_code=422, detail={
+                    "code": "SCHEDULE_MODEL_NO_RESULT",
+                    "message": "未识别到具体安排，请修改后重试",
+                })
         return schedule_graph_service.produce_schedule_graph(
             payload.text,
             payload.reference_datetime,
@@ -507,6 +516,27 @@ async def create_schedule_graph(
         }) from error
 
 
+@router.post("/schedule/graph/edit", response_model=ScheduleEditResponse)
+async def edit_schedule_graph(
+    payload: ScheduleEditRequest,
+    _context: device_v2_identity.DeviceV2Context = Depends(require_device_v2),
+) -> ScheduleEditResponse:
+    if not schedule_edit_service.enabled():
+        raise HTTPException(status_code=503, detail={
+            "code": "SCHEDULE_EDIT_NOT_ENABLED", "message": "暂时无法处理这次修改，可直接编辑日程",
+        })
+    try:
+        return await asyncio.to_thread(schedule_edit_service.edit_schedule, payload)
+    except (LlmProviderError, RequestException, TimeoutError) as error:
+        raise HTTPException(status_code=503, detail={
+            "code": "SCHEDULE_EDIT_PROVIDER_UNAVAILABLE", "message": "暂时无法处理这次修改，请重试",
+        }) from error
+    except schedule_edit_service.ScheduleEditInvalid as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "SCHEDULE_EDIT_INVALID", "message": "没有理解这次修改，请调整后重试",
+        }) from error
+
+
 @router.post("/schedule/graph/clarify", response_model=ScheduleMentionGraph)
 async def clarify_schedule_graph(
     payload: ScheduleGraphClarificationRequestV1,
@@ -521,7 +551,10 @@ async def clarify_schedule_graph(
             model_only=True,
         )
         if not parsed:
-            raise ScheduleParserUnavailable("模型未返回澄清观察")
+            raise HTTPException(status_code=422, detail={
+                "code": "SCHEDULE_MODEL_NO_RESULT",
+                "message": "未识别到具体安排，请修改后重试",
+            })
         return schedule_graph_service.merge_schedule_clarification(
             payload.graph,
             payload.answer,

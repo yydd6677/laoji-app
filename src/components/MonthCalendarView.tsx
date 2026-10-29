@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Appearance, Colors as C, withAlpha } from '../theme/colors';
 import type { CalEvent } from '../types';
+import { eventTimeLabel } from '../utils/scheduleEventTime';
 import { selectTasksForDate } from '../utils/taskOrdering';
 import { layoutMonthWeekEvents } from '../utils/monthEventLayout';
 import {
@@ -784,13 +785,6 @@ function ExpandedDayPage({
       ))}
     </ScrollView>
   );
-}
-
-function eventTimeLabel(event: CalEvent): string {
-  if (event.startTime && event.endTime) return `${event.startTime} - ${event.endTime}`;
-  if (event.startTime) return event.startTime;
-  if (event.spanning && event.endDate) return '跨日';
-  return '全天';
 }
 
 const s = StyleSheet.create({

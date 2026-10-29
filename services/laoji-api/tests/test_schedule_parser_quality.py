@@ -5,6 +5,125 @@ import pytest
 from app.services import schedule_parser_service as parser
 
 
+@pytest.mark.parametrize("phrase,period", [("凌晨", "early_morning"), ("上午", "morning"),
+    ("早上", "morning"), ("早晨", "morning"), ("中午", "noon"), ("下午", "afternoon"),
+    ("傍晚", "evening"), ("晚上", "night")])
+def test_model_only_preserves_verified_period_without_inventing_a_clock(phrase, period):
+    raw = "明天" + phrase + "整理资料"
+    parsed = parser._normalize_model_only_result({"title": "整理资料", "event_type": "once",
+        "date_phrase": "明天", "time_phrase": phrase, "is_all_day": True}, raw)
+    assert parsed["time_period"] == period
+    assert parsed["start_time"] is None and parsed["end_time"] is None
+    assert parsed["is_all_day"] is False
+
+
+@pytest.mark.parametrize("phrase", [None, "下午"])
+def test_model_only_does_not_recover_an_unselected_or_ungrounded_period(phrase):
+    raw = "明天晚上整理资料" if phrase is None else "明天整理资料"
+    parsed = parser._normalize_model_only_result({"title": "整理资料", "event_type": "once",
+        "date_phrase": "明天", "time_phrase": phrase}, raw)
+    assert parsed["time_period"] is None and parsed["start_time"] is None
+
+
+def test_model_only_exact_clock_still_has_no_separate_period():
+    parsed = parser._normalize_model_only_result({"title": "整理资料", "event_type": "once",
+        "date_phrase": "明天", "time_phrase": "下午三点半"}, "明天下午三点半整理资料")
+    assert parsed["time_period"] is None and parsed["start_time"] == "15:30"
+
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("上午十点零一", "10:01"),
+    ("上午十点〇一分", "10:01"),
+    ("上午十点零九分", "10:09"),
+    ("下午两点零三", "14:03"),
+    ("早上八点〇七", "08:07"),
+    ("晚上九点四十九分", "21:49"),
+    ("中午十二点五十九", "12:59"),
+    ("上午十点零零分", "10:00"),
+    ("上午十点01分", "10:01"),
+    ("上午十点六十分", None),
+])
+def test_source_time_lexer_preserves_spoken_minute(phrase, expected):
+    # A lexical contract, not a natural-language quality corpus. The same
+    # literal is used for boundary matching and authoritative conversion.
+    assert parser._parse_authoritative_time(phrase) == expected
+    if expected is not None:
+        assert parser._parse_time_token(phrase) == expected
+
+
+@pytest.mark.parametrize("phrase,resolution", [(None, "omitted"), ("改天", "unresolved"),
+    ("日期没定", "unresolved"), ("下个月找时间", "unresolved")])
+def test_model_date_observation_keeps_omission_separate_from_unresolved(phrase, resolution):
+    source = ((phrase + " ") if phrase else "") + "去取快递"
+    result = parser._normalize_model_only_result({"title": "取快递", "event_type": "once", "date_phrase": phrase,
+        "date_status": "omitted" if phrase is None else "unresolved", "time_phrase": None, "recurrence_phrase": None}, source)
+    assert result["date_resolution"] == resolution
+    assert result["start_date"] == ""
+
+
+def test_old_or_invalid_date_observation_cannot_claim_omission():
+    base = {"title": "取快递", "event_type": "once", "time_phrase": None}
+    for extra in ({}, {"date_phrase": None, "recurrence_phrase": None}, {"date_phrase": "原文中没有的日期"},
+        {"date_phrase": None, "date_status": "stated", "recurrence_phrase": None}):
+        parsed = parser._normalize_model_only_result({**base, **extra}, "去取快递")
+        assert parsed["date_resolution"] is None
+
+
+def test_model_unresolved_date_is_not_confused_with_an_empty_literal():
+    parsed = parser._normalize_model_only_result({"title": "取快递", "event_type": "once", "date_status": "unresolved",
+        "date_phrase": None, "time_phrase": None, "recurrence_phrase": None}, "等有空去取快递")
+    assert parsed["date_resolution"] == "unresolved"
+    assert parsed["start_date"] == ""
+
+
+def test_ungrounded_recurrence_cannot_silently_become_a_saveable_once_event():
+    parsed = parser._normalize_model_only_result({"title": "散步", "event_type": "daily", "date_status": "omitted",
+        "date_phrase": None, "time_phrase": "晚上", "recurrence_phrase": None}, "每天晚上散步")
+    assert parsed is None
+
+
+@pytest.mark.parametrize("event_type,phrase,source", [
+    ("weekly", None, "明天下午读书"),
+    ("monthly", "原话没有的重复规则", "明天去缴费"),
+    ("daily", "每周一", "除了周一，每天跑步"),
+    ("monthly", "每月最后一个工作日", "每月最后一个工作日缴费"),
+    ("提醒", None, "十分钟后关火"),
+])
+def test_invalid_or_unresolved_recurrence_is_not_downgraded_to_once(event_type, phrase, source):
+    parsed = parser._normalize_model_only_result({"title": "当前事项", "event_type": event_type,
+        "date_phrase": "明天" if "明天" in source else None, "date_status": "stated",
+        "time_phrase": None, "recurrence_phrase": phrase}, source)
+    assert parsed is None
+
+
+def test_source_backed_recurrence_and_ordinary_once_still_use_the_existing_owner():
+    context = parser._resolve_parse_context("2026-10-28T18:00:00+08:00", "Asia/Shanghai")
+    token = parser._ACTIVE_PARSE_CONTEXT.set(context)
+    try:
+        repeated = parser._normalize_model_only_result({"title": "散步", "event_type": "daily", "date_status": "omitted",
+            "date_phrase": None, "time_phrase": "晚上", "recurrence_phrase": "每天"}, "每天晚上散步")
+        assert repeated["event_type"] == "daily"
+        assert repeated["start_date"] == "2026-10-28"
+        assert repeated["time_period"] == "night"
+        once = parser._normalize_model_only_result({"title": "取快递", "event_type": "once", "date_status": "omitted",
+            "date_phrase": None, "time_phrase": None, "recurrence_phrase": None}, "去取快递")
+        assert once["event_type"] == "once" and once["date_resolution"] == "omitted"
+    finally:
+        parser._ACTIVE_PARSE_CONTEXT.reset(token)
+
+
+def test_resolved_date_observation_uses_request_clock_not_completion_clock():
+    context = parser._resolve_parse_context("2026-10-28T23:59:59+08:00", "Asia/Shanghai")
+    token = parser._ACTIVE_PARSE_CONTEXT.set(context)
+    try:
+        parsed = parser._normalize_model_only_result({"title": "取快递", "event_type": "once", "date_phrase": "明天",
+            "time_phrase": None, "recurrence_phrase": None}, "明天取快递")
+        assert parsed["start_date"] == "2026-10-29"
+        assert parsed["date_resolution"] == "resolved"
+    finally:
+        parser._ACTIVE_PARSE_CONTEXT.reset(token)
+
+
 def test_schedule_llm_context_uses_shared_generation_runner(monkeypatch):
     monkeypatch.delenv("SCHEDULE_LLM_NUM_CTX", raising=False)
     monkeypatch.delenv("LAOJI_GENERATION_NUM_CTX", raising=False)

@@ -45,9 +45,9 @@ def main() -> int:
     tabs = read("src/navigation/MainTabs.tsx")
     stack = read("src/navigation/index.tsx")
     summary_content = read("src/components/MeetingSummaryContent.tsx")
-    schedule_voice = read(
+    calendar_input = read(
         "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/"
-        "schedulevoice/ScheduleVoiceHostView.kt"
+        "calendarpages/CalendarEditInputDock.kt"
     )
     minutes_detail_pages = read(
         "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/minutes/"
@@ -183,15 +183,13 @@ def main() -> int:
     forbid(pressable, "height:", "press-layout-height-animation", failures)
     forbid(pressable, "width:", "press-layout-width-animation", failures)
 
-    # Original LaoJi surfaces must share one stable stage owner and visibly
-    # differ by theme structure, not only by color or font. Connection detail
-    # is transport telemetry and must not leak into the voice composer.
-    for expression in ("DIRECT", "SOFT", "EDITORIAL", "LAYERED"):
-        require(schedule_voice, f"VoiceThemeExpression.{expression}", f"voice-expression-{expression.lower()}", failures)
-    require(schedule_voice, "private val stageHost = FrameLayout(context)", "voice-stable-stage-host", failures)
-    require(schedule_voice, "renderStage(if (inputPhase) inputPanel else confirmPanel)", "voice-monotonic-stage-owner", failures)
-    require(schedule_voice, 'it.contains("正在连接")', "voice-hide-connection-copy", failures)
-    forbid(schedule_voice, "private val busyPanel", "voice-layout-swapping-busy-panel", failures)
+    # The editor owns input now; retired confirmation-stage silhouettes must
+    # not be required to keep an obsolete screen in the bundle. Actual
+    # four-skin input-instance/IME continuity is covered by native execution.
+    require(calendar_input, "private val input: EditText", "editor-stable-input", failures)
+    require(calendar_input, "private val microphone", "editor-stable-microphone", failures)
+    require(calendar_input, "pageDrawing", "editor-shared-theme-owner", failures)
+    forbid(calendar_input, "正在连接", "editor-hide-connection-copy", failures)
 
     # Compatibility text may contain lightweight syntax, but the product
     # surface renders authored sections and never exposes Markdown furniture.
@@ -210,7 +208,9 @@ def main() -> int:
     require(system_bars, "WindowInsetsCompat.Type.statusBars()", "status-bar-inset-owner", failures)
     require(system_bars, "WindowInsetsCompat.Type.navigationBars()", "navigation-bar-inset-owner", failures)
     require(system_bars, "isAppearanceLightStatusBars = !darkStatusSurface", "status-icon-contrast", failures)
-    require(system_bars, "isAppearanceLightNavigationBars = !darkNavigationSurface", "navigation-icon-contrast", failures)
+    for marker in ("val lightAppearance = !(darkSurface || overlayDark)",
+                   "controller.isAppearanceLightNavigationBars = lightAppearance"):
+        require(system_bars, marker, "navigation-icon-contrast", failures)
     require(system_bars, "window.isNavigationBarContrastEnforced = false", "three-button-navigation-scrim", failures)
     require(main_activity, "LaojiSystemBars.apply(this)", "activity-system-bar-owner", failures)
     require(main_activity, "override fun onResume()", "activity-system-bar-resume", failures)

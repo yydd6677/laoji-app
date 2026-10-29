@@ -11,6 +11,7 @@ export interface UpcomingEventProjectionItem {
   startAtMs: number;
   endAtMs: number;
   allDay: boolean;
+  timePeriodLabel?: string | null;
   meetingAction: UpcomingEventMeetingAction;
 }
 

@@ -15,7 +15,7 @@ export function scheduleInputContext(source: PendingHardwareRecording): Schedule
 export function scheduleInputDraft(source: PendingHardwareRecording, result: ParseResult): ParseResult {
   if (scheduleInputContext(source).reference_datetime) return result;
   // A cold offline board has no clock. Never assign "tomorrow" to the receive date.
-  return { ...result, start_date: '', end_date: null, schedule_graph: undefined,
+  return { ...result, start_date: '', end_date: null, date_resolution: 'unresolved', schedule_graph: undefined,
     needs_clarification: true, clarification_question: '这条日程是哪一天？' };
 }
 export type ScheduleInputJob = {

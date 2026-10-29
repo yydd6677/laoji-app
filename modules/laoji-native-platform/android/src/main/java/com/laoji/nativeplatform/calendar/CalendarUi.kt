@@ -133,6 +133,9 @@ object CalendarUi {
   fun eventDisplayTitle(event: CalendarEvent): String =
     (if (event.completed) "✓ " else "") + listEventTitle(event.title)
 
+  fun eventChipTitle(event: CalendarEvent): String =
+    listOfNotNull(event.timePeriodLabel?.takeIf(String::isNotBlank), eventDisplayTitle(event)).joinToString(" ")
+
   fun dp(context: Context, value: Float): Float = value * context.resources.displayMetrics.density
 
   fun sp(context: Context, value: Float): Float = TypedValue.applyDimension(

@@ -548,6 +548,35 @@ def _reset_provider_probe_cache_for_tests() -> None:
         _EMBEDDING_PROBE_CACHE.clear()
 
 
+def _ollama_decoding_schema(schema: str | dict[str, Any]) -> str | dict[str, Any]:
+    """Preserve JSON shape without expanding large string bounds into GBNF.
+
+    Ollama reports grammar repetition overflow as a vocabulary-load error.
+    maxLength stays in the canonical Pydantic contract and final validator;
+    output remains token-bounded. Do not traverse enum/default/example data as
+    schemas or remove a user's property merely named 'maxLength'.
+    """
+    import copy
+    if not isinstance(schema, dict):
+        return schema
+    result = copy.deepcopy(schema)
+    result.pop("maxLength", None)
+    for key in ("properties", "$defs", "definitions", "patternProperties", "dependentSchemas"):
+        if isinstance(result.get(key), dict):
+            result[key] = {name: _ollama_decoding_schema(value) if isinstance(value, dict) else value
+                for name, value in result[key].items()}
+    for key in ("items", "additionalProperties", "unevaluatedProperties", "contains", "propertyNames", "not", "if", "then", "else"):
+        value = result.get(key)
+        if isinstance(value, dict):
+            result[key] = _ollama_decoding_schema(value)
+        elif key == "items" and isinstance(value, list):
+            result[key] = [_ollama_decoding_schema(item) if isinstance(item, dict) else item for item in value]
+    for key in ("allOf", "anyOf", "oneOf", "prefixItems"):
+        if isinstance(result.get(key), list):
+            result[key] = [_ollama_decoding_schema(value) if isinstance(value, dict) else value for value in result[key]]
+    return result
+
+
 def _call_ollama_transport(
     config: Any,
     system_prompt: str,
@@ -598,7 +627,7 @@ def _call_ollama_transport(
         payload.pop("messages")
         payload["system"] = "/no_think\n" + str(system_prompt)
         payload["prompt"] = str(transcript)
-        payload["format"] = response_format
+        payload["format"] = _ollama_decoding_schema(response_format)
     headers = {
         "X-Laoji-Priority": active_priority,
     }

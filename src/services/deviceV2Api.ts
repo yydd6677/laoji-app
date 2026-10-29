@@ -53,6 +53,8 @@ export interface DeviceV2Capabilities {
   importTranscriptEventsV2: boolean;
   realtimeAsrV2: boolean;
   scheduleGraphV2: boolean;
+  scheduleEditV1: boolean;
+  scheduleTimePrecisionV1: boolean;
   sourceStreamV2: boolean;
   questionReaderV2: boolean;
   questionInlineSourcesV1: boolean;
@@ -515,6 +517,8 @@ function normalizeCapabilities(value: any): DeviceV2Capabilities {
     importTranscriptEventsV2: value.import_transcript_events_v2 === true,
     realtimeAsrV2: value.realtime_asr_v2 === true,
     scheduleGraphV2: value.schedule_graph_v2 === true,
+    scheduleEditV1: value.schedule_edit_v1 === true,
+    scheduleTimePrecisionV1: value.schedule_time_precision_v1 === true,
     sourceStreamV2: value.source_stream_v2 === true,
     questionReaderV2: value.question_reader_v2 === true,
     questionInlineSourcesV1: value.question_inline_sources_v1 === true,

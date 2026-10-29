@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
   LaojiCalendarDetailView,
   type NativeCalendarDetailAction,
@@ -10,6 +10,8 @@ import {
 import { ScreenContainer } from '../components/ScreenContainer';
 import { AppActionSheet, type AppActionSheetItem } from '../components/AppActionSheet';
 import { useAppDialog } from '../components/AppDialog';
+import { ScheduleEditorResumeSheet } from '../components/ScheduleEditorResumeSheet';
+import { useScheduleEditorEntry } from '../hooks/useScheduleEditorEntry';
 import {
   MeetingSeriesCarryForwardSheet,
   type MeetingSeriesCarryForwardSelection,
@@ -58,6 +60,7 @@ type ScopeRequest = {
 
 // CAL-DETAIL-001 / CAL-REPEAT-RRULE-001 / UI-OVERLAY-001: the route coordinates repository semantics only.
 export function EventDetailScreen({ navigation, route }: Props) {
+  const editorEntry = useScheduleEditorEntry(navigation, useIsFocused(), false);
   const { colors: C } = useTheme();
   const { events, searchableEvents, deleteEvent, refreshEvents } = useEvents();
   const { createMeeting } = useMeetings();
@@ -237,7 +240,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
   const editEvent = useCallback(() => {
     if (!event) return;
     const navigateToEditor = (recurrenceScope: 'occurrence' | 'following' | 'series') => {
-      navigation.navigate('AddEvent', {
+      void editorEntry.create({
         date: event.seriesStartDate ?? event.startDate,
         eventRef: eventRefForEvent(event),
         recurrenceScope,
@@ -248,7 +251,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
     } else {
       navigateToEditor('series');
     }
-  }, [event, navigation, showDialog]);
+  }, [editorEntry.create, event]);
 
   const scopeItems = useMemo<AppActionSheetItem[]>(() => {
     if (!event || !scopeRequest) return [];
@@ -365,6 +368,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
         items={scopeItems}
         onClose={() => setScopeRequest(null)}
       />
+      <ScheduleEditorResumeSheet selection={editorEntry.resume} onChoose={editorEntry.chooseResume} onClose={editorEntry.dismissResume} />
       <MeetingSeriesCarryForwardSheet
         visible={carrySheetVisible}
         memory={seriesMemory}

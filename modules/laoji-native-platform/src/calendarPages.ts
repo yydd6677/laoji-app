@@ -92,6 +92,8 @@ export interface NativeCalendarEditDraftSnapshot {
   startTime: string | null;
   endTime: string | null;
   isAllDay: boolean;
+  timePrecision?: 'unspecified' | 'period' | 'exact';
+  timePeriod?: 'early_morning' | 'morning' | 'noon' | 'afternoon' | 'evening' | 'night' | null;
   repeat: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
   recurrenceUntilDate: string | null;
   reminderMinutes: number | null;
@@ -111,6 +113,17 @@ export interface NativeCalendarEditSnapshot {
   saving: boolean;
   dirty: boolean;
   locating: boolean;
+  input?: NativeCalendarEditorInputSnapshot;
+  nativeEditAck?: string | null;
+}
+
+export interface NativeCalendarEditorInputSnapshot {
+  phase: 'editing' | 'recording' | 'parsing' | 'saving' | 'saved';
+  text: string;
+  error: string;
+  level: number;
+  durationMs: number;
+  canUndo: boolean;
 }
 
 export type NativeCalendarSearchAction =
@@ -128,11 +141,14 @@ export type NativeCalendarDetailAction =
     } & Partial<CalendarPageEventRefSnapshot>)
   | ({ type: 'openSeriesAction'; meetingId: string; actionId: string } & Partial<CalendarPageEventRefSnapshot>);
 
-export type NativeCalendarEditAction =
+export type NativeCalendarEditAction = (
   | { type: 'cancel' | 'delete' | 'retry' }
+  | { type: 'inputStart' | 'inputStop' | 'inputCancel' | 'inputUndo' | 'inputOptions' }
+  | { type: 'inputTextChange' | 'inputSubmit'; text: string }
   | { type: 'save' | 'openRepeat' | 'openReminder' | 'requestCurrentLocation'; draft: NativeCalendarEditDraftSnapshot }
   | { type: 'draftChange'; draft: NativeCalendarEditDraftSnapshot }
-  | { type: 'feedback'; message: string; durationMs?: number };
+  | { type: 'feedback'; message: string; durationMs?: number }
+) & { nativeEditToken?: string };
 
 type NativeActionHandler<T> = (event: NativeSyntheticEvent<T>) => void;
 

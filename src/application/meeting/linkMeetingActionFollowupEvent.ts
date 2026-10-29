@@ -10,6 +10,13 @@ export class MeetingActionFollowupConflictError extends Error {
   }
 }
 
+export class MeetingActionFollowupUnavailableError extends Error {
+  constructor(message = 'meeting action does not exist in active scope') {
+    super(message);
+    this.name = 'MeetingActionFollowupUnavailableError';
+  }
+}
+
 export interface LinkMeetingActionFollowupEventInput {
   meetingId: string;
   actionId: string;
@@ -48,10 +55,10 @@ export class LinkMeetingActionFollowupEventUseCase {
     await this.repository.transaction(async transaction => {
       const meeting = await transaction.getMeeting(meetingId, input.scopeKey);
       if (!meeting || meeting.lifecycle === 'deleted') {
-        throw new Error('meeting does not exist in active scope');
+        throw new MeetingActionFollowupUnavailableError('meeting does not exist in active scope');
       }
       const current = await transaction.getMeetingAction(actionId, meetingId, input.scopeKey);
-      if (!current) throw new Error('meeting action does not exist in active scope');
+      if (!current) throw new MeetingActionFollowupUnavailableError();
       if (current.followupEventSourceId === eventSourceId) {
         result = { action: current, applied: false };
         return;

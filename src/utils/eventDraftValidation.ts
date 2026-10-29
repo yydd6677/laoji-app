@@ -1,4 +1,5 @@
 import type { CalEvent } from '../types';
+import { isScheduleTimeValue } from '../domain/scheduleTime';
 
 export type EventDraftValidationCode =
   | 'invalid-start-date'
@@ -14,6 +15,7 @@ export type EventDraftValidationCode =
   | 'all-day-has-time'
   | 'all-day-reminder-unsupported'
   | 'untimed-reminder-unsupported'
+  | 'invalid-time-precision'
   | 'invalid-reminder';
 
 export interface EventDraftValidationIssue {
@@ -35,6 +37,8 @@ export type EventDraftForValidation = Pick<
   | 'startTime'
   | 'endTime'
   | 'isAllDay'
+  | 'timePrecision'
+  | 'timePeriod'
   | 'repeat'
   | 'recurrenceUntilDate'
   | 'reminderMinutes'
@@ -96,6 +100,15 @@ export function validateEventDraft<T extends EventDraftForValidation>(draft: T):
   if (isValidEventDate(draft.startDate) && draft.endDate && isValidEventDate(draft.endDate)
     && draft.endDate < draft.startDate) {
     add('end-before-start', '结束日期不能早于开始日期');
+  }
+
+  if ((draft.timePrecision !== undefined || draft.timePeriod != null) && !isScheduleTimeValue({
+    precision: draft.timePrecision,
+    period: draft.timePeriod ?? null,
+    startTime: draft.startTime ?? null,
+    endTime: draft.endTime ?? null,
+  })) {
+    add('invalid-time-precision', '日程时间精度与内容不一致');
   }
 
   if (draft.isAllDay) {

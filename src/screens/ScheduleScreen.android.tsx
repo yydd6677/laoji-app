@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
-import { useScheduleInputs, discardScheduleInput } from '../components/ScheduleInputProvider';
-import type { ScheduleInputJob } from '../services/scheduleInput';
+import { discardScheduleInput } from '../components/ScheduleInputProvider';
+import { useScheduleEditorEntry } from '../hooks/useScheduleEditorEntry';
+import { ScheduleEditorResumeSheet } from '../components/ScheduleEditorResumeSheet';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   LaojiCalendarView,
@@ -20,8 +21,6 @@ import {
   type NativeTabPressEvent,
   type NativeWindowOverlayEvent,
 } from 'laoji-native-platform';
-import { AppActionSheet } from '../components/AppActionSheet';
-import { VoiceInputModal } from '../components/VoiceInputModal';
 import { useAppDialog } from '../components/AppDialog';
 import { useEvents } from '../store/EventsStore';
 import type { CalEvent, EventRecurrenceScope, RootStackParamList } from '../types';
@@ -95,9 +94,7 @@ export function ScheduleScreen({
   const { colors: C } = useTheme();
   const styles = useMemo(() => createStyles(C), [C]);
   const isFocused = useIsFocused();
-  const inputs = useScheduleInputs();
-  const [input, setInput] = useState<ScheduleInputJob | null>(null);
-  const offered = useRef(new Set<string>());
+  const inputs = useScheduleEditorEntry(navigation, active && isFocused);
   const {
     events,
     searchableEvents,
@@ -112,16 +109,11 @@ export function ScheduleScreen({
   const [visibleRange, setVisibleRange] = useState<EpochRange>(() => initialCalendarRange(today));
   const [mode, setMode] = useState<'month' | 'day'>('month');
   const [mutationResolution, setMutationResolution] = useState<NativeCalendarMutationResolution | null>(null);
-  const [createMenuVisible, setCreateMenuVisible] = useState(false);
-  const [voiceVisible, setVoiceVisible] = useState(false);
-  useEffect(() => {
-    if (!active || !isFocused || voiceVisible || AppState.currentState !== 'active') return;
-    const next = inputs.jobs.find(item => item.state === 'ready' && !offered.current.has(item.id));
-    if (next) { offered.current.add(next.id); setInput(next); setVoiceVisible(true); }
-  }, [active, inputs.jobs, isFocused, voiceVisible]);
   const openInputs = () => {
-    showDialog({ title: '待确认日程', actions: [
-      ...inputs.jobs.filter(item => item.state !== 'pending').map(item => ({ text: item.draft?.title || '日程语音', onPress: () => { setInput(item); setVoiceVisible(true); } })),
+    showDialog({ title: '日程语音', actions: [
+      ...inputs.jobs.filter(item => item.state !== 'pending').map(item => ({
+        text: item.draft?.title || '日程语音', onPress: () => { void inputs.open(item); },
+      })),
       { text: '取消', role: 'cancel' as const },
     ] });
   };
@@ -221,14 +213,14 @@ export function ScheduleScreen({
     }
   }, [chooseEditScope, events, updateEvent]);
 
-  const openCreate = useCallback((draft?: NativeCalendarCreateEvent, epochDay = selectedEpochDay) => {
-    navigation.navigate('AddEvent', draft ? {
+  const openCreate = useCallback((draft?: NativeCalendarCreateEvent, epochDay?: number) => {
+    void inputs.create(draft ? {
       date: calendarDateFromEpochDay(draft.startEpochDay),
       endDate: calendarDateFromEpochDay(draft.endEpochDay + (draft.endMinutes === 1440 ? 1 : 0)),
       startTime: calendarTimeFromMinutes(draft.startMinutes),
       endTime: calendarTimeFromMinutes(draft.endMinutes),
-    } : { date: calendarDateFromEpochDay(epochDay) });
-  }, [navigation, selectedEpochDay]);
+    } : epochDay === undefined ? {} : { date: calendarDateFromEpochDay(epochDay) });
+  }, [inputs.create]);
 
   const handleSemantic = useCallback((event: NativeCalendarSemanticEvent) => {
     switch (event.type) {
@@ -238,14 +230,10 @@ export function ScheduleScreen({
       case 'search-open':
         setSearchVisible(true);
         break;
-      case 'create-menu':
-        setCreateMenuVisible(true);
+      case 'create':
+        openCreate();
         break;
-      case 'create-voice':
-        setInput(null);
-        setVoiceVisible(true);
-        break;
-      case 'create-manual':
+      case 'create-date':
         openCreate(undefined, typeof event.epochDay === 'number' ? event.epochDay : selectedEpochDay);
         break;
       default:
@@ -332,23 +320,8 @@ export function ScheduleScreen({
         onTabPress={onTabPress}
         testID="schedule-native-calendar"
       />
-      <AppActionSheet
-        visible={createMenuVisible}
-        title="新建日程"
-        onClose={() => setCreateMenuVisible(false)}
-        items={[
-          { key: 'voice', label: '语音输入', onPress: () => { setInput(null); setVoiceVisible(true); } },
-          { key: 'manual', label: '手动新建', onPress: () => openCreate() },
-        ]}
-      />
-      <VoiceInputModal
-        visible={voiceVisible}
-        input={input}
-        onClose={() => setVoiceVisible(false)}
-        onSaved={() => { setVoiceVisible(false); setInput(null); inputs.refresh(); }}
-      />
-      {active && inputs.jobs.length > 0 && !voiceVisible ? (
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="待确认日程" onPress={openInputs}
+      {active && inputs.jobs.length > 0 ? (
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="日程语音" onPress={openInputs}
           disabled={inputs.jobs.every(item => item.state === 'pending')}
           onLongPress={() => {
             const item = inputs.jobs[0];
@@ -356,9 +329,10 @@ export function ScheduleScreen({
               { text: '取消', role: 'cancel' }, { text: '删除', role: 'destructive', onPress: async () => { await discardScheduleInput(item); inputs.refresh(); } },
             ] });
           }} style={styles.pendingInput}>
-          <Text style={{ color: C.primary, fontSize: 14 }}>{inputs.jobs.every(item => item.state === 'pending') ? '正在解析日程' : `待确认日程 ${inputs.jobs.filter(item => item.state !== 'pending').length}`}</Text>
+          <Text style={{ color: C.primary, fontSize: 14 }}>{inputs.jobs.every(item => item.state === 'pending') ? '正在解析日程' : `日程语音 ${inputs.jobs.filter(item => item.state !== 'pending').length}`}</Text>
         </TouchableOpacity>
       ) : null}
+      <ScheduleEditorResumeSheet selection={inputs.resume} onChoose={inputs.chooseResume} onClose={inputs.dismissResume} />
     </>
   );
 }

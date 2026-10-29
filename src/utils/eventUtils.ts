@@ -5,7 +5,6 @@ import {
   type EventDraftForValidation,
 } from './eventDraftValidation';
 import { eventRefForEvent, sameEventRef, sourceEventId } from './eventIdentity';
-import { eventDisplaysAsAllDay } from './eventAllDay';
 
 /**
  * Returns true if two half-open time intervals [s1,e1) and [s2,e2) overlap.
@@ -59,7 +58,8 @@ export function evaluateEventConflicts(
   excludeRef?: EventRef,
   excludeScope: EventRecurrenceScope = 'series',
 ): EventConflictResult {
-  const proposedAllDay = eventDisplaysAsAllDay(proposed);
+  // The untimed layout lane is not a claim of all-day occupation.
+  const proposedAllDay = proposed.isAllDay === true;
   const proposedRange = proposedAllDay ? allDayRange(proposed) : timedRange(proposed);
   if (!proposedRange) return { hasConflict: false, conflicts: [] };
 
@@ -75,7 +75,7 @@ export function evaluateEventConflicts(
           : sameEventRef(eventRef, excludeRef);
       if (excluded) continue;
     }
-    const eventAllDay = eventDisplaysAsAllDay(event);
+    const eventAllDay = event.isAllDay === true;
     const eventRange = eventAllDay ? allDayRange(event) : timedRange(event);
     if (!eventRange || !rangesOverlap(proposedRange, eventRange)) continue;
     const mixed = proposedAllDay !== eventAllDay;

@@ -13,6 +13,7 @@ import {
   processingStatusesFromStages,
 } from '../domain/meeting';
 import { eventRefForEvent } from '../utils/eventIdentity';
+import { scheduleTimeForEvent } from '../utils/scheduleEventTime';
 
 export type OccurrenceMeetingActionKind = 'start' | 'continue' | 'view';
 
@@ -45,16 +46,15 @@ export function calendarMeetingContext(
 ): CalendarMeetingContext {
   assertScopeKey(scopeKey);
   const occurrence = eventRefForEvent(event);
-  const allDay = Boolean(event.isAllDay || (!event.startTime && !event.endTime));
+  const time = scheduleTimeForEvent(event);
+  const allDay = Boolean(event.isAllDay);
   return {
     occurrence,
     snapshot: {
       eventTitle: event.title ?? '',
-      plannedStartMs: localTimestamp(event.startDate, allDay ? undefined : event.startTime),
-      plannedEndMs: localTimestamp(
-        event.endDate ?? event.startDate,
-        allDay ? undefined : event.endTime ?? event.startTime,
-      ),
+      plannedStartMs: time.precision === 'exact' ? localTimestamp(event.startDate, time.startTime) : null,
+      plannedEndMs: time.precision === 'exact' && time.endTime
+        ? localTimestamp(event.endDate ?? event.startDate, time.endTime) : null,
       allDay,
       timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
       location: event.location?.trim() || null,

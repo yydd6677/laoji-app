@@ -10,7 +10,9 @@ import {
   View,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useIsFocused } from '@react-navigation/native';
+import { useScheduleEditorEntry } from '../hooks/useScheduleEditorEntry';
+import { ScheduleEditorResumeSheet } from '../components/ScheduleEditorResumeSheet';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors as C, withAlpha } from '../theme/colors';
@@ -20,7 +22,8 @@ import {
   resolveResponsiveContentLayout,
 } from '../components/ResponsiveContentFrame';
 import { CalendarDetailTitleBar } from '../components/CalendarTitleBar';
-import { RootStackParamList } from '../types';
+import { CalEvent, RootStackParamList } from '../types';
+import { eventTimeLabel, scheduleTimeForEvent } from '../utils/scheduleEventTime';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from '../components/AppDialog';
 import { labelForReminder } from '../services/notifications';
@@ -85,24 +88,13 @@ function conciseDate(value: string): string {
   return `${includeYear ? `${date.getFullYear()}年` : ''}${date.getMonth() + 1}月${date.getDate()}日 周${WEEKDAYS[date.getDay()]}`;
 }
 
-function detailTimeRange({
-  startDate,
-  endDate,
-  startTime,
-  endTime,
-  isAllDay,
-}: {
-  startDate: string;
-  endDate?: string;
-  startTime?: string;
-  endTime?: string;
-  isAllDay?: boolean;
-}): string {
+function detailTimeRange(event: CalEvent): string {
+  const { startDate, endDate, startTime, endTime } = event;
   const start = conciseDate(startDate);
   const end = endDate && endDate !== startDate ? conciseDate(endDate) : undefined;
 
-  if (isAllDay || (!startTime && !endTime)) {
-    return end ? `${start} - ${end}` : start;
+  if (scheduleTimeForEvent(event).precision !== 'exact') {
+    return `${end ? `${start} - ${end}` : start} ${eventTimeLabel(event)}`;
   }
 
   const startWithTime = startTime ? `${start} ${startTime}` : start;
@@ -129,6 +121,7 @@ function DetailInfoRow({ icon, children, testID }: {
 }
 
 export function EventDetailScreen({ navigation, route }: Props) {
+  const editorEntry = useScheduleEditorEntry(navigation, useIsFocused(), false);
   const { events, searchableEvents, deleteEvent } = useEvents();
   const { showDialog } = useAppDialog();
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -189,7 +182,7 @@ export function EventDetailScreen({ navigation, route }: Props) {
 
   const handleEdit = () => {
     const navigateToEditor = (recurrenceScope: 'occurrence' | 'following' | 'series') => {
-      navigation.navigate('AddEvent', {
+      void editorEntry.create({
         date: ev.seriesStartDate ?? ev.startDate,
         eventRef: eventRefForEvent(ev),
         recurrenceScope,
@@ -330,6 +323,8 @@ export function EventDetailScreen({ navigation, route }: Props) {
           </View>
         </Animated.ScrollView>
       </ResponsiveContentFrame>
+      <ScheduleEditorResumeSheet selection={editorEntry.resume} onChoose={editorEntry.chooseResume}
+        onClose={editorEntry.dismissResume} />
     </ScreenContainer>
   );
 }

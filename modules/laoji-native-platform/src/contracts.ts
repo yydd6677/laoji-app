@@ -28,6 +28,9 @@ export interface NativeCalendarEventSnapshot {
   endMinutes: number | null;
   /** Spoken period such as 下午 when an exact clock was not provided. */
   timePeriodLabel?: string | null;
+  /** allDay below remains the native untimed-layout flag, not this precision. */
+  timePrecision?: 'unspecified' | 'period' | 'exact';
+  timePeriod?: 'early_morning' | 'morning' | 'noon' | 'afternoon' | 'evening' | 'night' | null;
   timeZoneId: string;
   allDay: boolean;
   editable: boolean;

@@ -9,6 +9,11 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import android.widget.FrameLayout
 import android.widget.TextView
 import com.facebook.react.bridge.ReactApplicationContext
@@ -39,7 +44,6 @@ import com.laoji.nativeplatform.calendar.CalendarPickerContentState
 import com.laoji.nativeplatform.calendar.CalendarPickerExpandState
 import com.laoji.nativeplatform.calendar.CalendarPickerListener
 import com.laoji.nativeplatform.calendar.CalendarCreateFabView
-import com.laoji.nativeplatform.calendar.CalendarCreateAction
 import com.laoji.nativeplatform.calendar.CalendarShellContract
 import com.laoji.nativeplatform.calendar.DayAllDaySectionView
 import com.laoji.nativeplatform.calendar.DayAllDayPageView
@@ -147,7 +151,52 @@ class NativeThemeContinuityTest {
     }
   }
 
-  @Test fun timeEditorKeepsItsEndpointSwitchesAndWheelPositionAcrossSkins() {
+  @Test fun longActionSheetKeepsTitleCancelAndOlderItemsReachableAcrossSkins() {
+    val base = instrumentation.targetContext
+    val previous = NativeThemePreference.read(base)
+    val host = instrumentation.startActivitySync(Intent(base, ExperienceHostActivity::class.java)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ExperienceHostActivity
+    lateinit var sheet: LaojiNativeActionSheetHostView
+    lateinit var scroll: android.widget.ScrollView
+    val selected = mutableListOf<Map<String, Any?>>()
+    try {
+      onMain {
+        val react = BridgeReactContext(base)
+        val app = AppContext(object : ModulesProvider {
+          override fun getModulesList(): List<Class<out Module>> = emptyList()
+        }, expo.modules.core.ModuleRegistry(emptyList(), emptyList()), WeakReference(react))
+        sheet = LaojiNativeActionSheetHostView(host, app).apply {
+          setBridgeEventsEnabled(false); setItemListener(selected::add)
+          setSnapshot(mapOf("visible" to true, "title" to "未保存的日程", "items" to (1..18).map {
+            mapOf("key" to "draft-$it", "label" to "日程安排$it") }))
+        }
+        host.setContentView(sheet)
+      }
+      instrumentation.waitForIdleSync(); SystemClock.sleep(350)
+      onMain {
+        scroll = descendants(sheet).filterIsInstance<android.widget.ScrollView>().single()
+        assertTrue(scroll.height <= host.resources.displayMetrics.heightPixels / 2)
+        assertTrue(scroll.getChildAt(0).height > scroll.height)
+        val cancel = descendants(sheet).filterIsInstance<TextView>().single { it.text == "取消" }
+        val title = descendants(sheet).filterIsInstance<TextView>().single { it.text == "未保存的日程" }
+        assertTrue(cancel.getGlobalVisibleRect(Rect())); assertTrue(title.getGlobalVisibleRect(Rect()))
+        scroll.scrollTo(0, scroll.getChildAt(0).height)
+      }
+      instrumentation.waitForIdleSync()
+      for (skin in listOf("vivid", "paper", "midnight", "neutral")) onMain {
+        val offset = scroll.scrollY
+        NativeThemePreference.write(base, skin)
+        assertEquals(offset, scroll.scrollY)
+        val last = descendants(sheet).filterIsInstance<TextView>().single { it.text == "日程安排18" }
+        val rect = Rect(); assertTrue(last.getGlobalVisibleRect(rect)); assertEquals(last.height, rect.height())
+        assertTrue(selected.isEmpty())
+      }
+      onMain { descendants(sheet).filterIsInstance<TextView>().single { it.text == "日程安排18" }.performClick() }
+      assertEquals(listOf("draft-18"), selected.map { it["key"] })
+    } finally { onMain { NativeThemePreference.write(base, previous); host.finish() } }
+  }
+
+  @Test fun timeEditorKeepsItsPrecisionEndpointsAndWheelPositionAcrossSkins() {
     val base = instrumentation.targetContext
     val previous = NativeThemePreference.read(base)
     val host = instrumentation.startActivitySync(Intent(base, ExperienceHostActivity::class.java)
@@ -159,7 +208,7 @@ class NativeThemeContinuityTest {
     lateinit var page: CalendarEditTimePageView
     var children = emptyList<View>()
     lateinit var wheel: CalendarEditWheelView
-    lateinit var endSwitch: CalendarSourceSwitch
+    lateinit var endAction: TextView
     var wheelBounds = Rect()
     var geometry: CalendarEditWheelGeometry? = null
     try {
@@ -172,10 +221,10 @@ class NativeThemeContinuityTest {
       onMain {
         children = descendants(page)
         wheel = field(page, "hourWheel")
-        endSwitch = field(page, "endTimeSwitch")
+        endAction = field(page, "endAction")
         wheelBounds = bounds(wheel); geometry = wheel.geometryForTest()
         assertEquals(17, wheel.selectedValue)
-        assertTrue(endSwitch.isChecked)
+        assertEquals("移除结束时间", endAction.text)
       }
       for (skin in listOf("vivid", "paper", "midnight", "neutral")) {
         onMain { NativeThemePreference.write(base, skin) }
@@ -185,12 +234,8 @@ class NativeThemeContinuityTest {
           assertEquals(initial, page.currentState())
           assertEquals(17, wheel.selectedValue)
           assertEquals(wheelBounds, bounds(wheel)); assertEquals(geometry, wheel.geometryForTest())
-          assertTrue(endSwitch.isChecked)
-          val switchBitmap = Bitmap.createBitmap(endSwitch.width, endSwitch.height, Bitmap.Config.ARGB_8888)
-          endSwitch.draw(Canvas(switchBitmap)); switchBitmap.recycle()
-          val thumbColor = if (skin == "neutral") androidx.core.content.ContextCompat.getColor(host,
-            com.laoji.nativeplatform.R.color.laoji_ud_switch_on_thumb) else CalendarPagePalette.primary
-          assertEquals(thumbColor, field<android.graphics.Paint>(endSwitch, "paint").color)
+          assertEquals("移除结束时间", endAction.text)
+          assertEquals(CalendarPagePalette.primary, endAction.currentTextColor)
           val paint = field<android.graphics.Paint>(wheel, "centerPaint")
           assertEquals(CalendarPagePalette.text, paint.color)
           assertEquals(LaojiThemeTypography.typeface(host), paint.typeface)
@@ -205,6 +250,201 @@ class NativeThemeContinuityTest {
         assertEquals(listOf(initial.completedDraft()), completions)
       }
     } finally { onMain { page.dispose(); NativeThemePreference.write(base, previous); host.finish() } }
+  }
+
+  @Test fun neighboringTimeWheelsDoNotCancelEachOthersPendingSelection() {
+    val base = instrumentation.targetContext
+    val host = instrumentation.startActivitySync(Intent(base, ExperienceHostActivity::class.java)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ExperienceHostActivity
+    lateinit var page: CalendarEditTimePageView
+    try {
+      onMain {
+        page = CalendarEditTimePageView(host, CalendarEditTimeState.fromDraft(
+          CalendarEditDraft(startDate = "2026-10-28", endDate = "2026-10-28",
+            startTime = "10:00", timePrecision = "exact"), CalendarEditEndpoint.START), {}, {})
+        host.setContentView(page)
+      }
+      instrumentation.waitForIdleSync()
+      onMain {
+        field<CalendarEditWheelView>(page, "hourWheel").performAccessibilityAction(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD, null)
+        field<CalendarEditWheelView>(page, "minuteWheel").performAccessibilityAction(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, null)
+      }
+      Thread.sleep(650)
+      instrumentation.waitForIdleSync()
+      onMain {
+        assertEquals(9, page.currentState().startTime.hour)
+        assertEquals(1, page.currentState().startTime.minute)
+        assertEquals("09:01", page.currentState().completedDraft().startTime)
+      }
+    } finally { onMain { page.dispose(); host.finish() } }
+  }
+
+  @Test fun inlineEditorInputRetainsEditableAndTitleActionsDuringLevelsAndThemeChanges() {
+    val base = instrumentation.targetContext
+    val previous = NativeThemePreference.read(base)
+    val host = instrumentation.startActivitySync(Intent(base, ExperienceHostActivity::class.java)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ExperienceHostActivity
+    lateinit var page: CalendarEditPageView
+    lateinit var dock: CalendarEditInputDock
+    lateinit var input: android.widget.EditText
+    var titleChildren = emptyList<View>()
+    var editable: android.text.Editable? = null
+    val actions = mutableListOf<Map<String, Any?>>()
+    fun snapshot(phase: String, level: Float = 0f) = mapOf<String, Any?>(
+      "schemaVersion" to 2, "state" to "ready", "editing" to false,
+      "draft" to mapOf("title" to "", "startDate" to "2026-10-28", "endDate" to "2026-10-28",
+        "timePrecision" to "unspecified", "repeat" to "once", "location" to "", "notes" to ""),
+      "input" to mapOf("phase" to phase, "text" to "明天归还图书", "error" to "", "level" to level,
+        "durationMs" to 2000L, "canUndo" to false),
+    )
+    try {
+      onMain {
+        val react: ReactApplicationContext = BridgeReactContext(base)
+        val app = AppContext(object : ModulesProvider {
+          override fun getModulesList(): List<Class<out Module>> = emptyList()
+        }, expo.modules.core.ModuleRegistry(emptyList(), emptyList()), WeakReference(react))
+        page = CalendarEditPageView(host, app)
+        page.setBridgeEventsEnabled(false); page.setActionListener(actions::add)
+        val loading = snapshot("editing").toMutableMap().apply {
+          put("state", "loading"); put("input", mapOf("phase" to "editing", "text" to ""))
+        }
+        page.setSnapshot(loading); page.commitProps()
+        assertEquals(View.GONE, field<CalendarEditInputDock>(page, "inputDock").visibility)
+        page.setSnapshot(snapshot("editing")); page.commitProps(); host.setContentView(page)
+        dock = field(page, "inputDock"); input = field(dock, "input")
+        assertEquals(View.VISIBLE, field<View>(dock, "textRow").visibility)
+      }
+      instrumentation.waitForIdleSync()
+      onMain {
+        assertEquals("明天归还图书", input.text.toString())
+        assertFalse(input.hasFocus())
+        titleChildren = descendants(field<CalendarCommonTitleBar>(page, "titleBar"))
+        field<android.widget.ImageButton>(dock, "microphone").performClick()
+        assertEquals("inputStart", actions.last()["type"])
+        page.setSnapshot(snapshot("recording")); page.commitProps()
+        assertEquals(titleChildren, descendants(field<CalendarCommonTitleBar>(page, "titleBar")))
+        editable = input.text
+      }
+      for (skin in listOf("vivid", "paper", "midnight", "neutral")) {
+        onMain {
+          NativeThemePreference.write(base, skin)
+          for (n in 0..8) { page.setSnapshot(snapshot("recording", n / 10f)); page.commitProps() }
+          assertSame(input, field<android.widget.EditText>(dock, "input"))
+          assertSame(editable, input.text)
+          assertEquals(titleChildren, descendants(field<CalendarCommonTitleBar>(page, "titleBar")))
+          assertEquals("明天归还图书", input.text.toString())
+        }
+      }
+      onMain {
+        descendants(dock).filterIsInstance<TextView>().single { it.text == "取消" }.performClick()
+        assertEquals("inputCancel", actions.last()["type"])
+        assertEquals(1, actions.count { it["type"] == "inputStart" })
+      }
+    } finally { onMain { NativeThemePreference.write(base, previous); host.finish() } }
+  }
+
+  @Test fun inlineEditorRejectsOlderFieldAndTextEchoesWithoutBlockingAcknowledgedChanges() {
+    val base = instrumentation.targetContext
+    val host = instrumentation.startActivitySync(Intent(base, ExperienceHostActivity::class.java)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ExperienceHostActivity
+    val actions = mutableListOf<Map<String, Any?>>()
+    fun snapshot(ack: Any? = null, title: String = "", text: String = "") = mapOf<String, Any?>(
+      "schemaVersion" to 2, "state" to "ready", "editing" to false, "nativeEditAck" to ack,
+      "draft" to mapOf("title" to title, "startDate" to "2026-10-28", "endDate" to "2026-10-28",
+        "timePrecision" to "unspecified", "repeat" to "once", "location" to "", "notes" to ""),
+      "input" to mapOf("phase" to "editing", "text" to text, "level" to .5f),
+    )
+    try {
+      onMain {
+        val app = AppContext(object : ModulesProvider {
+          override fun getModulesList(): List<Class<out Module>> = emptyList()
+        }, expo.modules.core.ModuleRegistry(emptyList(), emptyList()), WeakReference<ReactApplicationContext>(BridgeReactContext(base)))
+        val page = CalendarEditPageView(host, app)
+        page.setBridgeEventsEnabled(false); page.setActionListener(actions::add)
+        page.setSnapshot(snapshot()); page.commitProps(); host.setContentView(page)
+        val title = field<android.widget.EditText>(page, "titleInput")
+        title.setText("甲"); val first = actions.last()["nativeEditToken"]
+        title.append("乙"); val latest = actions.last()["nativeEditToken"]
+        page.setSnapshot(snapshot(first, "甲")); page.commitProps()
+        assertEquals("甲乙", title.text.toString())
+        assertNotNull(latest); assertNotEquals(first, latest)
+        val titleEditable = title.text
+        page.setSnapshot(snapshot(latest, "甲乙")); page.commitProps()
+        assertSame(titleEditable, title.text)
+        // Reordered old echoes remain stale even after the latest one was accepted.
+        page.setSnapshot(snapshot(first, "甲")); page.commitProps()
+        assertEquals("甲乙", title.text.toString())
+        val input = field<android.widget.EditText>(field<CalendarEditInputDock>(page, "inputDock"), "input")
+        input.setText("下午"); val inputFirst = actions.last()["nativeEditToken"]
+        input.append("取书"); val inputLatest = actions.last()["nativeEditToken"]
+        page.setSnapshot(snapshot(inputFirst, "甲乙", "下午")); page.commitProps()
+        assertEquals("下午取书", input.text.toString())
+        page.setSnapshot(snapshot(inputLatest, "甲乙", "下午取书")); page.commitProps()
+        assertEquals("下午取书", input.text.toString())
+        // A model/undo or other accepted owner update is not permanently ignored.
+        page.setSnapshot(snapshot(inputLatest, "归还图书", "下午取书")); page.commitProps()
+        assertEquals("归还图书", title.text.toString())
+        assertSame(input, field<android.widget.EditText>(field<CalendarEditInputDock>(page, "inputDock"), "input"))
+      }
+    } finally { onMain { host.finish() } }
+  }
+
+  @Test fun inlineEditorDockRemainsAboveRealImeWithoutMovingTheTitle() {
+    val base = instrumentation.targetContext
+    val host = instrumentation.startActivitySync(Intent(base, ExperienceHostActivity::class.java)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ExperienceHostActivity
+    lateinit var page: CalendarEditPageView
+    lateinit var dock: CalendarEditInputDock
+    lateinit var input: android.widget.EditText
+    lateinit var microphone: View
+    lateinit var pageRoot: FrameLayout
+    var titleBounds = Rect()
+    var editable: android.text.Editable? = null
+    val ime = host.getSystemService(InputMethodManager::class.java)
+    try {
+      onMain {
+        // Match the full-height RN host: the native form must handle IME
+        // overlap even when Android does not resize its parent.
+        WindowCompat.setDecorFitsSystemWindows(host.window, false)
+        host.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+        val app = AppContext(object : ModulesProvider {
+          override fun getModulesList(): List<Class<out Module>> = emptyList()
+        }, expo.modules.core.ModuleRegistry(emptyList(), emptyList()), WeakReference(BridgeReactContext(base)))
+        page = CalendarEditPageView(host, app)
+        page.setBridgeEventsEnabled(false)
+        page.setSnapshot(mapOf("schemaVersion" to 2, "state" to "ready", "editing" to false,
+          "draft" to mapOf("title" to "", "startDate" to "2026-10-28", "endDate" to "2026-10-28"),
+          "input" to mapOf("phase" to "editing", "text" to "明天归还图书")))
+        page.commitProps(); host.setContentView(page)
+        pageRoot = field(page, "root"); dock = field(page, "inputDock")
+        input = field(dock, "input"); microphone = field(dock, "microphone")
+      }
+      instrumentation.waitForIdleSync()
+      onMain {
+        titleBounds = bounds(field<CalendarCommonTitleBar>(page, "titleBar"))
+        editable = input.text
+        input.requestFocus(); ime.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+      }
+      awaitMain("real IME did not become visible") {
+        ViewCompat.getRootWindowInsets(page)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+      }
+      awaitMain("input dock remained behind the IME") {
+        val frame = Rect(); page.getWindowVisibleDisplayFrame(frame)
+        val position = IntArray(2); microphone.getLocationOnScreen(position)
+        pageRoot.paddingBottom > 0 && position[1] + microphone.height <= frame.bottom
+      }
+      onMain {
+        assertEquals(titleBounds, bounds(field<CalendarCommonTitleBar>(page, "titleBar")))
+        assertSame(editable, input.text)
+        assertTrue(input.hasFocus())
+        ime.hideSoftInputFromWindow(input.windowToken, 0)
+      }
+      awaitMain("IME padding did not clear after hiding") {
+        ViewCompat.getRootWindowInsets(page)?.isVisible(WindowInsetsCompat.Type.ime()) == false && pageRoot.paddingBottom == 0
+      }
+    } finally { onMain { ime.hideSoftInputFromWindow(host.window.decorView.windowToken, 0); host.finish() } }
   }
 
   @Test fun repeatEndAndDisabledTitleActionKeepMeaningWithoutRebuildingThePage() {
@@ -353,18 +593,26 @@ class NativeThemeContinuityTest {
     lateinit var page: DayAllDayPageView
     lateinit var layer: View
     lateinit var fab: CalendarCreateFabView
-    val actions = mutableListOf<CalendarCreateAction>()
+    val actions = mutableListOf<String>()
     var downTime = 0L
-    var voiceX = 0f
-    var voiceY = 0f
+    var x = 0f
+    var y = 0f
+    val screenPosition = IntArray(2)
+    fun pointer(action: Int, localX: Float = x, localY: Float = y) {
+      MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action,
+        screenPosition[0] + localX, screenPosition[1] + localY, 0).also {
+        instrumentation.sendPointerSync(it); it.recycle()
+      }
+    }
     try {
       onMain {
         NativeThemePreference.write(base, "neutral")
         val root = FrameLayout(host)
         section = DayAllDaySectionView(host).apply { bind(events, day, 47); setExpanded(true, false) }
-        fab = CalendarCreateFabView(host).apply { setActionListener { actions.add(it) } }
+        fab = CalendarCreateFabView(host).apply { setActionListener { actions.add("create") } }
         root.addView(section, FrameLayout.LayoutParams(1080, 600))
-        root.addView(fab, FrameLayout.LayoutParams(700, 700).apply { topMargin = 800; leftMargin = 200 })
+        val size = CalendarUi.dp(host, CalendarShellContract.FAB_SIZE_DP).toInt()
+        root.addView(fab, FrameLayout.LayoutParams(size, size).apply { topMargin = 800; leftMargin = 200 })
         host.setContentView(root)
         measure(root, 2000)
       }
@@ -375,15 +623,13 @@ class NativeThemeContinuityTest {
         val scroll = descendants(page).filterIsInstance<android.widget.ScrollView>().single()
         scroll.scrollTo(0, 90)
         assertEquals(90, page.currentScrollY())
-        val x = fab.width - CalendarUi.dp(host, CalendarShellContract.FAB_SIZE_DP) / 2f
-        val y = fab.height - CalendarUi.dp(host, CalendarShellContract.FAB_SIZE_DP) / 2f
-        voiceX = x + CalendarUi.dp(host, CalendarShellContract.FAB_VOICE_OFFSET_X_DP)
-        voiceY = y + CalendarUi.dp(host, CalendarShellContract.FAB_VOICE_OFFSET_Y_DP)
+        x = fab.width / 2f
+        y = fab.height / 2f
         downTime = SystemClock.uptimeMillis()
-        sendTouch(fab, downTime, MotionEvent.ACTION_DOWN, x, y)
+        fab.getLocationOnScreen(screenPosition)
       }
-      awaitMain("create long press did not open") { field<Boolean>(fab, "radialVisible") && field<Float>(fab, "expansionProgress") == 1f }
-      onMain { sendTouch(fab, downTime, MotionEvent.ACTION_MOVE, voiceX, voiceY) }
+      pointer(MotionEvent.ACTION_DOWN)
+      SystemClock.sleep(400)
       for (skin in listOf("vivid", "paper", "midnight", "neutral")) {
         onMain {
           NativeThemePreference.write(base, skin)
@@ -392,22 +638,28 @@ class NativeThemeContinuityTest {
           assertSame(layer, page.instanceLayerForTest())
           assertEquals(90, page.currentScrollY())
           assertEquals(47, page.boundGeneration)
-          assertEquals(CalendarCreateAction.VOICE, field<CalendarCreateAction>(fab, "selectedAction"))
-          assertTrue(field<Boolean>(fab, "dragSelecting"))
-          assertEquals(1f, field<Float>(fab, "expansionProgress"), 0f)
+          assertTrue(fab.isPressed)
+          assertFalse(fab.isLongClickable)
           assertTrue(actions.isEmpty())
           val paint = field<android.graphics.Paint>(fab, "fabPaint")
-          assertEquals(CalendarUi.palette(host).accent, paint.color)
+          assertEquals(CalendarUi.palette(host).accent, paint.color or android.graphics.Color.BLACK)
           val bitmap = Bitmap.createBitmap(fab.width, fab.height, Bitmap.Config.ARGB_8888)
           fab.draw(Canvas(bitmap))
-          val centerX = fab.width - (CalendarUi.dp(host, CalendarShellContract.FAB_SIZE_DP) / 2f).toInt()
-          assertEquals(CalendarUi.palette(host).accent, bitmap.getPixel(centerX - 22, fab.height - 30))
+          assertTrue(android.graphics.Color.alpha(bitmap.getPixel(x.toInt() - 22, y.toInt() - 22)) > 0)
           bitmap.recycle()
         }
       }
-      onMain { sendTouch(fab, downTime, MotionEvent.ACTION_UP, voiceX, voiceY) }
-      awaitMain("release did not commit the selected action") { actions == listOf(CalendarCreateAction.VOICE) }
-      onMain { assertEquals(90, page.currentScrollY()); assertFalse(field<Boolean>(fab, "radialVisible")) }
+      pointer(MotionEvent.ACTION_UP)
+      awaitMain("release did not open the unified editor") { actions == listOf("create") }
+      onMain {
+        assertEquals(90, page.currentScrollY()); assertFalse(fab.isPressed)
+        downTime = SystemClock.uptimeMillis()
+      }
+      pointer(MotionEvent.ACTION_DOWN)
+      pointer(MotionEvent.ACTION_MOVE, -100f, -100f)
+      pointer(MotionEvent.ACTION_UP, -100f, -100f)
+      instrumentation.waitForIdleSync()
+      onMain { assertEquals(listOf("create"), actions) }
     } finally { onMain { NativeThemePreference.write(base, previous); host.finish() } }
   }
 

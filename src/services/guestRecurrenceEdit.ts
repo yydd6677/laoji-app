@@ -58,7 +58,7 @@ export function applyGuestRecurrenceEdit({
   scope: EventRecurrenceScope;
   validated: Omit<CalEvent, 'id'>;
   segmentId: string;
-}): CalEvent[] {
+}): { events: CalEvent[]; eventRef: EventRef } {
   const entries = sourceEntries(events, ref);
   if (entries.length === 0) throw new Error('event series not found');
   const unrelated = events.filter(event => sourceEventId(event) !== ref.sourceEventId);
@@ -69,8 +69,10 @@ export function applyGuestRecurrenceEdit({
       ?? entries.find(event => !event.isRecurrenceException)
       ?? target;
     const deltaDays = dateDeltaDays(target.startDate, validated.startDate);
-    const startDate = shiftDate(root.startDate, deltaDays) ?? validated.startDate;
-    const endDate = shiftDate(root.endDate, deltaDays);
+    const startDate = validated.repeat && validated.repeat !== 'once'
+      ? shiftDate(root.startDate, deltaDays) ?? validated.startDate
+      : validated.startDate;
+    const endDate = shiftDate(validated.endDate, dateDeltaDays(validated.startDate, startDate));
     const updated: CalEvent = {
       ...root,
       ...validated,
@@ -91,7 +93,7 @@ export function applyGuestRecurrenceEdit({
       excludedAfterDate: undefined,
       notificationId: null,
     };
-    return [...unrelated, updated];
+    return { events: [...unrelated, updated], eventRef: { ...ref, occurrenceDate: validated.startDate } };
   }
 
   const exception = recurrenceException(target, ref, validated);
@@ -110,7 +112,7 @@ export function applyGuestRecurrenceEdit({
           ])].sort(),
         }
         : event);
-    return [...unrelated, ...nextEntries, exception];
+    return { events: [...unrelated, ...nextEntries, exception], eventRef: ref };
   }
 
   const retainedEntries = entries
@@ -126,7 +128,7 @@ export function applyGuestRecurrenceEdit({
       : event);
 
   if (!validated.repeat || validated.repeat === 'once') {
-    return [...unrelated, ...retainedEntries, { ...exception, repeat: 'once' }];
+    return { events: [...unrelated, ...retainedEntries, { ...exception, repeat: 'once' }], eventRef: ref };
   }
   const segment: CalEvent = {
     ...target,
@@ -145,5 +147,5 @@ export function applyGuestRecurrenceEdit({
     excludedAfterDate: undefined,
     notificationId: null,
   };
-  return [...unrelated, ...retainedEntries, exception, segment];
+  return { events: [...unrelated, ...retainedEntries, exception, segment], eventRef: ref };
 }

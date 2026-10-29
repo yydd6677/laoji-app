@@ -1,5 +1,7 @@
 import { requireNativeViewManager } from 'expo-modules-core';
+import type { ComponentType } from 'react';
 import type { NativeSyntheticEvent, ViewProps } from 'react-native';
+import { Platform, View } from 'react-native';
 
 // CAL-ROOT-001: TypeScript observes low-frequency calendar semantics, never native drag frames.
 
@@ -77,9 +79,8 @@ export interface NativeCalendarSemanticEvent {
     | 'event-open'
     | 'settings-open'
     | 'search-open'
-    | 'create-menu'
-    | 'create-voice'
-    | 'create-manual'
+    | 'create'
+    | 'create-date'
     | 'create-request'
     | 'picker-open'
     | 'picker-close'
@@ -118,6 +119,9 @@ export interface LaojiCalendarViewProps extends ViewProps {
   onTabPress?: NativeEventHandler<NativeTabPressEvent>;
 }
 
-export const LaojiCalendarView = requireNativeViewManager<LaojiCalendarViewProps>(
-  'LaojiCalendar',
-);
+// Calendar pages/minutes already keep Android view registration behind this
+// platform boundary. The shared module barrel must also be importable by RN
+// screens; they never render this native-only calendar surface.
+export const LaojiCalendarView: ComponentType<LaojiCalendarViewProps> = Platform.OS === 'android'
+  ? requireNativeViewManager<LaojiCalendarViewProps>('LaojiCalendar')
+  : View as unknown as ComponentType<LaojiCalendarViewProps>;
