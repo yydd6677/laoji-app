@@ -45,3 +45,20 @@ def test_storage_admission_keeps_audio_local_below_hard_limit(monkeypatch, tmp_p
 
     assert error.value.status_code == 507
     assert error.value.detail == "云端存储空间不足，录音已保留在本机，稍后会自动重试上传"
+
+
+def test_storage_admission_can_check_an_explicit_target_mount(monkeypatch, tmp_path):
+    default_root = tmp_path / "default"
+    target_root = tmp_path / "target"
+    monkeypatch.setattr(storage_admission.settings, "AUDIO_STORAGE_PATH", str(default_root))
+
+    def disk_usage(path):
+        if str(path) == str(target_root):
+            return SimpleNamespace(total=100 * 1024**3, used=65 * 1024**3, free=35 * 1024**3)
+        return SimpleNamespace(total=100 * 1024**3, used=85 * 1024**3, free=15 * 1024**3)
+
+    monkeypatch.setattr(storage_admission.shutil, "disk_usage", disk_usage)
+
+    with pytest.raises(HTTPException):
+        storage_admission.ensure_audio_upload_allowed()
+    storage_admission.ensure_audio_upload_allowed(target_root)

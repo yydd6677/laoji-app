@@ -8,6 +8,7 @@ import { ScheduleScreen } from '../screens/ScheduleScreen';
 import { MeetingListScreen } from '../screens/MeetingListScreen';
 import { MainTabsParamList } from '../types';
 import { openMeetingRecorder, pressMainTab } from './tabTargets';
+import { useTheme } from '../theme/ThemeProvider';
 
 const Tab = createBottomTabNavigator<MainTabsParamList>();
 
@@ -25,9 +26,18 @@ function MainTabBar({ state, navigation }: BottomTabBarProps) {
 }
 
 export function MainTabsNavigator() {
+  const { appearance, reduceMotion } = useTheme();
   return (
     <Tab.Navigator
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        animation: reduceMotion ? 'none' : appearance.tabAnimation,
+        transitionSpec: {
+          animation: 'timing',
+          config: { duration: appearance.tabDurationMs },
+        },
+        sceneStyle: { backgroundColor: 'transparent' },
+      }}
       tabBar={props => <MainTabBar {...props} />}
       initialRouteName="Schedule"
     >

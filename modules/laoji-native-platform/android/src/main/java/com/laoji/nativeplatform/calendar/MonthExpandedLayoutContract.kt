@@ -54,7 +54,7 @@ object MonthExpandedLayoutContract {
   const val GRID_END_MARGIN_DP = 11.5f
   const val EVENT_ROW_HEIGHT_DP = 48f
   // [PRODUCT] LaoJi deliberately enlarges calendar date numbers by 20% over
-  // the Feishu-derived 12sp month baseline.
+  // the fixed 12sp month baseline.
   const val DATE_TEXT_SIZE_SP = 12f * CalendarProductVisualContract.DATE_NUMBER_SCALE
   const val DATE_TOP_DP = 10f
   const val DATE_BASELINE_DP = 22f

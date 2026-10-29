@@ -1,12 +1,13 @@
 package com.laoji.nativeplatform.minutes
 
-// MIN-HOME-LIST-001: Feishu list/grid item hierarchy from MmHomeVHFactory and the
+// MIN-HOME-LIST-001 [SOURCE]: Feishu list/grid item hierarchy from MmHomeVHFactory and the
 // mm_item_list_home_* layouts, with LaoJi meeting data bound into that structure.
 
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -20,6 +21,7 @@ import androidx.core.view.accessibility.AccessibilityViewCommand
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.NativeThemePreference
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 
 internal enum class MinutesHomeViewMode {
   LIST,
@@ -109,20 +111,20 @@ internal class MinutesMeetingAdapter(
     private val coverContent = LinearLayout(parent.context)
     private val coverHeader = LinearLayout(parent.context)
     private val coverHeaderIcon = ImageView(parent.context)
-    private val coverTitle = parent.context.textView(textSizeSp = 12, color = MinutesPalette.secondary)
+    private val coverTitle = parent.context.textView(textSizeSp = 12, color = { MinutesPalette.secondary })
     private val coverText = parent.context.textView(textSizeSp = 14)
     private val coverQuote = ImageView(parent.context)
     private val textColumn = LinearLayout(parent.context)
     private val title = parent.context.textView()
-    private val support = parent.context.textView(textSizeSp = 12, color = MinutesPalette.secondary)
+    private val support = parent.context.textView(textSizeSp = 12, color = { MinutesPalette.secondary })
     private val metaRow = LinearLayout(parent.context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
     }
     private val typeIcon = ImageView(parent.context)
-    private val meta = parent.context.textView(color = MinutesPalette.faint)
+    private val meta = parent.context.textView(color = { MinutesPalette.faint })
     private val divider = View(parent.context)
-    private val status = parent.context.textView(color = MinutesPalette.faint)
+    private val status = parent.context.textView(color = { MinutesPalette.faint })
 
     init {
       host.clipChildren = false
@@ -133,17 +135,26 @@ internal class MinutesMeetingAdapter(
       root.isClickable = true
       root.isFocusable = true
       root.backgroundShape(
-        MinutesPalette.surface,
-        radiusDp = if (MinutesPalette.vivid) 16 else 12,
+        { MinutesPalette.surface },
+        radiusDp = { MinutesPalette.cardRadiusDp },
       )
+      root.minutesDrawing { root.foreground = RippleDrawable(
+        ColorStateList.valueOf(MinutesPalette.primaryTransparent),
+        null,
+        GradientDrawable().apply {
+          shape = GradientDrawable.RECTANGLE
+          cornerRadius = parent.context.dp(MinutesPalette.cardRadiusDp).toFloat()
+          setColor(Color.WHITE)
+        },
+      ) }
       root.clipToOutline = true
 
       cover.backgroundShape(
-        MinutesPalette.coverDefault,
-        radiusDp = if (MinutesPalette.vivid) 12 else 0,
+        { MinutesPalette.coverDefault },
+        radiusDp = { MinutesPalette.coverRadiusDp },
       )
       coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
-      coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
+      coverIcon.minutesIconColors { ColorStateList.valueOf(Color.WHITE) }
       coverIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
       cover.addView(
         coverIcon,
@@ -205,13 +216,13 @@ internal class MinutesMeetingAdapter(
       textColumn.addView(support)
 
       typeIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
-      typeIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.faint)
+      typeIcon.minutesIconColors { ColorStateList.valueOf(MinutesPalette.faint) }
       typeIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
       metaRow.addView(typeIcon)
       meta.maxLines = 1
       meta.ellipsize = TextUtils.TruncateAt.END
       metaRow.addView(meta)
-      divider.setBackgroundColor(MinutesPalette.divider)
+      divider.minutesBackgroundColor { MinutesPalette.divider }
       metaRow.addView(divider)
       status.maxLines = 1
       status.ellipsize = TextUtils.TruncateAt.END
@@ -241,7 +252,7 @@ internal class MinutesMeetingAdapter(
         cover.layoutParams = LinearLayout.LayoutParams(0, 0)
         textColumn.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
-        title.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        title.minutesTypeface(Typeface.NORMAL)
         support.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
         support.layoutParams = LinearLayout.LayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
@@ -295,7 +306,7 @@ internal class MinutesMeetingAdapter(
           topMargin = context.dp(10)
         }
         title.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
-        title.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        title.minutesTypeface(Typeface.NORMAL)
         support.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
         support.layoutParams = LinearLayout.LayoutParams(
           ViewGroup.LayoutParams.MATCH_PARENT,
@@ -319,6 +330,9 @@ internal class MinutesMeetingAdapter(
           ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { leftMargin = context.dp(4) }
       }
+      metaRow.layoutParams = metaRow.layoutParams.apply {
+        height = maxOf(height, MinutesDetailLayoutContract.minimumTextLineHeightPx(maxOf(meta.textSize, status.textSize)))
+      }
     }
 
     fun bind(
@@ -334,7 +348,7 @@ internal class MinutesMeetingAdapter(
       ) View.GONE else View.VISIBLE
       bindCover(meeting)
       meta.text = if (mode == MinutesHomeViewMode.GRID) {
-        // Feishu's cover card keeps one compact itemTime lane beside itemStatus.
+        // The cover card keeps one compact item-time lane beside item status.
         // Duration remains available in list/detail where the lane is wide enough.
         meeting.dateTimeLabel
       } else {
@@ -349,7 +363,7 @@ internal class MinutesMeetingAdapter(
       divider.visibility = if (hasStatus && mode == MinutesHomeViewMode.LIST) View.VISIBLE else View.GONE
       status.visibility = if (hasStatus) View.VISIBLE else View.GONE
       status.text = visibleStatus
-      status.setTextColor(statusToneColor(meeting.statusTone))
+      status.minutesTextColor { statusToneColor(meeting.statusTone) }
       root.contentDescription = listOf(
         meeting.title,
         meeting.coverTitle,
@@ -405,37 +419,37 @@ internal class MinutesMeetingAdapter(
         MinutesListCoverType.DEFAULT -> {
           applyDefaultCoverGeometry()
           cover.backgroundShape(
-            MinutesPalette.coverDefault,
-            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+            { MinutesPalette.coverDefault },
+            radiusDp = { MinutesPalette.coverRadiusDp },
           )
           coverIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_filled)
-          coverIcon.imageTintList = ColorStateList.valueOf(Color.WHITE)
+          coverIcon.minutesIconColors { ColorStateList.valueOf(Color.WHITE) }
           coverIcon.visibility = View.VISIBLE
           coverContent.visibility = View.GONE
         }
         MinutesListCoverType.SUMMARY -> {
           applyDynamicCoverGeometry(topPaddingDp = 24, bottomPaddingDp = 28)
           cover.backgroundShape(
-            MinutesPalette.coverSummary,
-            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+            { MinutesPalette.coverSummary },
+            radiusDp = { MinutesPalette.coverRadiusDp },
           )
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
           coverHeaderIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_summary_book)
           // The source book glyph is multicolor blue/red. In LaoJi's vivid
           // skin it must follow the active purple semantic accent so the cover
-          // does not become an isolated Feishu-blue island.
-          coverHeaderIcon.imageTintList = if (NativeThemePreference.isVivid(itemView.context)) {
+          // does not become an isolated accent-color island.
+          coverHeaderIcon.minutesIconColors { if (NativeThemePreference.read(itemView.context) != "neutral") {
             ColorStateList.valueOf(MinutesPalette.primary)
           } else {
             null
-          }
-          coverHeaderIcon.background = null
+          } }
+          coverHeaderIcon.minutesBackground { null }
           coverTitle.text = meeting.coverTitle.ifBlank { "整理结果" }
-          coverTitle.setTextColor(MinutesPalette.secondary)
+          coverTitle.minutesTextColor { MinutesPalette.secondary }
           coverText.maxLines = 5
           coverText.text = usableText
-          coverText.setTextColor(MinutesPalette.text)
+          coverText.minutesTextColor { MinutesPalette.text }
           coverQuote.visibility = View.GONE
         }
         MinutesListCoverType.SPEAKER_SUMMARY -> {
@@ -444,19 +458,19 @@ internal class MinutesMeetingAdapter(
           // blue-gray server-selected speaker-summary cover.
           applyDynamicCoverGeometry(topPaddingDp = 26, bottomPaddingDp = 20)
           cover.backgroundShape(
-            MinutesPalette.coverContent,
-            radiusDp = if (MinutesPalette.vivid) 12 else 0,
+            { MinutesPalette.coverContent },
+            radiusDp = { MinutesPalette.coverRadiusDp },
           )
           coverIcon.visibility = View.GONE
           coverContent.visibility = View.VISIBLE
           coverHeaderIcon.setImageDrawable(null)
-          coverHeaderIcon.imageTintList = null
-          coverHeaderIcon.background = speakerAvatarBackground(meeting.coverTitle)
+          coverHeaderIcon.minutesIconColors { null }
+          coverHeaderIcon.minutesBackground { speakerAvatarBackground(meeting.coverTitle) }
           coverTitle.text = meeting.coverTitle.ifBlank { "讲话人" }
-          coverTitle.setTextColor(MinutesPalette.secondary)
+          coverTitle.minutesTextColor { MinutesPalette.secondary }
           coverText.maxLines = 4
           coverText.text = usableText
-          coverText.setTextColor(MinutesPalette.text)
+          coverText.minutesTextColor { MinutesPalette.text }
           coverQuote.visibility = View.VISIBLE
         }
       }

@@ -20,8 +20,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.DrawableCompat
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import kotlin.math.max
 import kotlin.math.min
 
@@ -143,7 +141,6 @@ internal object CalendarTitleSaveContract {
   }
 }
 
-@FeishuEvidence("UI-TITLE-COMMON-001")
 internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) {
   private enum class TitlePlacement { CENTER, SECONDARY_LEFT }
 
@@ -161,7 +158,6 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     setTextSize(TypedValue.COMPLEX_UNIT_SP, CalendarCommonTitleBarContract.MAIN_TITLE_SP)
     gravity = Gravity.CENTER
   }
-  private val centerDefaultTypeface = centerTitle.typeface
   private val subtitle = sourceText().apply {
     setTextSize(TypedValue.COMPLEX_UNIT_SP, CalendarCommonTitleBarContract.SUBTITLE_SP)
     gravity = Gravity.CENTER
@@ -183,7 +179,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     setPadding(context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP), 0, 0, 0)
   }
   private val divider = View(context).apply {
-    setBackgroundColor(CalendarPagePalette.divider)
+    pageBackgroundColor { CalendarPagePalette.divider }
     visibility = GONE
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
@@ -196,20 +192,11 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
 
   init {
     orientation = HORIZONTAL
-    setBackgroundColor(CalendarPagePalette.float)
+    pageBackgroundColor { CalendarPagePalette.float }
     minimumHeight = context.dp(CalendarCommonTitleBarContract.FULL_SCREEN_HEIGHT_DP)
     clipChildren = false
     clipToPadding = false
 
-    FeishuEvidenceRuntime.bind(this, "UI-TITLE-COMMON-001", "titlebar", "calendar-common-titlebar")
-    FeishuEvidenceRuntime.bind(leftAction, "UI-TITLE-COMMON-001", "leading-action", "calendar-title-leading")
-    FeishuEvidenceRuntime.bind(secondaryTitle, "UI-TITLE-COMMON-001", "secondary-title", "calendar-title-secondary")
-    FeishuEvidenceRuntime.bind(leftAuxLayout, "UI-TITLE-COMMON-001", "leading-container", "calendar-title-leading-container")
-    FeishuEvidenceRuntime.bind(centerLayout, "UI-TITLE-COMMON-001", "title-container", "calendar-title-center-container")
-    FeishuEvidenceRuntime.bind(centerTitle, "UI-TITLE-COMMON-001", "title", "calendar-title-center")
-    FeishuEvidenceRuntime.bind(subtitle, "UI-TITLE-COMMON-001", "subtitle", "calendar-title-subtitle")
-    FeishuEvidenceRuntime.bind(rightActions, "UI-TITLE-COMMON-001", "actions", "calendar-title-actions")
-    FeishuEvidenceRuntime.bind(divider, "UI-TITLE-COMMON-001", "divider", "calendar-title-divider")
 
     addView(leftAction)
     addView(secondaryTitle)
@@ -221,7 +208,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
 
   fun setCenterTitle(
     value: CharSequence,
-    color: Int = CalendarPagePalette.text,
+    color: () -> Int = { CalendarPagePalette.text },
     alpha: Float = 1f,
     bold: Boolean = false,
   ) {
@@ -229,26 +216,22 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     secondaryTitle.visibility = GONE
     centerLayout.visibility = VISIBLE
     centerTitle.text = value
-    centerTitle.setTextColor(color)
+    centerTitle.pageTextColor(color)
     centerTitle.alpha = alpha.coerceIn(0f, 1f)
-    centerTitle.typeface = if (bold) {
-      Typeface.create(centerDefaultTypeface, Typeface.BOLD)
-    } else {
-      centerDefaultTypeface
-    }
+    centerTitle.pageTypeface(if (bold) Typeface.BOLD else Typeface.NORMAL)
     requestLayout()
   }
 
   fun setSecondaryLeftTitle(
     value: CharSequence,
-    color: Int = CalendarPagePalette.text,
+    color: () -> Int = { CalendarPagePalette.text },
     alpha: Float = 1f,
   ) {
     placement = TitlePlacement.SECONDARY_LEFT
     centerLayout.visibility = VISIBLE
     secondaryTitle.visibility = if (value.isEmpty()) GONE else VISIBLE
     secondaryTitle.text = value
-    secondaryTitle.setTextColor(color)
+    secondaryTitle.pageTextColor(color)
     secondaryTitle.alpha = alpha.coerceIn(0f, 1f)
     requestLayout()
   }
@@ -262,9 +245,9 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     }
   }
 
-  fun setSubtitle(value: CharSequence, color: Int = CalendarPagePalette.text) {
+  fun setSubtitle(value: CharSequence, color: () -> Int = { CalendarPagePalette.text }) {
     subtitle.text = value
-    subtitle.setTextColor(color)
+    subtitle.pageTextColor(color)
     subtitle.visibility = if (value.isEmpty()) GONE else VISIBLE
     centerLayout.visibility = VISIBLE
     requestLayout()
@@ -278,7 +261,8 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     leftAction.isClickable = false
     leftAction.isFocusable = false
     leftAction.contentDescription = null
-    leftAction.background = null
+    leftAction.pageBackground { null }
+    leftAction.pageDrawing {}
     leftAction.minimumHeight = 0
     rightActions.removeAllViews()
     nextActionIndex = 0
@@ -287,23 +271,26 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
 
   fun setLeftTextAction(
     label: String,
-    color: Int = CalendarPagePalette.text,
+    color: () -> Int = { CalendarPagePalette.text },
     debounce: Boolean = false,
     onClick: () -> Unit,
   ) {
     configureActionText(leftAction, label, color)
+    leftAction.pageDrawing {}
     leftAction.setCompoundDrawables(null, null, null, null)
     if (label == "取消") {
       // The source app uses a text-only cancel action, but LaoJi's edit page
       // deliberately makes this destructive-to-navigation escape hatch read as
       // a control. Keep the pill inside the 44dp title bar so it does not alter
       // title alignment or the save action's geometry.
-      val pill = GradientDrawable().apply {
-        setColor(CalendarPagePalette.neutralBackground)
-        cornerRadius = context.dp(18f).toFloat()
-      }
       val outerInset = context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP)
-      leftAction.background = InsetDrawable(pill, outerInset, context.dp(5f), 0, context.dp(5f))
+      leftAction.pageBackground {
+        val pill = GradientDrawable().apply {
+          setColor(CalendarPagePalette.neutralBackground)
+          cornerRadius = context.dp(18f).toFloat()
+        }
+        InsetDrawable(pill, outerInset, context.dp(5f), 0, context.dp(5f))
+      }
       leftAction.minimumHeight = context.dp(34f)
       // The action view still owns the edge-to-edge 44dp hit region, while the
       // visible capsule begins at the same 15dp margin as every other leading
@@ -311,7 +298,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
       // off by the left edge of the screen.
       leftAction.setPadding(outerInset + context.dp(10f), 0, context.dp(10f), 0)
     } else {
-      leftAction.background = null
+      leftAction.pageBackground { null }
       leftAction.minimumHeight = 0
       leftAction.setPadding(
         context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP),
@@ -328,7 +315,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
   fun setLeftIconAction(
     drawableRes: Int,
     description: String,
-    tint: Int = CalendarPagePalette.text,
+    tint: () -> Int = { CalendarPagePalette.text },
     size: CalendarTitleIconSize = CalendarTitleIconSize.NORMAL,
     trailingPaddingDp: Float = CalendarCommonTitleBarContract.OUTER_PADDING_DP,
     debounce: Boolean = false,
@@ -336,12 +323,13 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
   ) {
     leftAction.text = ""
     leftAction.setTextSize(TypedValue.COMPLEX_UNIT_SP, CalendarCommonTitleBarContract.ACTION_TEXT_SP)
-    leftAction.setTextColor(tint)
-    val icon = tintedDrawable(drawableRes, tint).apply {
+    leftAction.pageTextColor(tint)
+    val icon = tintedDrawable(drawableRes, tint()).apply {
       val iconPx = context.dp(size.iconDp)
       setBounds(0, 0, iconPx, iconPx)
     }
     leftAction.setCompoundDrawables(icon, null, null, null)
+    leftAction.pageDrawing { DrawableCompat.setTint(icon, tint()); leftAction.invalidate() }
     leftAction.compoundDrawablePadding = 0
     leftAction.setPadding(
       context.dp(CalendarCommonTitleBarContract.OUTER_PADDING_DP),
@@ -356,7 +344,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
 
   fun addRightTextAction(
     label: String,
-    color: Int = CalendarPagePalette.text,
+    color: () -> Int = { CalendarPagePalette.text },
     debounce: Boolean = true,
     onClick: () -> Unit,
   ): TextView {
@@ -380,7 +368,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
   fun addRightIconAction(
     drawableRes: Int,
     description: String,
-    tint: Int = CalendarPagePalette.text,
+    tint: () -> Int = { CalendarPagePalette.text },
     size: CalendarTitleIconSize = CalendarTitleIconSize.NORMAL,
     debounce: Boolean = true,
     onClick: () -> Unit,
@@ -390,7 +378,8 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
     val endPadding = context.dp(CalendarCommonTitleBarContract.RIGHT_ACTION_END_PADDING_DP)
     val action = ImageView(context).apply {
       scaleType = ImageView.ScaleType.FIT_CENTER
-      setImageDrawable(tintedDrawable(drawableRes, tint))
+      setImageResource(drawableRes)
+      pageIconTint { android.content.res.ColorStateList.valueOf(tint()) }
       setPadding(startPadding, 0, endPadding, 0)
       bindClick(this, description, debounce, onClick)
     }
@@ -416,7 +405,7 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
   }
 
   fun setTransparentBackground() {
-    setBackgroundColor(Color.TRANSPARENT)
+    pageBackgroundColor { Color.TRANSPARENT }
   }
 
   override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -498,17 +487,18 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
   }
 
   private fun sourceText(): TextView = TextView(context).apply {
-    setTextColor(CalendarPagePalette.text)
+    pageTextColor { CalendarPagePalette.text }
+    pageTypeface(Typeface.NORMAL)
     setTextSize(TypedValue.COMPLEX_UNIT_SP, CalendarCommonTitleBarContract.ACTION_TEXT_SP)
     isSingleLine = true
     maxLines = 1
     ellipsize = TextUtils.TruncateAt.END
   }
 
-  private fun configureActionText(view: TextView, label: String, color: Int) {
+  private fun configureActionText(view: TextView, label: String, color: () -> Int) {
     view.text = label
     view.setTextSize(TypedValue.COMPLEX_UNIT_SP, CalendarCommonTitleBarContract.ACTION_TEXT_SP)
-    view.setTextColor(color)
+    view.pageTextColor(color)
   }
 
   private fun bindClick(
@@ -530,12 +520,6 @@ internal class CalendarCommonTitleBar(context: Context) : LinearLayout(context) 
 
   private fun bindRightAction(view: View, role: String) {
     val index = nextActionIndex++
-    FeishuEvidenceRuntime.bind(
-      view,
-      "UI-TITLE-COMMON-001",
-      role,
-      "calendar-title-action-$index",
-    )
   }
 
   private fun tintedDrawable(drawableRes: Int, tint: Int): Drawable {

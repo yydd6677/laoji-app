@@ -12,8 +12,6 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeParseException
@@ -75,7 +73,6 @@ internal data class CalendarRepeatEndState(
 }
 
 @SuppressLint("ViewConstructor", "UseSwitchCompatOrMaterialCode")
-@FeishuEvidence("UI-TITLE-COMMON-001", "CAL-REPEAT-RRULE-001")
 internal class CalendarRepeatEndPageView(
   context: Context,
   initialState: CalendarRepeatEndState,
@@ -91,7 +88,7 @@ internal class CalendarRepeatEndPageView(
   }
   private val wheelContainer = LinearLayout(context).apply {
     orientation = VERTICAL
-    setBackgroundColor(CalendarPagePalette.body)
+    pageBackgroundColor { CalendarPagePalette.body }
   }
   private val wheelPanel = LinearLayout(context).apply {
     orientation = HORIZONTAL
@@ -103,22 +100,18 @@ internal class CalendarRepeatEndPageView(
   private val errorText = context.pageText(
     "截止日期需晚于开始日期",
     14f,
-    CalendarPagePalette.danger,
+    { CalendarPagePalette.danger },
   ).apply {
     visibility = GONE
   }
 
   init {
     orientation = VERTICAL
-    setBackgroundColor(CalendarPagePalette.body)
+    pageBackgroundColor { CalendarPagePalette.body }
     isClickable = true
     isFocusable = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
 
-    FeishuEvidenceRuntime.bind(this, "CAL-REPEAT-RRULE-001", "repeat-end-page", "calendar-repeat-end-page")
-    FeishuEvidenceRuntime.bind(neverEndsSwitch, "CAL-REPEAT-RRULE-001", "switch", "calendar-repeat-end-never-switch")
-    FeishuEvidenceRuntime.bind(wheelContainer, "CAL-REPEAT-RRULE-001", "date-picker", "calendar-repeat-end-date-picker")
-    FeishuEvidenceRuntime.bind(errorText, "CAL-REPEAT-RRULE-001", "error", "calendar-repeat-end-error")
 
     addView(titleBar, LayoutParams(
       LayoutParams.MATCH_PARENT,
@@ -135,13 +128,13 @@ internal class CalendarRepeatEndPageView(
     })
 
     wheelContainer.addView(View(context).apply {
-      setBackgroundColor(CalendarPagePalette.divider)
+      pageBackgroundColor { CalendarPagePalette.divider }
     }, LayoutParams(LayoutParams.MATCH_PARENT, context.pageDp(0.5f).coerceAtLeast(1)).apply {
       topMargin = context.pageDp(14)
       bottomMargin = context.pageDp(14)
       marginStart = context.pageDp(16)
     })
-    wheelContainer.addView(context.pageText("截止时间", 16f, CalendarPagePalette.text), LayoutParams(
+    wheelContainer.addView(context.pageText("截止时间", 16f, { CalendarPagePalette.text }), LayoutParams(
       LayoutParams.MATCH_PARENT,
       context.pageDp(34),
     ).apply {
@@ -179,7 +172,7 @@ internal class CalendarRepeatEndPageView(
     orientation = HORIZONTAL
     gravity = Gravity.CENTER_VERTICAL
     setPadding(context.pageDp(16), 0, context.pageDp(16), 0)
-    addView(context.pageText("永不截止", 16f, CalendarPagePalette.text, Typeface.NORMAL), LayoutParams(
+    addView(context.pageText("永不截止", 16f, { CalendarPagePalette.text }, Typeface.NORMAL), LayoutParams(
       0,
       LayoutParams.WRAP_CONTENT,
       1f,
@@ -246,7 +239,7 @@ internal class CalendarRepeatEndPageView(
     titleBar.setLeftTextAction("取消", debounce = true) { onCancel() }
     titleBar.addRightTextAction(
       "完成",
-      if (state.valid) CalendarPagePalette.primary else CalendarPagePalette.disabled,
+      { if (state.valid) CalendarPagePalette.primary else CalendarPagePalette.disabled },
       debounce = true,
     ) {
       if (state.valid) onComplete(state.completedDraft())

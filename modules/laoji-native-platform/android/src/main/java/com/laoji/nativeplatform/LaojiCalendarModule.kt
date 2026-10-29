@@ -8,6 +8,7 @@ import com.laoji.nativeplatform.calendar.CalendarHostView
 import com.laoji.nativeplatform.calendar.CalendarMutationResolution
 import com.laoji.nativeplatform.calendar.CalendarSettings
 import com.laoji.nativeplatform.calendar.CalendarSnapshot
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.records.Field
@@ -27,7 +28,7 @@ class CalendarSettingsRecord : Record {
 }
 
 // CAL-DAY-COMPOSE-001: the bridge accepts the same percentage rectangle that
-// Feishu's Rust-backed InstanceLayout adapter produces.
+// [SOURCE] Feishu's Rust-backed InstanceLayout adapter produces.
 class CalendarInstanceLayoutRecord : Record {
   @Field
   var xOffsetPercent: Double = 0.0
@@ -98,6 +99,9 @@ class CalendarEventRecord : Record {
   var editable: Boolean = false
 
   @Field
+  var completed: Boolean = false
+
+  @Field
   var revision: Int = 0
 
   @Field
@@ -117,6 +121,7 @@ class CalendarEventRecord : Record {
     timeZoneId = timeZoneId,
     allDay = allDay,
     editable = editable,
+    completed = completed,
     revision = revision,
     instanceLayout = instanceLayout?.toModel(),
   )
@@ -147,16 +152,24 @@ class CalendarSnapshotRecord : Record {
   @Field
   var events: List<CalendarEventRecord> = emptyList()
 
-  fun toModel(): CalendarSnapshot = CalendarSnapshot(
-    schemaVersion = schemaVersion,
-    generation = generation,
-    rangeStartEpochDay = rangeStartEpochDay,
-    rangeEndEpochDayExclusive = rangeEndEpochDayExclusive,
-    selectedEpochDay = selectedEpochDay,
-    todayEpochDay = todayEpochDay,
-    settings = settings.toModel(),
-    events = events.map(CalendarEventRecord::toModel)
-  )
+  @Field
+  var projection: Map<String, Any?>? = null
+
+  fun toModel(): CalendarSnapshot {
+    val parsedProjection = ProjectionEnvelope.fromMap(projection)
+    return CalendarSnapshot(
+      schemaVersion = schemaVersion,
+      generation = generation,
+      rangeStartEpochDay = rangeStartEpochDay,
+      rangeEndEpochDayExclusive = rangeEndEpochDayExclusive,
+      selectedEpochDay = selectedEpochDay,
+      todayEpochDay = todayEpochDay,
+      settings = settings.toModel(),
+      events = events.map(CalendarEventRecord::toModel),
+      projection = parsedProjection,
+      projectionInvalid = projection != null && parsedProjection == null,
+    )
+  }
 }
 
 class CalendarMutationResolutionRecord : Record {

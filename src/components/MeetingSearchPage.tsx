@@ -8,9 +8,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Meeting } from '../types';
-import type { MeetingSearchResult } from '../data/repositories';
+import type { MeetingSearchResult } from "../data/repositories/meetingNoteRepository";
 import { Colors as C } from '../theme/colors';
 import { CalendarSlidePage } from './CalendarSlidePage';
 import { MeetingListItem } from './MeetingListItem';

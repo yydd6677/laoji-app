@@ -1,9 +1,17 @@
 import React from 'react';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Colors as C } from '../theme/colors';
+import { Animated, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import type { ColorPalette, ThemeAppearance } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
+import { MotionPressable } from './MotionPressable';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
+function useTitleBarStyles() {
+  const { colors: C, appearance } = useTheme();
+  const s = React.useMemo(() => createStyles(C, appearance), [C, appearance]);
+  return { C, s };
+}
 
 export type CalendarTitleAction = {
   key: string;
@@ -42,17 +50,19 @@ export function CommonTextTitleBar({
   rightTestID?: string;
   testID?: string;
 }) {
+  const { s } = useTitleBarStyles();
   return (
     <View style={s.commonTextBar} testID={testID}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.commonLeftAction}
         onPress={onLeft}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={leftText}
       >
         <Text style={s.commonActionText}>{leftText}</Text>
-      </TouchableOpacity>
+      </MotionPressable>
       <Text
         style={s.commonTextTitle}
         numberOfLines={1}
@@ -60,12 +70,13 @@ export function CommonTextTitleBar({
       >
         {title}
       </Text>
-      <TouchableOpacity
+      <MotionPressable
         testID={rightTestID}
         style={s.commonRightAction}
         onPress={onRight}
         disabled={!onRight || !rightEnabled}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={rightText}
         accessibilityState={{ disabled: !onRight || !rightEnabled }}
@@ -78,7 +89,7 @@ export function CommonTextTitleBar({
             {rightText}
           </Text>
         ) : null}
-      </TouchableOpacity>
+      </MotionPressable>
     </View>
   );
 }
@@ -87,7 +98,7 @@ export function CalendarDetailTitleBar({
   title,
   titleOpacity,
   titleAlignment = 'center',
-  titleColor = C.text,
+  titleColor,
   onBack,
   actions = [],
 }: {
@@ -98,22 +109,24 @@ export function CalendarDetailTitleBar({
   onBack: () => void;
   actions?: CalendarTitleAction[];
 }) {
+  const { C, s } = useTitleBarStyles();
   const titleSide = Math.max(64, actions.length * 44 + 8);
   const titleInsets = titleAlignment === 'leading'
     ? { left: 44, right: actions.length * 44 + 42 }
     : { left: titleSide, right: titleSide };
   return (
     <View style={[s.bar, s.detailBar]}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.iconAction}
         onPress={onBack}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.iconPressed}
         hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         accessibilityRole="button"
         accessibilityLabel="返回"
       >
         <Ionicons name="chevron-back" size={22} color={C.text} />
-      </TouchableOpacity>
+      </MotionPressable>
       <Animated.Text
         testID="calendar-detail-collapsed-title"
         numberOfLines={1}
@@ -121,7 +134,7 @@ export function CalendarDetailTitleBar({
           s.detailTitle,
           titleInsets,
           titleAlignment === 'leading' && s.detailTitleLeading,
-          { color: titleColor },
+          { color: titleColor ?? C.text },
           titleOpacity ? { opacity: titleOpacity } : null,
         ]}
       >
@@ -129,16 +142,17 @@ export function CalendarDetailTitleBar({
       </Animated.Text>
       <View style={s.detailActions}>
         {actions.map(action => (
-          <TouchableOpacity
+          <MotionPressable
             key={action.key}
             style={s.detailIconAction}
             onPress={action.onPress}
-            activeOpacity={0.65}
+            feedback="quiet"
+            pressedStyle={s.iconPressed}
             accessibilityRole="button"
             accessibilityLabel={action.label}
           >
             <Ionicons name={action.icon} size={20} color={C.text} />
-          </TouchableOpacity>
+          </MotionPressable>
         ))}
       </View>
     </View>
@@ -158,24 +172,27 @@ export function CalendarEditTitleBar({
   saving: boolean;
   saveAccessibilityLabel: string;
 }) {
+  const { s } = useTitleBarStyles();
   return (
     <View style={s.bar}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.textAction}
         onPress={onCancel}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel="取消编辑"
       >
         <Text style={s.cancelText}>取消</Text>
-      </TouchableOpacity>
+      </MotionPressable>
       <View style={s.editorTitleSpacer} />
-      <TouchableOpacity
+      <MotionPressable
         testID="event-save"
         style={[s.textAction, s.saveAction]}
         onPress={onSave}
         disabled={!saveEnabled || saving}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={saveAccessibilityLabel}
         accessibilityState={{ disabled: !saveEnabled || saving }}
@@ -186,7 +203,7 @@ export function CalendarEditTitleBar({
         ]}>
           {saving ? '保存中' : '保存'}
         </Text>
-      </TouchableOpacity>
+      </MotionPressable>
     </View>
   );
 }
@@ -210,24 +227,27 @@ export function CalendarTextTitleBar({
   rightTestID?: string;
   transparent?: boolean;
 }) {
+  const { s } = useTitleBarStyles();
   return (
     <View style={[s.bar, transparent && s.transparentBar]}>
-      <TouchableOpacity
+      <MotionPressable
         style={s.textAction}
         onPress={onLeft}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={leftText}
       >
         <Text style={s.cancelText}>{leftText}</Text>
-      </TouchableOpacity>
+      </MotionPressable>
       <Text style={s.textBarTitle} numberOfLines={1}>{title}</Text>
-      <TouchableOpacity
+      <MotionPressable
         testID={rightTestID}
         style={[s.textAction, s.saveAction]}
         onPress={onRight}
         disabled={!onRight || !rightEnabled}
-        activeOpacity={0.65}
+        feedback="quiet"
+        pressedStyle={s.textPressed}
         accessibilityRole="button"
         accessibilityLabel={rightText}
         accessibilityState={{ disabled: !onRight || !rightEnabled }}
@@ -235,12 +255,12 @@ export function CalendarTextTitleBar({
         {rightText ? (
           <Text style={[s.saveText, !rightEnabled && s.saveTextDisabled]}>{rightText}</Text>
         ) : null}
-      </TouchableOpacity>
+      </MotionPressable>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const createStyles = (C: ColorPalette, Appearance: ThemeAppearance) => StyleSheet.create({
   commonTextBar: {
     height: COMMON_TEXT_TITLE_BAR_GEOMETRY.height,
     flexDirection: 'row',
@@ -264,6 +284,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   commonActionText: {
+    fontFamily: Appearance.fontFamily,
     fontSize: COMMON_TEXT_TITLE_BAR_GEOMETRY.actionSize,
     lineHeight: 24,
     fontWeight: '400',
@@ -279,6 +300,8 @@ const s = StyleSheet.create({
     fontSize: COMMON_TEXT_TITLE_BAR_GEOMETRY.titleSize,
     lineHeight: 25,
     fontWeight: '400',
+    fontFamily: Appearance.titleFontFamily,
+    letterSpacing: Appearance.titleLetterSpacing,
     color: C.text,
   },
   bar: {
@@ -291,18 +314,22 @@ const s = StyleSheet.create({
   transparentBar: { backgroundColor: 'transparent' },
   iconAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   detailIconAction: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  iconPressed: { backgroundColor: C.pressed, borderRadius: Appearance.iconRadius },
+  textPressed: { backgroundColor: C.pressed },
   detailTitle: {
     position: 'absolute',
     textAlign: 'center',
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '600',
+    fontFamily: Appearance.titleFontFamily,
+    letterSpacing: Appearance.titleLetterSpacing,
     color: C.text,
   },
   detailTitleLeading: { textAlign: 'left', fontWeight: '400' },
   detailActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center' },
   textAction: { minWidth: 64, height: 44, paddingHorizontal: 16, justifyContent: 'center' },
-  cancelText: { fontSize: 16, lineHeight: 22, color: C.text },
+  cancelText: { fontFamily: Appearance.fontFamily, fontSize: 16, lineHeight: 22, color: C.text },
   editorTitleSpacer: { flex: 1 },
   textBarTitle: {
     position: 'absolute',
@@ -312,9 +339,11 @@ const s = StyleSheet.create({
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '600',
+    fontFamily: Appearance.titleFontFamily,
+    letterSpacing: Appearance.titleLetterSpacing,
     color: C.text,
   },
   saveAction: { alignItems: 'flex-end' },
-  saveText: { fontSize: 16, lineHeight: 22, fontWeight: '500', color: C.primary },
+  saveText: { fontFamily: Appearance.fontFamily, fontSize: 16, lineHeight: 22, fontWeight: '500', color: C.primary },
   saveTextDisabled: { color: C.faint },
 });

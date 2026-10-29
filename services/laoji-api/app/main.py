@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.privacy_logging import install_uvicorn_protocol_privacy_filter
 from app.runtime_policy import env_enabled as _env_enabled
 from app.security_headers import SensitiveApiHeadersMiddleware
 from app.service_telemetry import ServiceTelemetryMiddleware
@@ -35,12 +36,17 @@ if not _access_log:
 
 # 保留 uvicorn.error 和 uvicorn.asgi 的 INFO 日志（有用）
 logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+install_uvicorn_protocol_privacy_filter()
 
 
 # 静默第三方库的冗余 INFO 日志。
 for _lib in [
     "transformers",
     "onnxruntime",
+    # Request URLs may contain geocoding keys/coordinates. Our own structured
+    # timing events retain status and latency without query strings or bodies.
+    "httpx",
+    "httpcore",
 ]:
     _lg = logging.getLogger(_lib)
     _lg.setLevel(logging.WARNING)
@@ -68,32 +74,25 @@ async def lifespan(app: FastAPI):
     from app.models import Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    from app.services.app_meeting_schema import ensure_app_meeting_schema
-    from app.services import schedule_db_service
     from app.services.device_identity import ensure_device_schema, purge_expired_device_data
-    from app.services.laoji_auth_service import init_auth_db
+    from app.services import vnext_purge_store, vnext_task_store
     from app.services.speaker_db_service import get_speaker_db
 
-    await asyncio.to_thread(ensure_app_meeting_schema)
-    await asyncio.to_thread(init_auth_db)
-    await asyncio.to_thread(schedule_db_service.ensure_schedule_database)
     await asyncio.to_thread(ensure_device_schema)
+    await asyncio.to_thread(vnext_task_store.ensure_vnext_task_schema)
+    await asyncio.to_thread(vnext_task_store.reconcile_terminal_task_attempts)
+    from app.services.vnext_realtime_store import recover_expired_realtime_workers
+    from app.services.vnext_realtime_maintenance import start_realtime_maintenance
+    await asyncio.to_thread(recover_expired_realtime_workers)
+    start_realtime_maintenance()
+    recovered_purges = await asyncio.to_thread(vnext_purge_store.recover_interrupted_purges)
+    if recovered_purges:
+        print(
+            f"[启动] 已将 {recovered_purges} 个中断清理任务恢复为待设备重放",
+            flush=True,
+        )
     await asyncio.to_thread(purge_expired_device_data)
     await asyncio.to_thread(get_speaker_db)
-    from app.services.summary_v3_store import purge_expired_source_payloads
-    expired_summary_payloads = await asyncio.to_thread(purge_expired_source_payloads)
-    if expired_summary_payloads:
-        print(
-            f"[启动] 已清理 {expired_summary_payloads} 个过期整理临时载荷",
-            flush=True,
-        )
-    from app.services.database_migrations import archive_orphan_final_summaries
-    archived_orphans = await asyncio.to_thread(archive_orphan_final_summaries)
-    if archived_orphans:
-        print(
-            f"[启动] 已保全并移出 {archived_orphans} 条缺少原会议的历史整理记录",
-            flush=True,
-        )
     os.makedirs(settings.audio_storage_abs_path, exist_ok=True)
     print("✓ SQLite 数据库已就绪", flush=True)
 
@@ -102,7 +101,7 @@ async def lifespan(app: FastAPI):
         from sqlalchemy import text
         async with engine.connect() as conn:
             result = await conn.execute(
-                text("SELECT id, title FROM meetings WHERE status = 'processing'")
+                text("SELECT id FROM meetings WHERE status = 'processing'")
             )
             stuck_meetings = result.fetchall()
             if stuck_meetings:
@@ -111,10 +110,11 @@ async def lifespan(app: FastAPI):
                     text("UPDATE meetings SET status = 'ended' WHERE status = 'processing'")
                 )
                 await conn.commit()
-                for m in stuck_meetings:
-                    meeting_id, title = m[0], m[1]
-                    print(f"  - {meeting_id[:20]}... ({title})")
-                    print("    已标记为 ended；总结将在用户进入总结页或手动触发时生成", flush=True)
+                print(
+                    "[启动] processing 状态已批量标记为 ended；"
+                    "总结将在用户进入总结页或手动触发时生成",
+                    flush=True,
+                )
     except Exception as e:
         print(f"[启动] 清理残留状态失败: {e}")
 
@@ -163,21 +163,29 @@ async def lifespan(app: FastAPI):
     else:
         print("[启动] 已按 MEETING_ASR_WARMUP_ENABLED=0 跳过实时转录模型预热", flush=True)
 
+    try:
+        from app.services.vnext_speaker_pipeline import start_speaker_overlay_worker
+
+        start_speaker_overlay_worker()
+        print("[启动] vNext 讲话人 overlay 恢复 worker 已启动", flush=True)
+    except Exception as error:
+        print(f"[启动] 讲话人 overlay worker 启动失败: {type(error).__name__}", flush=True)
 
     try:
-        from app.workers.summary_tasks import recover_persistent_summary_jobs
+        from app.services.vnext_import_transcription_pipeline import start_import_transcription_worker
 
-        recovered_summaries = recover_persistent_summary_jobs()
-        if recovered_summaries:
-            print(
-                f"[启动] 已恢复 {recovered_summaries} 个中断的整理任务",
-                flush=True,
-            )
+        start_import_transcription_worker()
+        print("[启动] 导入转写恢复 worker 已启动", flush=True)
     except Exception as error:
-        print(
-            f"[启动] 恢复整理任务失败: {type(error).__name__}",
-            flush=True,
-        )
+        print(f"[启动] vNext 导入转写 worker 启动失败: {type(error).__name__}", flush=True)
+
+    try:
+        from app.services.vnext_summary_worker import start_summary_source_stream_worker
+
+        start_summary_source_stream_worker()
+        print("[启动] 来源整理 worker 已启动", flush=True)
+    except Exception as error:
+        print(f"[启动] vNext 来源整理 worker 启动失败: {type(error).__name__}", flush=True)
 
     from app.services.meeting_retention_service import start_meeting_retention_cleanup
     start_meeting_retention_cleanup()
@@ -187,7 +195,15 @@ async def lifespan(app: FastAPI):
     finally:
         from app.services.meeting_recording_asset_service import stop_recording_worker
         from app.services.meeting_retention_service import stop_meeting_retention_cleanup
+        from app.services.vnext_speaker_pipeline import stop_speaker_overlay_worker
+        from app.services.vnext_import_transcription_pipeline import stop_import_transcription_worker
+        from app.services.vnext_summary_worker import stop_summary_source_stream_worker
+        from app.services.vnext_realtime_maintenance import stop_realtime_maintenance
+        await stop_realtime_maintenance()
         await stop_recording_worker()
+        await stop_import_transcription_worker()
+        await stop_summary_source_stream_worker()
+        await stop_speaker_overlay_worker()
         await stop_meeting_retention_cleanup()
 
 

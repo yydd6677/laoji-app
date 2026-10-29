@@ -5,14 +5,13 @@ package com.laoji.nativeplatform.calendar
 import android.annotation.SuppressLint
 import android.content.Context
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import com.laoji.nativeplatform.NativeThemePreference
 import com.laoji.nativeplatform.ui.LaojiNativeBottomBarView
 import com.laoji.nativeplatform.ui.NativeBottomTab
+import com.laoji.nativeplatform.ui.NativeUiTokens
 import com.laoji.nativeplatform.ui.installStatusBarInsetPadding
-import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -42,7 +41,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
 
   private val toolbar = CalendarToolbarView(context, appContext)
   private val indicator = CalendarIndicatorView(context)
-  private val palette = CalendarUi.palette(context)
+  private var palette = CalendarUi.palette(context)
   private val content = FrameLayout(context)
   private val monthPager = ThreePageMonthPager(context)
   // CAL-DAY-PAGER-001: CalendarHost owns one composed day surface with separate native interaction layers.
@@ -51,7 +50,6 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private val createFab = CalendarCreateFabView(context)
   // CAL-PICKER-HOST-001: QuickChoose is a full-content transparent touch owner, not a fixed panel.
   private val pickerPanel = CalendarQuickChooseHostView(context)
-  @FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
   private val bottomBar = LaojiNativeBottomBarView(context, appContext).apply {
     setBridgeEventsEnabled(false)
     setSelectedTab(NativeBottomTab.SCHEDULE.wireName)
@@ -64,9 +62,14 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   private val operationIds = CalendarOperationIdGenerator()
   private val handledResolutionIds = linkedSetOf<String>()
   private val acknowledgedEvents = linkedMapOf<String, CalendarEvent>()
+  // A gesture can outlive the snapshot it started from. Retain a bounded
+  // revision-to-projection lineage so the eventual bridge action cannot wear
+  // the identity of a newer snapshot and bypass the JS stale-action fence.
+  private val projectionLineage = CalendarProjectionLineage()
   private var mode = CalendarMode.MONTH
   private var baseSnapshot: CalendarSnapshot? = null
   private var renderedSnapshot: CalendarSnapshot? = null
+  private var currentProjection: ProjectionEnvelope? = null
   private var selectedEpochDay = currentEpochDay()
   private var pickerState = CalendarPickerState.closed(selectedEpochDay)
   private var pendingPickerCloseReason: String? = null
@@ -134,6 +137,12 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     addView(bottomBar, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     pickerPanel.prepare(selectedEpochDay, mode)
     updateModeVisibility()
+    NativeUiTokens.bindTheme(this) {
+      palette = CalendarUi.palette(context)
+      setBackgroundColor(palette.background)
+      styleVividSurface(monthPager)
+      styleVividSurface(dayView)
+    }
   }
 
   fun setMode(value: String?) {
@@ -145,6 +154,8 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     if (snapshot == null) {
       baseSnapshot = null
       renderedSnapshot = null
+      currentProjection = null
+      projectionLineage.clear()
       monthPager.setSnapshot(null)
       dayView.setSnapshot(null)
       pickerPanel.setDateData(CalendarQuickChooseDateData.EMPTY)
@@ -152,6 +163,19 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     }
     if (snapshot.schemaVersion != 1) {
       emitSemantic("snapshot-rejected", mapOf("reason" to "unsupported-schema", "schemaVersion" to snapshot.schemaVersion))
+      return
+    }
+    if (snapshot.projectionInvalid) {
+      emitSemantic("snapshot-rejected", mapOf("reason" to "invalid-projection"))
+      return
+    }
+    val incomingProjection = snapshot.projection
+    if (currentProjection != null && incomingProjection == null) {
+      emitSemantic("snapshot-rejected", mapOf("reason" to "missing-projection"))
+      return
+    }
+    if (incomingProjection != null && !incomingProjection.isAcceptableReplacement(currentProjection)) {
+      emitSemantic("snapshot-rejected", mapOf("reason" to "stale-projection"))
       return
     }
     val currentGeneration = baseSnapshot?.generation
@@ -163,6 +187,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
       return
     }
     val normalized = snapshot.normalized()
+    normalized.projection?.let { projectionLineage.remember(normalized.events, it) }
     val incomingByIdentity = normalized.events.associateBy(CalendarEvent::identity)
     acknowledgedEvents.entries.removeAll { (identity, acknowledged) ->
       val incoming = incomingByIdentity[identity]
@@ -174,6 +199,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
           normalized.events.none { it.identity == acknowledged.identity }
         }
     )
+    currentProjection = normalized.projection
     selectedEpochDay = normalized.selectedEpochDay
     if (!visibleMonthInitialized) {
       monthPager.jumpToMonth(selectedEpochDay)
@@ -260,6 +286,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     disposed = true
     ledger.clear()
     acknowledgedEvents.clear()
+    projectionLineage.clear()
     createFab.setActionListener(null)
     bottomBar.setTabPressListener(null)
     pickerPanel.dispose()
@@ -373,7 +400,12 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
   }
 
   override fun onEmptyCreateRequested(epochDay: Int) {
-    selectDate(epochDay, source = "month-empty-create", emit = true)
+    // The empty action belongs to the page that is already selected. Rebinding
+    // that same day hides and recreates the selected-day surface immediately
+    // before navigation, which appears as a full-page flash.
+    if (selectedEpochDay != epochDay) {
+      selectDate(epochDay, source = "month-empty-create", emit = true)
+    }
     emitSemantic("create-manual", mapOf("epochDay" to epochDay))
   }
 
@@ -431,7 +463,7 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     }
   }
 
-  // UI-SHELL-RESELECT-001: mirrors Feishu's shared backToday event without remounting this root.
+  // UI-SHELL-RESELECT-001: handle the shared back-today event without remounting this root.
   private fun returnToToday() {
     val now = nowProvider()
     val today = CalendarDateMath.toEpochDay(
@@ -591,7 +623,19 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     mutation.optimistic.startMinutes?.let { put("startMinutes", it) }
     mutation.optimistic.endMinutes?.let { put("endMinutes", it) }
     put("baseRevision", mutation.original.revision)
+    val actionProjection = projectionLineage.projectionFor(mutation.original)
+      ?: baseSnapshot?.projection
+    actionProjection?.let { projection -> put("projection", projectionPayload(projection)) }
   }
+
+  private fun projectionPayload(projection: ProjectionEnvelope): Map<String, Any> = mapOf(
+    "deviceEpoch" to projection.deviceEpoch,
+    "entityId" to projection.entityId,
+    "entityRevision" to projection.entityRevision,
+    "viewRevision" to projection.viewRevision,
+    "surfaceInstanceId" to projection.surfaceInstanceId,
+    "payloadSha256" to projection.payloadSha256,
+  )
 
   private fun emitSemantic(type: String, details: Map<String, Any>) {
     onSemanticEvent(buildMap {
@@ -609,19 +653,12 @@ class CalendarHostView(context: Context, appContext: AppContext) : ExpoView(cont
     )
   }
 
-  // [PRODUCT] The vivid skin changes the calendar silhouette as well as its
-  // palette: both retained views become an inset, rounded surface while the
-  // standard skin remains edge-to-edge and source-shaped.
+  // Theme expression must not change the retained calendar's measured canvas.
+  // Earlier vivid-only insets compressed the grid and survived activity
+  // recreation when switching skins. Keep the root edge-to-edge; themed
+  // character belongs inside cells, controls and semantic surfaces.
   private fun styleVividSurface(view: View) {
-    if (!NativeThemePreference.isVivid(context)) return
-    view.background = CalendarUi.background(
-      palette.surface,
-      16f,
-      context,
-      palette.divider,
-      1f,
-    )
-    view.clipToOutline = true
-    view.outlineProvider = ViewOutlineProvider.BACKGROUND
+    view.setBackgroundColor(palette.surface)
+    view.clipToOutline = false
   }
 }

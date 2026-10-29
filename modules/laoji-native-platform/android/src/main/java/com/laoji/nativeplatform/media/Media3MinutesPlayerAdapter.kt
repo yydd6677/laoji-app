@@ -17,6 +17,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.laoji.nativeplatform.minutes.MinutesPlayerSource
+import com.laoji.nativeplatform.minutes.traceMinutes
 import java.util.concurrent.CopyOnWriteArraySet
 
 /** The only concrete player owner. Production creates it only inside [LaojiMinutesPlaybackService]. */
@@ -40,6 +41,7 @@ internal class Media3MinutesPlayerAdapter(
     AndroidMinutesLocalSourceAccess(applicationContext),
   )
   private val progressThrottle = MinutesPlaybackProgressThrottle()
+  private val recoveryWriter = MinutesPlaybackRecoveryWriter(recoveryStore)
   private val player = ExoPlayer.Builder(applicationContext)
     .setMediaSourceFactory(mediaSourceFactory)
     .setSeekBackIncrementMs(MINUTES_SKIP_INTERVAL_MS)
@@ -188,11 +190,19 @@ internal class Media3MinutesPlayerAdapter(
 
   override fun seekTo(positionMs: Long) {
     checkMainThread()
-    if (released || source == null) return
+    val currentSource = source ?: return
+    seekToChecked(currentSource.sourceId, currentSource.storageScope, positionMs)
+  }
+
+  internal fun seekToChecked(sourceId: String, storageScope: String, positionMs: Long): Boolean {
+    checkMainThread()
+    val currentSource = source ?: return false
+    if (released || currentSource.sourceId != sourceId || currentSource.storageScope != storageScope) return false
     val target = clampMinutesSeek(positionMs, effectiveDurationMs())
     player.seekTo(target)
     persist(force = true, positionOverrideMs = target)
     publish(force = true)
+    return true
   }
 
   override fun seekBy(deltaMs: Long) {
@@ -223,13 +233,14 @@ internal class Media3MinutesPlayerAdapter(
     mainHandler.removeCallbacks(progressTicker)
     player.removeListener(playerListener)
     player.release()
+    recoveryWriter.close()
     listeners.clear()
     source = null
   }
 
   private fun restorePersistedPlayback() {
     if (activeStorageScope == MINUTES_SIGNED_OUT_SCOPE) {
-      recoveryStore.clear()
+      recoveryWriter.clear()
       return
     }
     val record = recoveryStore.load(activeStorageScope) ?: return
@@ -246,7 +257,7 @@ internal class Media3MinutesPlayerAdapter(
       source = null
       player.stop()
       player.clearMediaItems()
-      recoveryStore.clear()
+      recoveryWriter.clear()
       progressThrottle.reset()
     } finally {
       restoring = false
@@ -258,7 +269,7 @@ internal class Media3MinutesPlayerAdapter(
     source = null
     player.stop()
     player.clearMediaItems()
-    recoveryStore.clear()
+    recoveryWriter.clear()
     progressThrottle.reset()
     publish(force = true)
   }
@@ -273,16 +284,22 @@ internal class Media3MinutesPlayerAdapter(
     val elapsedNow = elapsedRealtimeMs()
     val positionMs = (positionOverrideMs ?: player.currentPosition).coerceAtLeast(0L)
     if (!force && !progressThrottle.shouldPersist(elapsedNow, positionMs)) return
-    val saved = recoveryStore.save(
-      MinutesPlaybackRecoveryRecord(
-        source = currentSource,
-        positionMs = positionMs,
-        rate = resolveMinutesPlaybackRate(player.playbackParameters.speed),
-        wasPlaying = player.isPlaying,
-        savedAtEpochMs = nowEpochMs(),
-      ),
+    val checkpoint = MinutesPlaybackRecoveryRecord(
+      source = currentSource,
+      positionMs = positionMs,
+      rate = resolveMinutesPlaybackRate(player.playbackParameters.speed),
+      wasPlaying = player.isPlaying,
+      savedAtEpochMs = nowEpochMs(),
     )
-    if (saved) progressThrottle.markPersisted(elapsedNow, positionMs)
+    traceMinutes("LaoJi/minutes.player.persist") {
+      recoveryWriter.enqueue(checkpoint) { saved ->
+        mainHandler.post {
+          if (saved && !released && source == currentSource) {
+            progressThrottle.markPersisted(elapsedNow, positionMs)
+          }
+        }
+      }
+    }
   }
 
   private fun configureRequestHeaders(source: MinutesPlayerSource) {

@@ -1,5 +1,4 @@
-import { requestMeetingOccurrenceSync } from '../application/meeting/occurrenceSyncTrigger';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { OccurrenceReference, ScopeKey } from '../domain/meeting';
 
 export async function setOccurrenceMeetingLinkState(input: {
@@ -17,8 +16,5 @@ export async function setOccurrenceMeetingLinkState(input: {
     state: input.state,
     updatedAtMs: input.updatedAtMs ?? Date.now(),
   });
-  if (changed > 0 && input.scopeKey !== 'guest') {
-    requestMeetingOccurrenceSync(input.scopeKey);
-  }
   return changed;
 }

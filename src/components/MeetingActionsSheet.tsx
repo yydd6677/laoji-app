@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSummaryActionCandidate } from '../domain/meeting';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 
 const MOTION_MS = 300;
 const ROW_HEIGHT = 92;
@@ -40,12 +40,9 @@ function timeLabel(milliseconds: number): string {
     : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function actionMetadata(
-  action: MeetingSummaryActionCandidate,
-  conflicted: boolean,
-): string {
+function actionMetadata(action: MeetingSummaryActionCandidate): string {
   const parts = [
-    conflicted ? '同步冲突' : action.status === 'completed' ? '已完成' : '待完成',
+    action.status === 'completed' ? '已完成' : '待完成',
     action.assignee?.trim() ? `负责人：${action.assignee.trim()}` : '',
     action.dueAtMs === null ? '' : `截止：${dateLabel(action.dueAtMs)}`,
   ].filter(Boolean);
@@ -53,7 +50,9 @@ function actionMetadata(
 }
 
 function actionSource(action: MeetingSummaryActionCandidate): { label: string; available: boolean } {
-  const citation = action.citations[0];
+  const citation = action.citations.find(item => (
+    item.sourceType === undefined || item.sourceType === 'transcript'
+  ));
   const positionMs = citation?.startMs ?? action.sourceStartMs;
   if (positionMs === null || positionMs === undefined || !Number.isFinite(positionMs)) {
     return { label: '', available: false };
@@ -68,7 +67,6 @@ function actionSource(action: MeetingSummaryActionCandidate): { label: string; a
 export function MeetingActionsSheet({
   visible,
   actions,
-  conflictedActionIds,
   loading,
   busyActionId,
   error,
@@ -83,7 +81,6 @@ export function MeetingActionsSheet({
 }: {
   visible: boolean;
   actions: readonly MeetingSummaryActionCandidate[];
-  conflictedActionIds: ReadonlySet<string>;
   loading: boolean;
   busyActionId: string | null;
   error: string;
@@ -96,7 +93,8 @@ export function MeetingActionsSheet({
   onOpenSource: (actionId: string) => void;
   onOpenFollowup: (actionId: string) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -109,8 +107,8 @@ export function MeetingActionsSheet({
   closeRef.current = onClose;
 
   const visibleActions = useMemo(
-    () => actions.filter(action => action.status !== 'dismissed' || conflictedActionIds.has(actionId(action))),
-    [actions, conflictedActionIds],
+    () => actions.filter(action => action.status !== 'dismissed'),
+    [actions],
   );
 
   const finishClose = useCallback((notify: boolean) => {
@@ -239,7 +237,6 @@ export function MeetingActionsSheet({
             )}
             renderItem={({ item }) => {
               const id = actionId(item);
-              const conflicted = conflictedActionIds.has(id);
               const completed = item.status === 'completed';
               const busy = Boolean(busyActionId);
               const updating = busyActionId === id;
@@ -258,10 +255,10 @@ export function MeetingActionsSheet({
                   <Pressable
                     style={styles.checkTarget}
                     onPress={() => onToggle(id, !completed)}
-                    disabled={busy || conflicted}
+                    disabled={busy}
                     accessibilityRole="checkbox"
                     accessibilityLabel={completed ? `恢复待办事项：${item.content}` : `完成待办事项：${item.content}`}
-                    accessibilityState={{ checked: completed, disabled: busy || conflicted, busy: updating }}
+                    accessibilityState={{ checked: completed, disabled: busy, busy: updating }}
                   >
                     {updating ? (
                       <ActivityIndicator size="small" color={colors.primary} />
@@ -270,9 +267,7 @@ export function MeetingActionsSheet({
                         style={[
                           styles.check,
                           {
-                            borderColor: conflicted
-                              ? colors.danger
-                              : completed ? colors.primary : colors.iconTertiary,
+                            borderColor: completed ? colors.primary : colors.iconTertiary,
                             backgroundColor: completed ? colors.primary : colors.backgroundFloat,
                           },
                         ]}
@@ -304,10 +299,10 @@ export function MeetingActionsSheet({
                     </Text>
                     <View style={styles.metadataRow}>
                       <Text
-                        style={[styles.rowMeta, { color: conflicted ? colors.danger : colors.textCaption }]}
+                        style={[styles.rowMeta, { color: colors.textCaption }]}
                         numberOfLines={1}
                       >
-                        {actionMetadata(item, conflicted)}
+                        {actionMetadata(item)}
                       </Text>
                       {source.available ? (
                         <Pressable
@@ -329,15 +324,15 @@ export function MeetingActionsSheet({
                   <Pressable
                     style={({ pressed }) => [styles.iconAction, pressed && !busy && { backgroundColor: colors.primarySoft }]}
                     onPress={() => onOpenFollowup(id)}
-                    disabled={busy || conflicted || item.status !== 'pending'}
+                    disabled={busy || (!item.followupEventSourceId && item.status !== 'pending')}
                     accessibilityRole="button"
                     accessibilityLabel={item.followupEventSourceId ? '查看后续日程' : '创建后续日程'}
-                    accessibilityState={{ disabled: busy || conflicted || item.status !== 'pending' }}
+                    accessibilityState={{ disabled: busy || (!item.followupEventSourceId && item.status !== 'pending') }}
                   >
                     <Ionicons
                       name={item.followupEventSourceId ? 'calendar' : 'calendar-outline'}
                       size={20}
-                      color={busy || conflicted || item.status !== 'pending' ? colors.iconDisabled : colors.primary}
+                      color={busy || (!item.followupEventSourceId && item.status !== 'pending') ? colors.iconDisabled : colors.primary}
                     />
                   </Pressable>
                   <Ionicons name="chevron-forward" size={18} color={colors.iconTertiary} />
@@ -356,27 +351,27 @@ export function MeetingActionsSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   sheet: { borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 60, height: 44, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
   list: { flexGrow: 0, flexShrink: 1 },
   empty: { height: 144, alignItems: 'center', justifyContent: 'center' },
-  emptyText: { fontSize: 14, lineHeight: 22 },
+  emptyText: { fontFamily, fontSize: 14, lineHeight: 22 },
   retry: { minWidth: 60, height: 36, marginTop: 8, paddingHorizontal: 16, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  retryText: { fontSize: 14, lineHeight: 22 },
+  retryText: { fontFamily, fontSize: 14, lineHeight: 22 },
   row: { height: ROW_HEIGHT, paddingLeft: 4, paddingRight: 8, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   checkTarget: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   check: { width: 22, height: 22, borderWidth: 1.5, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   rowBody: { flex: 1, minWidth: 96, alignSelf: 'stretch', justifyContent: 'center', paddingRight: 8 },
-  rowTitle: { fontSize: 15, lineHeight: 21, fontWeight: '400' },
+  rowTitle: { fontFamily, fontSize: 15, lineHeight: 21, fontWeight: '400' },
   metadataRow: { marginTop: 3, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowMeta: { flexShrink: 1, fontSize: 12, lineHeight: 18 },
-  source: { fontSize: 12, lineHeight: 18 },
+  rowMeta: { flexShrink: 1, fontFamily, fontSize: 12, lineHeight: 18 },
+  source: { fontFamily, fontSize: 12, lineHeight: 18 },
   iconAction: { width: 44, height: 44, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   errorSlot: { minHeight: 34, paddingHorizontal: 16, justifyContent: 'center' },
-  errorText: { fontSize: 12, lineHeight: 18 },
+  errorText: { fontFamily, fontSize: 12, lineHeight: 18 },
 });

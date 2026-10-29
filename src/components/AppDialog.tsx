@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { Colors as C, Motion } from '../theme/colors';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Motion, type ColorPalette } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 export type AppDialogTone = 'info' | 'success' | 'warning' | 'error' | 'danger';
@@ -44,19 +45,13 @@ export const APP_DIALOG_GEOMETRY = {
   entryScale: 0.98,
 } as const;
 
-const TONE_ACCENT: Record<AppDialogTone, string> = {
-  info: C.primary,
-  success: C.green,
-  warning: C.orange,
-  error: C.red,
-  danger: C.red,
-};
-
 function defaultActions(): AppDialogAction[] {
   return [{ text: '知道了', role: 'primary' }];
 }
 
 export function AppDialogProvider({ children }: { children: React.ReactNode }) {
+  const { colors: C, appearance, reduceMotion } = useTheme();
+  const s = useMemo(() => createStyles(C, appearance.fontFamily), [C, appearance.fontFamily]);
   const [dialog, setDialog] = useState<AppDialogOptions | null>(null);
   const [mounted, setMounted] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -78,7 +73,7 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
     progress.stopAnimation();
     Animated.timing(progress, {
       toValue: 0,
-      duration: APP_DIALOG_GEOMETRY.animationDuration,
+      duration: reduceMotion ? 0 : APP_DIALOG_GEOMETRY.animationDuration,
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (!finished || transitionRef.current !== transition) return;
@@ -92,7 +87,7 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
       if (notifyDismiss) current.onDismiss?.();
       afterExit?.();
     });
-  }, [progress]);
+  }, [progress, reduceMotion]);
 
   const hideDialog = useCallback(() => {
     finishDialog(undefined, true);
@@ -118,10 +113,10 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
     progress.setValue(0);
     Animated.timing(progress, {
       toValue: 1,
-      duration: APP_DIALOG_GEOMETRY.animationDuration,
+      duration: reduceMotion ? 0 : APP_DIALOG_GEOMETRY.animationDuration,
       useNativeDriver: true,
     }).start();
-  }, [presentationKey, progress]);
+  }, [presentationKey, progress, reduceMotion]);
 
   useEffect(() => () => {
     transitionRef.current += 1;
@@ -130,7 +125,8 @@ export function AppDialogProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo(() => ({ showDialog, hideDialog }), [hideDialog, showDialog]);
   const tone = dialog?.tone ?? 'info';
-  const accent = TONE_ACCENT[tone];
+  const accent = ({ info: C.primary, success: C.green, warning: C.orange,
+    error: C.red, danger: C.red } satisfies Record<AppDialogTone, string>)[tone];
   const actions = dialog?.actions?.length ? dialog.actions : defaultActions();
   const inlineActions = actions.length <= 2;
 
@@ -246,7 +242,7 @@ export function useAppDialog() {
   return ctx;
 }
 
-const s = StyleSheet.create({
+const createStyles = (C: ColorPalette, fontFamily: string) => StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: C.overlay,
@@ -283,6 +279,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
+    fontFamily,
     fontSize: APP_DIALOG_GEOMETRY.titleSize,
     lineHeight: APP_DIALOG_GEOMETRY.titleHeight,
     fontWeight: '600',
@@ -299,12 +296,14 @@ const s = StyleSheet.create({
     flexGrow: 1,
   },
   message: {
+    fontFamily,
     fontSize: APP_DIALOG_GEOMETRY.bodySize,
     lineHeight: 20,
     color: C.sub,
     textAlign: 'center',
   },
   hintText: {
+    fontFamily,
     fontSize: 12,
     lineHeight: 18,
     color: C.sub,
@@ -341,6 +340,7 @@ const s = StyleSheet.create({
     borderTopColor: C.divider,
   },
   actionText: {
+    fontFamily,
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '500',

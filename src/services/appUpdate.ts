@@ -1,5 +1,5 @@
 import { AppState, AppStateStatus } from 'react-native';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -39,6 +39,9 @@ const initialState: AppUpdateState = {
   checkedAtMs: null, downloadedUri: null,
 };
 let state = initialState;
+let checkInFlight: Promise<AppUpdateState> | null = null;
+let downloadInFlight: Promise<AppUpdateState> | null = null;
+let checkGeneration = 0;
 const listeners = new Set<(next: AppUpdateState) => void>();
 
 function publish(next: AppUpdateState): AppUpdateState {
@@ -112,31 +115,60 @@ function normalizeManifest(value: unknown): AppUpdateManifest {
   };
 }
 
-export async function checkForAppUpdate(options: { manual?: boolean } = {}): Promise<AppUpdateState> {
-  if (state.status === 'checking' || state.status === 'downloading') return state;
+export function checkForAppUpdate(options: { manual?: boolean } = {}): Promise<AppUpdateState> {
+  if (downloadInFlight || state.status === 'downloading' || state.status === 'ready_to_install') {
+    return Promise.resolve(state);
+  }
+  if (checkInFlight) return checkInFlight;
+  const generation = checkGeneration;
+  const operation = Promise.resolve().then(() => performUpdateCheck(options, generation));
+  checkInFlight = operation;
+  const release = () => { if (checkInFlight === operation) checkInFlight = null; };
+  void operation.then(release, release);
+  return operation;
+}
+
+async function performUpdateCheck(options: { manual?: boolean }, generation: number): Promise<AppUpdateState> {
+  const ownsCheck = () => generation === checkGeneration && !downloadInFlight;
+  if (!ownsCheck()) return state;
   const manual = options.manual === true;
   if (!manual) {
     const last = Number(await AsyncStorage.getItem(AUTO_CHECK_KEY).catch(() => '0'));
     if (Number.isFinite(last) && Date.now() - last < AUTO_CHECK_INTERVAL_MS) return state;
     await AsyncStorage.setItem(AUTO_CHECK_KEY, String(Date.now())).catch(() => undefined);
   }
+  if (!ownsCheck()) return state;
   const previous = state;
   publish({ ...state, status: 'checking', message: null, progress: null });
   try {
     const response = await fetch(manifestUrl(), { headers: { Accept: 'application/json' } }, 15_000);
     if (!response.ok) throw new Error('暂时无法获取版本信息，请稍后重试。');
     const manifest = normalizeManifest(await readJsonWithTimeout(response, 10_000));
+    if (!ownsCheck()) return state;
     if (manifest.version_code <= currentVersionCode()) {
       return publish({ ...state, status: 'up_to_date', manifest, checkedAtMs: Date.now(), message: '当前已是最新版本。' });
     }
     return publish({ ...state, status: 'available', manifest, checkedAtMs: Date.now(), message: `发现新版本 ${manifest.version_name}。` });
   } catch (error) {
+    if (!ownsCheck()) return state;
     if (!manual) return publish({ ...previous, status: previous.status === 'checking' ? 'idle' : previous.status });
     return publish({ ...state, status: 'failed', checkedAtMs: Date.now(), message: error instanceof Error ? error.message : '版本检查失败，请稍后重试。' });
   }
 }
 
-export async function downloadAndInstallAppUpdate(): Promise<AppUpdateState> {
+export function downloadAndInstallAppUpdate(): Promise<AppUpdateState> {
+  if (downloadInFlight) return downloadInFlight;
+  // Claim ownership before any storage await or synchronous subscriber can
+  // start another download. Older checks may finish, but cannot write state.
+  checkGeneration += 1;
+  const operation = Promise.resolve().then(performUpdateDownload);
+  downloadInFlight = operation;
+  const release = () => { if (downloadInFlight === operation) downloadInFlight = null; };
+  void operation.then(release, release);
+  return operation;
+}
+
+async function performUpdateDownload(): Promise<AppUpdateState> {
   const manifest = state.manifest;
   if (!manifest || manifest.version_code <= currentVersionCode()) {
     throw new Error('没有可安装的新版本。');
@@ -149,13 +181,15 @@ export async function downloadAndInstallAppUpdate(): Promise<AppUpdateState> {
     }
     return state;
   }
-  publish({ ...state, status: 'downloading', progress: null, message: '正在下载更新。' });
-  const cacheDir = FileSystem.cacheDirectory;
-  if (!cacheDir) throw new Error('本机缓存目录不可用。');
-  const updateDir = `${cacheDir}updates/`;
-  await FileSystem.makeDirectoryAsync(updateDir, { intermediates: true });
-  const targetUri = `${updateDir}laoji-${manifest.version_name}-${manifest.version_code}.apk`;
+  publish({ ...state, status: 'downloading', progress: 0, downloadedUri: null, message: null });
+  let targetUri: string | null = null;
+  let receiving = true;
   try {
+    const cacheDir = FileSystem.cacheDirectory;
+    if (!cacheDir) throw new Error('本机缓存目录不可用。');
+    const updateDir = `${cacheDir}updates/`;
+    await FileSystem.makeDirectoryAsync(updateDir, { intermediates: true });
+    targetUri = `${updateDir}laoji-${manifest.version_name}-${manifest.version_code}.apk`;
     const existing = await FileSystem.readDirectoryAsync(updateDir).catch(() => []);
     await Promise.all(existing
       .filter(name => name.endsWith('.apk') && `${updateDir}${name}` !== targetUri)
@@ -165,25 +199,31 @@ export async function downloadAndInstallAppUpdate(): Promise<AppUpdateState> {
       manifest.apk_url,
       targetUri,
       {},
-      ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-        const total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : manifest.size_bytes;
-        const progress = Math.max(0, Math.min(1, totalBytesWritten / total));
-        publish({ ...state, status: 'downloading', progress, message: '正在下载更新。' });
+      ({ totalBytesWritten }) => {
+        if (!receiving || !Number.isFinite(totalBytesWritten) || totalBytesWritten < 0) return;
+        // The release manifest is also the final size contract. Native
+        // HTTP totals can be unknown/change; they must not reset known progress.
+        const progress = Math.max(state.progress ?? 0, Math.min(1, totalBytesWritten / manifest.size_bytes));
+        if (Math.round(progress * 100) === Math.round((state.progress ?? 0) * 100)) return;
+        publish({ ...state, status: 'downloading', progress, message: null });
       },
     );
     const result = await download.downloadAsync();
+    receiving = false;
     if (!result) throw new Error('下载更新失败，请稍后重试。');
     if (result.status < 200 || result.status >= 300) {
       throw new Error('下载更新失败，请稍后重试。');
     }
+    publish({ ...state, progress: 1 });
     const checksum = await sha256NativeFile(result.uri);
     if (checksum.checksumSha256 !== manifest.sha256 || checksum.byteSize !== manifest.size_bytes) {
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
       throw new Error('下载文件校验失败，已取消安装。');
     }
-    publish({ ...state, status: 'ready_to_install', progress: 1, downloadedUri: result.uri, message: '更新已下载，等待系统确认安装。' });
+    publish({ ...state, status: 'ready_to_install', progress: 1, downloadedUri: result.uri, message: null });
   } catch (error) {
-    await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => undefined);
+    receiving = false;
+    if (targetUri) await FileSystem.deleteAsync(targetUri, { idempotent: true }).catch(() => undefined);
     publish({ ...state, status: 'failed', progress: null, message: error instanceof Error ? error.message : '下载更新失败，请稍后重试。' });
     throw error;
   }

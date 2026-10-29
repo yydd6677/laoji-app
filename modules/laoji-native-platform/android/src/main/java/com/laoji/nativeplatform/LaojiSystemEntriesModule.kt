@@ -21,12 +21,5 @@ class LaojiSystemEntriesModule : Module() {
       }
       SystemEntryProjectionStore.clear(context)
     }
-
-    AsyncFunction("getUpcomingEventsProjectionState") {
-      val context = requireNotNull(appContext.reactContext?.applicationContext) {
-        "Android application context is unavailable"
-      }
-      SystemEntryProjectionStore.read(context).toStateMap()
-    }
   }
 }

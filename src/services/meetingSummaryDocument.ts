@@ -8,6 +8,7 @@ import type {
   MeetingSummarySection,
   MeetingSummarySectionKind,
 } from '../domain/meeting';
+import { isNormalizedMeetingSummaryActionLabel } from '../domain/meeting/summarySectionClassification';
 import { toSimplifiedChinese } from '../utils/simplifiedChinese';
 
 type UnknownRecord = Record<string, unknown>;
@@ -25,13 +26,7 @@ const SECTION_KINDS = new Set<MeetingSummarySectionKind>([
   'comparison',
   'risk_card',
   'stat',
-  'bullets',
-  'numbered',
-  'decisions',
-  'topics',
-  'risks',
   'action_items',
-  'legacy',
 ]);
 const RICH_BLOCK_KINDS = new Set<MeetingSummaryRichBlock['kind']>([
   'paragraph', 'bullet_group', 'quote', 'timeline', 'flow', 'comparison', 'risk_card', 'stat',
@@ -39,22 +34,6 @@ const RICH_BLOCK_KINDS = new Set<MeetingSummaryRichBlock['kind']>([
 const RICH_ICON_KEYS = new Set<MeetingSummaryRichBlock['iconKey']>([
   'overview', 'topic', 'quote', 'time', 'flow', 'compare', 'risk', 'stat', 'action',
 ]);
-
-export interface LegacyMeetingSummaryLike {
-  id?: string;
-  meeting_id?: string;
-  overview?: string;
-  full_text?: string;
-  key_decisions?: readonly string[];
-  action_items?: readonly {
-    id?: string;
-    content: string;
-    assignee?: string | null;
-    due_date?: string | null;
-    status?: string;
-  }[];
-  generated_at?: string | null;
-}
 
 function asRecord(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -175,8 +154,8 @@ function summaryKind(value: unknown): MeetingSummarySectionKind {
   if (SECTION_KINDS.has(normalized as MeetingSummarySectionKind)) {
     return normalized as MeetingSummarySectionKind;
   }
-  if (normalized === 'bullet' || normalized === 'list') return 'bullets';
-  if (normalized === 'decision') return 'decisions';
+  if (normalized === 'bullet' || normalized === 'list') return 'bullet_group';
+  if (normalized === 'decision') return 'bullet_group';
   if (normalized === 'overview' || normalized === 'summary') return 'paragraph';
   return 'paragraph';
 }
@@ -220,6 +199,7 @@ function citations(
         ? text(firstValue(record, 'sourceType', 'source_type'), 30) as MeetingSummaryCitation['sourceType']
         : undefined,
       sourceLabel: text(firstValue(record, 'sourceLabel', 'source_label'), 120) || null,
+      excerpt: text(firstValue(record, 'excerpt', 'quote', 'source_excerpt'), 600) || null,
     });
   });
   return result;
@@ -447,10 +427,8 @@ function normalizedSectionLabel(value: string): string {
 export function isMeetingSummaryActionSection(section: Pick<MeetingSummarySection, 'kind' | 'stableKey' | 'title'>): boolean {
   if (section.kind === 'action_items') return true;
   const labels = [section.stableKey, section.title ?? ''].map(normalizedSectionLabel);
-  return labels.some(label => (
-    /^(?:待办事项|待办|行动项|行动事项|任务|任务清单|后续事项|后续行动|下一步|跟进事项|todo(?:s)?|actionitems?|tasks?|followups?)$/.test(label)
-      || /^(?:待办|行动|任务|后续|下一步|跟进)/.test(label)
-  ));
+  // “后续问题” is evidence for the next conversation, not an action list.
+  return labels.some(isNormalizedMeetingSummaryActionLabel);
 }
 
 /** Strictly normalizes the additive v2 API or a previously cached camelCase document. */
@@ -470,6 +448,9 @@ export function normalizeMeetingSummaryDocument(
   if (sections.length === 0 && actions.length === 0) return null;
   const payloadMeetingId = text(firstValue(root, 'meetingId', 'meeting_id'), 240);
   if (payloadMeetingId && payloadMeetingId !== meetingId) return null;
+  const templateId = text(firstValue(root, 'templateId', 'template_id'), 120);
+  const templateRevision = nonNegativeInteger(firstValue(root, 'templateRevision', 'template_revision'));
+  if (templateId !== 'general' || templateRevision !== 3) return null;
   const createdAtMs = timestamp(
     firstValue(root, 'createdAtMs', 'created_at', 'generated_at'),
     0,
@@ -482,9 +463,10 @@ export function normalizeMeetingSummaryDocument(
     schemaVersion: 2,
     remoteVersionId: text(firstValue(root, 'remoteVersionId', 'version_id', 'id'), 240) || null,
     meetingId,
-    templateId: text(firstValue(root, 'templateId', 'template_id'), 120) || 'general',
-    templateRevision: nonNegativeInteger(firstValue(root, 'templateRevision', 'template_revision'), 1),
+    templateId: 'general',
+    templateRevision: 3,
     transcriptRevisionId: text(firstValue(root, 'transcriptRevisionId', 'transcript_revision_id'), 240) || null,
+    remoteTranscriptRevisionId: text(firstValue(root, 'remoteTranscriptRevisionId', 'remote_transcript_revision_id'), 240) || null,
     manualNoteRevision: nonNegativeInteger(firstValue(root, 'manualNoteRevision', 'manual_note_revision')),
     scheduleSnapshotHash: text(firstValue(root, 'scheduleSnapshotHash', 'schedule_snapshot_hash'), 200) || null,
     status: text(root.status, 30).toLowerCase() === 'stale' ? 'stale' : 'ready',
@@ -495,57 +477,6 @@ export function normalizeMeetingSummaryDocument(
     sections,
     actionItemCandidates: actions,
   };
-}
-
-/** Compatibility adapter used only until every server and cache emits schema v2. */
-export function legacyMeetingSummaryToDocument(
-  meetingId: string,
-  summary: LegacyMeetingSummaryLike,
-): MeetingSummaryDocument | null {
-  const overview = contentText(summary.overview || summary.full_text);
-  const decisions = (summary.key_decisions ?? []).map(item => contentText(item)).filter(Boolean);
-  const mergedOverview = decisions.length > 0 && overview
-    ? `${overview.replace(/[。；;]+$/, '')}。会议明确：${decisions.join('；')}。`
-    : overview;
-  const actions = parseActions(summary.action_items ?? []);
-  const sections: MeetingSummarySection[] = [];
-  if (mergedOverview) {
-    sections.push({
-      id: 'legacy-section:overview',
-      stableKey: 'overview',
-      kind: 'paragraph',
-      title: '会议概述',
-      content: mergedOverview,
-      citations: [],
-    });
-  }
-  if (sections.length === 0 && actions.length === 0) return null;
-  const createdAtMs = timestamp(summary.generated_at, Date.now());
-  return {
-    schemaVersion: 2,
-    remoteVersionId: text(summary.id, 240) || null,
-    meetingId: text(summary.meeting_id, 240) || meetingId,
-    templateId: 'legacy',
-    templateRevision: 1,
-    transcriptRevisionId: null,
-    manualNoteRevision: 0,
-    scheduleSnapshotHash: null,
-    status: 'ready',
-    generatedBy: 'legacy-adapter',
-    supersedesVersionId: null,
-    createdAtMs,
-    completedAtMs: createdAtMs,
-    sections,
-    actionItemCandidates: actions,
-  };
-}
-
-export function meetingSummaryDocumentForLegacy(
-  meetingId: string,
-  summary: LegacyMeetingSummaryLike,
-): MeetingSummaryDocument | null {
-  return normalizeMeetingSummaryDocument(meetingId, summary)
-    ?? legacyMeetingSummaryToDocument(meetingId, summary);
 }
 
 function actionText(action: MeetingSummaryActionCandidate): string {
@@ -577,7 +508,7 @@ export function meetingSummaryDocumentToText(document: MeetingSummaryDocument): 
       keptFallbackActionSection = true;
     }
     const heading = section.title ? `## ${toSimplifiedChinese(section.title)}\n` : '';
-    const body = ['bullet_group', 'timeline', 'flow', 'comparison', 'risk_card', 'stat', 'bullets', 'decisions', 'topics', 'risks', 'action_items'].includes(section.kind)
+    const body = ['bullet_group', 'timeline', 'flow', 'comparison', 'risk_card', 'stat', 'action_items'].includes(section.kind)
       ? contentText(section.content).split(/\r?\n/).map(item => item.trim()).filter(Boolean).map(item => `- ${item}`).join('\n')
       : contentText(section.content);
     return `${heading}${body}`.trim();

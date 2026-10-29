@@ -2,20 +2,17 @@ import { TranscriptLine } from '../types';
 import {
   DEFAULT_MEETING_TEMPLATE,
   meetingTemplateById,
-  meetingTemplateKey,
   type MeetingSummaryAttachmentAuthorization,
   type MeetingSummaryAttachmentItem,
   type MeetingSummaryCarryForwardAuthorization,
   type MeetingSummaryCarryForwardItem,
   type MeetingTemplate,
 } from '../domain/meeting';
-import { getAppStorageItem, removeAppStorageItem, setAppStorageItem } from './appStorage';
+import { openMeetingDatabase, withMeetingDatabaseTransaction } from '../data/db/openDatabase';
 
-const PENDING_SUMMARY_TASKS_KEY = '@laoji:pendingMeetingSummaryTasks:v1';
 const GUEST_TASK_RETENTION_MS = 55 * 60 * 1000;
-const ACCOUNT_TASK_RETENTION_MS = 23 * 60 * 60 * 1000;
 
-export type MeetingSummaryTaskMode = 'guest' | 'authenticated';
+export type MeetingSummaryTaskMode = 'guest';
 
 export interface PendingMeetingSummaryTask {
   meetingId: string;
@@ -32,7 +29,40 @@ export interface PendingMeetingSummaryTask {
 
 type PendingSummaryTaskMap = Record<string, PendingMeetingSummaryTask>;
 
-let pendingStorageMutation: Promise<void> = Promise.resolve();
+type PendingSummaryTaskRow = {
+  meeting_id: string;
+  task_id: string;
+  mode: string;
+  template_id: string;
+  template_revision: number;
+  input_fingerprint: string;
+  carry_forward_json: string | null;
+  attachment_authorization_json: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+async function ensurePendingTaskTable(): Promise<void> {
+  const database = await openMeetingDatabase();
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS device_summary_task_intents (
+      storage_scope TEXT NOT NULL,
+      meeting_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK(mode = 'guest'),
+      template_id TEXT NOT NULL CHECK(template_id = 'general'),
+      template_revision INTEGER NOT NULL CHECK(template_revision = 3),
+      input_fingerprint TEXT NOT NULL,
+      carry_forward_json TEXT,
+      attachment_authorization_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(storage_scope, meeting_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_summary_task_intents_ready
+      ON device_summary_task_intents(storage_scope, updated_at, meeting_id);
+  `);
+}
 
 function updateHash(hash: number, value: string): number {
   let next = hash >>> 0;
@@ -62,7 +92,11 @@ export function meetingSummaryInputFingerprint(
     secondary = updateHash(secondary, `${text.length}:${text}\u001e`);
   };
 
-  feed(meetingTemplateKey(template));
+  // The retired presentation template must not fork the generation identity.
+  // `template` remains in the signature for compatibility with released task
+  // records; every accepted legacy value projects to the same current result.
+  void template;
+  feed('adaptive-summary-current');
   feed(title?.trim());
   feed(meetingDate?.trim());
   feed(transcriptLines.length);
@@ -119,8 +153,55 @@ export function meetingSummaryInputFingerprint(
     });
   }
 
-  const version = 'v7';
+  const version = 'v8';
   return `${version}:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
+}
+
+/**
+ * Local recovery identity for the Facts V3 source contract.
+ *
+ * Templates are deterministic local projections of one immutable fact
+ * document, so changing a template must never create another remote task.
+ * Keep this identity aligned with summarySourceRevision: transcript evidence,
+ * the current manual note, and explicitly authorized attachment revisions.
+ */
+export function meetingSummaryFactsInputFingerprint(
+  transcriptLines: TranscriptLine[],
+  attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null = null,
+  manualNote: { content: string; revision: number } | null = null,
+): string {
+  let primary = 0x811c9dc5;
+  let secondary = 0x9e3779b9;
+  let characterCount = 0;
+  const feed = (value: unknown) => {
+    const text = value == null ? '' : String(value);
+    characterCount += text.length;
+    primary = updateHash(primary, `${text}\u001f`);
+    secondary = updateHash(secondary, `${text.length}:${text}\u001e`);
+  };
+
+  feed('facts-v3-source-v1');
+  feed(transcriptLines.length);
+  transcriptLines.forEach(line => {
+    feed(line.id);
+    feed(line.text);
+    feed(line.start_time);
+    feed(line.end_time);
+    feed(line.speaker_label);
+  });
+  if (manualNote) {
+    feed(manualNote.revision);
+    feed(manualNote.content);
+  }
+  for (const item of attachmentAuthorization?.items ?? []) {
+    feed(item.attachmentId);
+    feed(item.updatedAtMs);
+    feed(item.positionMs);
+    feed(item.kind);
+    feed(item.kind === 'text' ? item.contentSha256 : item.checksumSha256);
+  }
+
+  return `facts-v3-source-v1:${transcriptLines.length}:${characterCount}:${primary.toString(16).padStart(8, '0')}${secondary.toString(16).padStart(8, '0')}`;
 }
 
 export async function getPendingMeetingSummaryTask(
@@ -128,12 +209,10 @@ export async function getPendingMeetingSummaryTask(
   meetingId: string,
   nowMs = Date.now(),
 ): Promise<PendingMeetingSummaryTask | null> {
-  await pendingStorageMutation.catch(() => {});
-  const task = (await readPendingTasks(storageScope))[meetingId] ?? null;
+  const task = (await readPendingTasks(storageScope))[meetingId.trim()] ?? null;
   if (!task) return null;
   const createdAtMs = Date.parse(task.createdAt);
-  const retentionMs = task.mode === 'guest' ? GUEST_TASK_RETENTION_MS : ACCOUNT_TASK_RETENTION_MS;
-  if (!Number.isFinite(createdAtMs) || nowMs - createdAtMs >= retentionMs) {
+  if (!Number.isFinite(createdAtMs) || nowMs - createdAtMs >= GUEST_TASK_RETENTION_MS) {
     await clearPendingMeetingSummaryTask(storageScope, meetingId);
     return null;
   }
@@ -143,7 +222,6 @@ export async function getPendingMeetingSummaryTask(
 export async function listPendingMeetingSummaryTasks(
   storageScope: string,
 ): Promise<PendingMeetingSummaryTask[]> {
-  await pendingStorageMutation.catch(() => {});
   return Object.values(await readPendingTasks(storageScope)).sort((left, right) => (
     left.createdAt.localeCompare(right.createdAt)
     || left.meetingId.localeCompare(right.meetingId)
@@ -155,11 +233,47 @@ export async function savePendingMeetingSummaryTask(
   task: Omit<PendingMeetingSummaryTask, 'createdAt' | 'updatedAt'> & Partial<Pick<PendingMeetingSummaryTask, 'createdAt'>>,
 ): Promise<PendingMeetingSummaryTask> {
   const now = new Date().toISOString();
-  let saved: PendingMeetingSummaryTask | null = null;
-  await mutatePendingTasks(storageScope, records => {
-    const existing = records[task.meetingId];
-    saved = {
-      meetingId: task.meetingId,
+  const scope = normalizeStorageScope(storageScope);
+  const meeting = normalizeMeetingId(task.meetingId);
+  await ensurePendingTaskTable();
+  const saved = await withMeetingDatabaseTransaction(async database => {
+    const existing = await database.getFirstAsync<{ task_id: string; created_at: string }>(
+      `SELECT task_id, created_at FROM device_summary_task_intents
+        WHERE storage_scope = ? AND meeting_id = ?`,
+      scope,
+      meeting,
+    );
+    const createdAt = existing?.task_id === task.taskId ? existing.created_at : task.createdAt ?? now;
+    await database.runAsync(
+      `INSERT INTO device_summary_task_intents (
+         storage_scope, meeting_id, task_id, mode, template_id, template_revision,
+         input_fingerprint, carry_forward_json, attachment_authorization_json,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(storage_scope, meeting_id) DO UPDATE SET
+         task_id = excluded.task_id,
+         mode = excluded.mode,
+         template_id = excluded.template_id,
+         template_revision = excluded.template_revision,
+         input_fingerprint = excluded.input_fingerprint,
+         carry_forward_json = excluded.carry_forward_json,
+         attachment_authorization_json = excluded.attachment_authorization_json,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`,
+      scope,
+      meeting,
+      task.taskId,
+      task.mode,
+      task.templateId,
+      task.templateRevision,
+      task.inputFingerprint,
+      task.carryForward ? JSON.stringify(task.carryForward) : null,
+      task.attachmentAuthorization ? JSON.stringify(task.attachmentAuthorization) : null,
+      createdAt,
+      now,
+    );
+    return {
+      meetingId: meeting,
       taskId: task.taskId,
       mode: task.mode,
       templateId: task.templateId,
@@ -167,75 +281,89 @@ export async function savePendingMeetingSummaryTask(
       inputFingerprint: task.inputFingerprint,
       carryForward: task.carryForward,
       attachmentAuthorization: task.attachmentAuthorization,
-      createdAt: existing?.taskId === task.taskId
-        ? existing.createdAt
-        : task.createdAt ?? now,
+      createdAt,
       updatedAt: now,
-    };
-    records[task.meetingId] = saved;
+    } satisfies PendingMeetingSummaryTask;
   });
-  if (!saved) throw new Error('pending meeting summary task was not saved');
   return saved;
 }
 
 export async function clearPendingMeetingSummaryTask(storageScope: string, meetingId: string): Promise<void> {
-  await mutatePendingTasks(storageScope, records => {
-    delete records[meetingId];
-  });
-}
-
-function mutatePendingTasks(storageScope: string, mutator: (records: PendingSummaryTaskMap) => void): Promise<void> {
-  const storageKey = pendingTasksKey(storageScope);
-  const operation = pendingStorageMutation
-    .catch(() => {})
-    .then(async () => {
-      const records = await readPendingTasks(storageScope);
-      mutator(records);
-      if (Object.keys(records).length === 0) {
-        await removeAppStorageItem(storageKey);
-      } else {
-        await setAppStorageItem(storageKey, JSON.stringify(records));
-      }
-    });
-  pendingStorageMutation = operation;
-  return operation;
+  const scope = normalizeStorageScope(storageScope);
+  const meeting = normalizeMeetingId(meetingId);
+  await ensurePendingTaskTable();
+  await withMeetingDatabaseTransaction(database => database.runAsync(
+    `DELETE FROM device_summary_task_intents WHERE storage_scope = ? AND meeting_id = ?`,
+    scope,
+    meeting,
+  ));
 }
 
 async function readPendingTasks(storageScope: string): Promise<PendingSummaryTaskMap> {
-  const raw = await getAppStorageItem(pendingTasksKey(storageScope));
-  if (!raw) return {};
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('pending meeting summary task registry is invalid');
-  }
+  const scope = normalizeStorageScope(storageScope);
+  await ensurePendingTaskTable();
+  const database = await openMeetingDatabase();
+  const rows = await database.getAllAsync<PendingSummaryTaskRow>(
+    `SELECT meeting_id, task_id, mode, template_id, template_revision,
+            input_fingerprint, carry_forward_json, attachment_authorization_json,
+            created_at, updated_at
+       FROM device_summary_task_intents
+      WHERE storage_scope = ? ORDER BY created_at, meeting_id`,
+    scope,
+  );
+  return rows.reduce<PendingSummaryTaskMap>((result, row) => {
+    const parsed = pendingTaskFromRow(row);
+    if (parsed) result[parsed.meetingId] = parsed;
+    return result;
+  }, {});
+}
 
-  const records: PendingSummaryTaskMap = {};
-  Object.entries(parsed).forEach(([meetingId, value]) => {
-    if (!value || typeof value !== 'object') return;
-    const item = value as Partial<PendingMeetingSummaryTask>;
-    if (typeof item.taskId !== 'string' || !item.taskId) return;
-    if (item.mode !== 'guest' && item.mode !== 'authenticated') return;
-    if (typeof item.inputFingerprint !== 'string' || !item.inputFingerprint) return;
-    const template = meetingTemplateById(item.templateId, item.templateRevision)
-      ?? DEFAULT_MEETING_TEMPLATE;
-    const carryForward = parseCarryForwardAuthorization(item.carryForward);
-    if (item.carryForward != null && !carryForward) return;
-    const attachmentAuthorization = parseAttachmentAuthorization(item.attachmentAuthorization);
-    if (item.attachmentAuthorization != null && !attachmentAuthorization) return;
-    records[meetingId] = {
-      meetingId,
-      taskId: item.taskId,
-      mode: item.mode,
-      templateId: template.id,
-      templateRevision: template.revision,
-      inputFingerprint: item.inputFingerprint,
-      carryForward,
-      attachmentAuthorization,
-      createdAt: typeof item.createdAt === 'string' ? item.createdAt : new Date(0).toISOString(),
-      updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : new Date(0).toISOString(),
-    };
-  });
-  return records;
+function normalizeStorageScope(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 120 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error('meeting summary storage scope is invalid');
+  }
+  return normalized;
+}
+
+function normalizeMeetingId(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 512 || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error('meeting summary meeting ID is invalid');
+  }
+  return normalized;
+}
+
+function pendingTaskFromRow(row: PendingSummaryTaskRow): PendingMeetingSummaryTask | null {
+  if (!row.task_id || row.mode !== 'guest' || !row.input_fingerprint) return null;
+  const template = meetingTemplateById(row.template_id, Number(row.template_revision));
+  if (!template) return null;
+  let carryForward: MeetingSummaryCarryForwardAuthorization | null = null;
+  let attachmentAuthorization: MeetingSummaryAttachmentAuthorization | null = null;
+  try {
+    if (row.carry_forward_json) {
+      carryForward = parseCarryForwardAuthorization(JSON.parse(row.carry_forward_json));
+      if (!carryForward) return null;
+    }
+    if (row.attachment_authorization_json) {
+      attachmentAuthorization = parseAttachmentAuthorization(JSON.parse(row.attachment_authorization_json));
+      if (!attachmentAuthorization) return null;
+    }
+  } catch {
+    return null;
+  }
+  return {
+    meetingId: row.meeting_id,
+    taskId: row.task_id,
+    mode: row.mode,
+    templateId: template.id,
+    templateRevision: template.revision,
+    inputFingerprint: row.input_fingerprint,
+    carryForward,
+    attachmentAuthorization,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 function pendingText(value: unknown, maximum: number, allowEmpty = false): string | null {
@@ -364,14 +492,4 @@ function parseAttachmentAuthorization(value: unknown): MeetingSummaryAttachmentA
     ) > 40 * 1024 * 1024
   ) return null;
   return { requestId, items: resolved };
-}
-
-function pendingTasksKey(storageScope: string): string {
-  const normalized = storageScope.trim();
-  if (!normalized) throw new Error('meeting summary storage scope is required');
-  return `${PENDING_SUMMARY_TASKS_KEY}:${normalized}`;
-}
-
-export function resetMeetingSummaryTaskStorageForTests(): void {
-  pendingStorageMutation = Promise.resolve();
 }

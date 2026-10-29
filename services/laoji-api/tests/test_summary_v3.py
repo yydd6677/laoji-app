@@ -2,22 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
+import re
 
 import pytest
 
-from app.config import settings
 from app.schemas.meeting_facts_v3 import (
     MeetingFactsModelResponseV3,
     OverviewV3,
     model_response_json_schema,
 )
 from app.services import (
-    device_identity,
-    summary_task_store,
+    llm_provider,
     summary_v3_evidence,
     summary_v3_generator,
-    summary_v3_store,
 )
 from app.services.summary_v3_evidence import (
     SummaryEvidenceIncomplete,
@@ -26,8 +23,38 @@ from app.services.summary_v3_evidence import (
 )
 
 
+@pytest.fixture(autouse=True)
+def reset_shared_embedding_cache():
+    llm_provider._reset_embedding_cache_for_tests()
+    yield
+    llm_provider._reset_embedding_cache_for_tests()
+
+
 def digest(value: str) -> str:
     return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
+
+
+def test_model_source_id_grammar_preserves_strict_language_without_unsupported_groups():
+    schema = summary_v3_generator._generation_response_schema()
+    patterns = []
+    def visit(value):
+        if isinstance(value, dict):
+            if "pattern" in value:
+                patterns.append(value["pattern"])
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+    visit(schema)
+    assert patterns
+    for pattern in patterns:
+        assert "(?" not in pattern
+        for prefix in ("transcript", "manual_note", "attachment"):
+            assert re.fullmatch(pattern, f"{prefix}:a-1.b_2:c")
+            assert re.fullmatch(pattern, f"{prefix}:" + "a" * 180)
+        for bad in ("other:a", "transcript:", "transcript:a/b", "transcript:" + "a" * 181):
+            assert re.fullmatch(pattern, bad) is None
 
 
 def package():
@@ -682,6 +709,80 @@ def test_explicit_cancellation_is_not_marked_as_an_unresolved_conflict():
     assert all(fact.conflict_group_id is None for fact in document.facts)
 
 
+def test_later_confirmation_resolves_conflict_with_shared_correction_source():
+    active_package = build_evidence_package(
+        [
+            {"id": "old", "speaker": "主持人", "text": "原先由王工在 9 月 2 日前提交核对表。"},
+            {
+                "id": "correction",
+                "speaker": "主持人",
+                "text": "前面的安排作废，改由赵工负责，截止日期改为 9 月 3 日。",
+            },
+            {"id": "confirmation", "speaker": "赵工", "text": "确认，最终由我在 9 月 3 日前提交核对表。"},
+        ],
+        None,
+        None,
+    )
+    old, correction, confirmation = active_package.sources
+
+    def reference(source):
+        return {
+            "source_id": source.source_id,
+            "source_type": source.source_type,
+            "quote": source.text,
+            "content_hash": source.content_hash,
+        }
+
+    response = MeetingFactsModelResponseV3.model_validate(
+        {
+            "schema_version": 3,
+            "overview": {"text": "改由赵工提交核对表。", "fact_ids": ["new", "old"]},
+            "facts": [
+                {
+                    "fact_id": "new",
+                    "fact_type": "action",
+                    "certainty": "uncertain",
+                    "content": "由赵工在 9 月 3 日前提交核对表。",
+                    "sources": [reference(correction), reference(confirmation)],
+                },
+                {
+                    "fact_id": "old",
+                    "fact_type": "timeline",
+                    "certainty": "uncertain",
+                    "content": "原先由王工在 9 月 2 日前提交核对表。",
+                    "sources": [reference(old), reference(correction)],
+                },
+            ],
+            "relations": [
+                {
+                    "relation_type": "contradicts",
+                    "from_fact_id": "new",
+                    "to_fact_id": "old",
+                }
+            ],
+            "action_candidates": [
+                {
+                    "action_id": "a1",
+                    "fact_id": "new",
+                    "content": "由赵工在 9 月 3 日前提交核对表。",
+                    "owner": "赵工",
+                    "due_text": "9 月 3 日前",
+                    "schedule_fit": "high",
+                }
+            ],
+        }
+    )
+
+    document = summary_v3_generator.verify_model_response(response, active_package)
+
+    assert document.relations == []
+    assert {fact.fact_id: fact.certainty for fact in document.facts} == {
+        "new": "confirmed",
+        "old": "negated",
+    }
+    assert document.action_candidates[0].schedule_fit == "high"
+
+
 def test_cross_source_conflict_remains_unresolved():
     active_package = build_evidence_package(
         [{"id": "spoken", "text": "确认使用甲方案。"}],
@@ -749,6 +850,24 @@ def test_model_is_called_once_and_only_repairs_structural_failure(monkeypatch):
     assert operations == ["summary.facts.v3", "summary.facts.v3.repair"]
 
 
+def test_missing_root_facts_array_delimiter_is_repaired_without_second_call(monkeypatch):
+    active_package = package()
+    value = json.dumps(valid_response(active_package), ensure_ascii=False, separators=(",", ":"))
+    malformed = value.replace('],"relations"', ',"relations"', 1)
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return malformed
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert response.schema_version == 3
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+
+
 def test_failed_repair_exposes_only_sanitized_field_errors(monkeypatch):
     active_package = package()
     monkeypatch.setattr(summary_v3_generator, "call_llm", lambda *_args, **_kwargs: "not-json")
@@ -774,6 +893,29 @@ def test_valid_model_response_uses_exactly_one_call(monkeypatch):
     assert response.schema_version == 3
     assert calls == 1
     assert operations == ["summary.facts.v3"]
+
+
+def test_provider_response_omits_overview_and_server_projects_it(monkeypatch):
+    active_package = package()
+    value = valid_response(active_package)
+    value.pop("overview")
+    for fact in value["facts"]:
+        for source in fact["sources"]:
+            source.pop("quote")
+            source.pop("content_hash", None)
+
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(value, ensure_ascii=False),
+    )
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert response.overview.fact_ids == ["f1", "f2"]
+    assert response.overview.text.endswith("。")
+    assert len(response.overview.text) <= 160
+    assert response.facts[0].sources[0].quote == active_package.sources[0].text
 
 
 def test_self_relation_is_dropped_without_consuming_repair(monkeypatch):
@@ -849,9 +991,13 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
         for index in range(18)
     ]
     operations: list[str] = []
+    embedding_options: list[tuple[int | None, int | None]] = []
+    embedding_batch_sizes: list[int] = []
 
     def fake_embed_texts(texts, *, operation, **_kwargs):
         operations.append(operation)
+        embedding_options.append((_kwargs.get("num_ctx"), _kwargs.get("num_gpu")))
+        embedding_batch_sizes.append(len(texts))
         return [(1.0, 0.0) for _ in texts]
 
     monkeypatch.setattr(summary_v3_evidence, "embed_texts", fake_embed_texts)
@@ -864,7 +1010,32 @@ def test_long_evidence_uses_embeddings_without_intermediate_summary(monkeypatch)
     assert active_package.coverage["included_segments"] < active_package.coverage["total_segments"]
     assert active_package.coverage["topic_groups"] == active_package.coverage["covered_topic_groups"]
     assert active_package.coverage["source_types"] == ["attachment", "manual_note", "transcript"]
+    assert operations
     assert set(operations) == {"summary.v3.evidence.embedding"}
+    assert set(embedding_options) == {(2048, 0)}
+    assert max(embedding_batch_sizes) <= 8
+
+
+def test_long_evidence_maps_embedding_provider_failure_to_stable_error(monkeypatch):
+    transcript = [
+        {
+            "id": f"timeout-{index}",
+            "text": "这是一段需要通过 embedding 选择代表片段的长会议内容。" * 60,
+            "start_ms": index * 10_000,
+            "end_ms": index * 10_000 + 8_000,
+        }
+        for index in range(18)
+    ]
+
+    def fail_embedding(*_args, **_kwargs):
+        from app.services.llm_provider import LlmProviderError
+
+        raise LlmProviderError("ollama_embedding_timeout")
+
+    monkeypatch.setattr(summary_v3_evidence, "embed_texts", fail_embedding)
+    with pytest.raises(SummaryEvidenceIncomplete) as captured:
+        build_evidence_package(transcript, None, None)
+    assert str(captured.value) == "embedding_unavailable"
 
 
 def test_long_evidence_fails_closed_when_required_segments_exceed_budget(monkeypatch):
@@ -891,7 +1062,7 @@ def test_long_evidence_budget_counts_serialized_source_metadata(monkeypatch):
             "start_ms": index * 8_000,
             "end_ms": index * 8_000 + 7_000,
         }
-        for index in range(130)
+        for index in range(180)
     ]
     monkeypatch.setattr(
         summary_v3_evidence,
@@ -910,6 +1081,38 @@ def test_long_evidence_budget_counts_serialized_source_metadata(monkeypatch):
     assert active_package.estimated_tokens == active_package.coverage["estimated_input_tokens"]
 
 
+def test_long_evidence_reserves_dense_priority_source_metadata(monkeypatch):
+    transcript = [
+        {
+            "id": f"priority-{index}",
+            "speaker": f"成员{index}",
+            "text": (
+                f"另外，第{index}项同步运行背景与检查范围，"
+                + "相关说明用于保持上下文完整。" * 8
+            ),
+            "start_ms": index * 8_000,
+            "end_ms": index * 8_000 + 7_000,
+        }
+        for index in range(180)
+    ]
+    monkeypatch.setattr(
+        summary_v3_evidence,
+        "embed_texts",
+        lambda texts, **_kwargs: [(1.0, 0.0) for _ in texts],
+    )
+
+    active_package = build_evidence_package(transcript, None, None)
+    encoded = json.dumps(
+        active_package.model_payload(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+    assert len(active_package.model_payload()["priority_source_ids"]) >= 48
+    assert summary_v3_evidence.estimate_tokens(encoded) <= 10_240
+    assert active_package.coverage["included_segments"] < len(transcript)
+
+
 def test_highly_repetitive_long_evidence_is_grouped_for_output_budget(monkeypatch):
     transcript = [
         {
@@ -919,7 +1122,7 @@ def test_highly_repetitive_long_evidence_is_grouped_for_output_budget(monkeypatc
             "start_ms": index * 8_000,
             "end_ms": index * 8_000 + 7_000,
         }
-        for index in range(120)
+        for index in range(160)
     ]
     monkeypatch.setattr(
         summary_v3_evidence,
@@ -932,135 +1135,38 @@ def test_highly_repetitive_long_evidence_is_grouped_for_output_budget(monkeypatc
     assert active_package.coverage["topic_groups"] == 1
 
 
-def test_plaintext_is_not_stored_in_source_payload(tmp_path, monkeypatch):
-    database = tmp_path / "summary.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    monkeypatch.setenv("LAOJI_SUMMARY_V3_PAYLOAD_KEY", "00" * 32)
-    summary_v3_store.reset_store_for_tests()
-    secret = "这段我的笔记不应以明文进入数据库"
-    payload_id = summary_v3_store.save_source_payload(
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        payload={"manual_note": {"content": secret}},
-    )
-    assert summary_v3_store.load_source_payload(
-        payload_id,
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-    )["manual_note"]["content"] == secret
-    assert secret.encode("utf-8") not in database.read_bytes()
-    with sqlite3.connect(database) as connection:
-        row = connection.execute(
-            "SELECT content_bytes, length(ciphertext) FROM summary_v3_source_payloads WHERE id = ?",
-            (payload_id,),
-        ).fetchone()
-    assert row is not None and row[0] > 0 and row[1] > row[0]
+def test_evidence_payload_marks_attention_sources_without_promoting_background() -> None:
+    package = build_evidence_package([
+        {
+            "id": "background",
+            "speaker": "成员甲",
+            "text": "这部分只是状态同步，没有新增决策或负责人。",
+            "start_ms": 0,
+            "end_ms": 1_000,
+        },
+        {
+            "id": "timeline",
+            "speaker": "主持人",
+            "text": "最终确认在 2026 年 9 月 3 日切换运行模式。",
+            "start_ms": 2_000,
+            "end_ms": 3_000,
+        },
+        {
+            "id": "commitment",
+            "speaker": "成员乙",
+            "text": "我今天下班前提交操作清单。",
+            "start_ms": 4_000,
+            "end_ms": 5_000,
+        },
+    ], None, None)
 
-
-def test_document_identity_is_immutable_and_idempotent(tmp_path, monkeypatch):
-    database = tmp_path / "summary.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    summary_v3_store.reset_store_for_tests()
-    active_package = package()
-    document = summary_v3_generator.verify_model_response(
-        MeetingFactsModelResponseV3.model_validate(valid_response(active_package)),
-        active_package,
-    ).model_dump(mode="json")
-    first = summary_v3_store.persist_document(
-        task_id="task-one",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        source_fingerprint=active_package.source_fingerprint,
-        transcript_revision=active_package.transcript_revision,
-        model_revision="ollama:qwen3.5:9b",
-        prompt_revision="facts-v3-r1",
-        document=document,
-        coverage=active_package.coverage,
-    )
-    second = summary_v3_store.persist_document(
-        task_id="task-two",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        source_fingerprint=active_package.source_fingerprint,
-        transcript_revision=active_package.transcript_revision,
-        model_revision="ollama:qwen3.5:9b",
-        prompt_revision="facts-v3-r1",
-        document=document,
-        coverage=active_package.coverage,
-    )
-    assert second["id"] == first["id"]
-    assert second["task_id"] == "task-one"
-    with sqlite3.connect(database) as connection:
-        count = connection.execute("SELECT COUNT(*) FROM summary_v3_documents").fetchone()[0]
-    assert count == 1
-
-
-def test_closing_device_epoch_removes_v3_payloads_documents_and_tasks(tmp_path, monkeypatch):
-    database = tmp_path / "device-summary.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    monkeypatch.setenv("LAOJI_SUMMARY_V3_PAYLOAD_KEY", "11" * 32)
-    monkeypatch.setattr(device_identity, "drain_speaker_cleanup_outbox", lambda limit=8: (0, 0))
-    device_identity._SCHEMA_READY.clear()
-    summary_task_store.reset_store_for_tests()
-    summary_v3_store.reset_store_for_tests()
-    with sqlite3.connect(database) as connection:
-        connection.execute(
-            """CREATE TABLE meetings (
-                 id TEXT PRIMARY KEY, user_id INTEGER, data_epoch_id TEXT,
-                 updated_at TEXT
-               )"""
-        )
-        connection.commit()
-
-    device_id = "10000000-0000-4000-8000-000000000001"
-    epoch_id = "20000000-0000-4000-8000-000000000002"
-    meeting_id = "30000000-0000-4000-8000-000000000003"
-    secret = "A" * 43
-    device_identity.register_device(device_id, secret, epoch_id)
-    context = device_identity.authenticate(device_id, secret, epoch_id)
-    task_scope = f"device:{context.principal_id}:{epoch_id}"
-    with sqlite3.connect(database) as connection:
-        connection.execute(
-            "INSERT INTO meetings(id, user_id, data_epoch_id, updated_at) VALUES (?, ?, ?, ?)",
-            (meeting_id, context.principal_id, epoch_id, "2026-08-15T00:00:00+00:00"),
-        )
-        connection.commit()
-    summary_task_store.create_task(
-        task_id="summary-task-v3-close",
-        task_kind="device-summary-v3",
-        task_scope=task_scope,
-        meeting_id=meeting_id,
-        dedupe_key="close-epoch",
-        request={"worker_args": [meeting_id]},
-        force=False,
-        retain_generated_result=True,
-    )
-    summary_v3_store.save_source_payload(
-        task_scope=task_scope,
-        meeting_id=meeting_id,
-        payload={"manual_note": {"content": "待删除"}},
-    )
-    summary_v3_store.persist_document(
-        task_id="summary-task-v3-close",
-        task_scope=task_scope,
-        meeting_id=meeting_id,
-        source_fingerprint="sha256:" + "1" * 64,
-        transcript_revision="sha256:" + "2" * 64,
-        model_revision="ollama:qwen3.5:9b",
-        prompt_revision="facts-v3-r4",
-        document={"schema_version": 3},
-        coverage={},
-    )
-
-    result = device_identity.close_epoch(context, epoch_id)
-
-    assert result["summary_tasks_deleted"] == 1
-    assert result["summary_v3_payloads_deleted"] == 1
-    assert result["summary_v3_documents_deleted"] == 1
-    with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM summary_tasks_v2").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM summary_v3_source_payloads").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM summary_v3_documents").fetchone()[0] == 0
+    assert package.model_payload()["priority_source_ids"] == [
+        "transcript:t1",
+        "transcript:t2",
+    ]
+    assert [
+        source["source_id"] for source in package.model_payload()["sources"]
+    ] == ["transcript:t1", "transcript:t2", "transcript:t0"]
 
 
 def test_prompt_has_no_known_sample_pollution():
@@ -1093,6 +1199,418 @@ def test_ollama_schema_is_complete_and_has_no_unresolved_references():
     ]
 
 
+def test_generation_schema_caps_single_call_output_without_changing_document_contract():
+    schema = summary_v3_generator._generation_response_schema()
+    assert schema["required"] == ["v", "facts", "relations", "actions"]
+    assert schema["additionalProperties"] is False
+    facts = schema["properties"]["facts"]
+    assert facts["additionalProperties"] is False
+    assert facts["required"] == ["f1"]
+    assert list(facts["properties"]) == [f"f{index}" for index in range(1, 13)]
+    first_fact = facts["properties"]["f1"]
+    assert first_fact["required"] == ["type", "state", "content", "source_1"]
+    assert "quote" not in first_fact["properties"]
+    assert "source_type" not in first_fact["properties"]
+    assert "fact_id" not in first_fact["properties"]
+    assert list(schema["properties"]["relations"]["properties"]) == [
+        f"r{index}" for index in range(1, 17)
+    ]
+    assert list(schema["properties"]["actions"]["properties"]) == [
+        f"a{index}" for index in range(1, 7)
+    ]
+    assert schema["properties"]["actions"]["properties"]["a1"]["required"] == ["fact"]
+    assert "maxItems" not in json.dumps(schema, ensure_ascii=False)
+    assert model_response_json_schema()["properties"]["facts"]["maxItems"] == 40
+
+
+def test_compact_provider_response_expands_immutable_source_fields(monkeypatch):
+    active_package = package()
+    first, second = active_package.sources[:2]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+            },
+            "f2": {
+                "type": "timeline",
+                "state": "uncertain",
+                "content": "截止时间需要会后确认",
+                "source_1": second.model_source_id,
+            },
+        },
+        "relations": {
+            "r1": {"type": "depends_on", "from_fact": "f1", "to_fact": "f2"},
+        },
+        "actions": {
+            "a1": {"fact": "f1", "owner": "林清", "due": "明天下午", "fit": "high"},
+        },
+    }
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return json.dumps(compact, ensure_ascii=False)
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+    assert [fact.fact_id for fact in response.facts] == ["f1", "f2"]
+    assert response.facts[0].sources[0].source_type == first.source_type
+    assert response.facts[0].sources[0].quote == first.text
+    assert response.facts[0].sources[0].content_hash is None
+    assert response.action_candidates[0].content == response.facts[0].content
+    assert response.overview.fact_ids == ["f1", "f2"]
+
+
+def test_compact_action_without_fit_uses_conservative_projection(monkeypatch):
+    active_package = package()
+    first = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+            },
+        },
+        "relations": {},
+        "actions": {"a1": {"fact": "f1", "owner": "林清", "due": "明天下午"}},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert response.action_candidates[0].schedule_fit == "medium"
+
+
+def test_compact_action_redundant_projection_fields_do_not_drop_fact(monkeypatch):
+    active_package = package()
+    first = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+                "owner": "林清",
+                "due": "明天下午",
+                "fit": "high",
+            },
+        },
+        "relations": {},
+        "actions": {
+            "a1": {"fact": "f1", "owner": "林清", "due": "明天下午", "fit": "high"},
+        },
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.action_candidates[0].fact_id == "f1"
+    assert response.action_candidates[0].owner == "林清"
+    assert response.action_candidates[0].due_text == "明天下午"
+
+
+def test_compact_action_projection_inside_fact_is_relocated(monkeypatch):
+    active_package = package()
+    first = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "林清在明天下午提交界面复核清单",
+                "source_1": first.model_source_id,
+                "owner": "林清",
+                "due": "明天下午",
+                "fit": "high",
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert response.action_candidates[0].fact_id == "f1"
+    assert response.action_candidates[0].owner == "林清"
+    assert response.action_candidates[0].due_text == "明天下午"
+    assert response.action_candidates[0].schedule_fit == "high"
+
+
+def test_missing_action_projection_recovers_only_explicit_bounded_due(monkeypatch):
+    active_package = build_evidence_package(
+        [
+            {
+                "id": "commitment",
+                "speaker": "周工",
+                "text": "我会在 2026 年 9 月 18 日前提交上线核对表。",
+            }
+        ],
+        None,
+        None,
+    )
+    source = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "在 2026 年 9 月 18 日前提交上线核对表",
+                "source_1": source.model_source_id,
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+    document = summary_v3_generator.verify_model_response(response, active_package)
+
+    assert calls == 1
+    assert document.action_candidates[0].owner == "周工"
+    assert document.action_candidates[0].due_text == "2026 年 9 月 18 日前"
+
+
+def test_missing_action_projection_does_not_infer_unbounded_event_time(monkeypatch):
+    active_package = build_evidence_package(
+        [
+            {
+                "id": "preparation",
+                "speaker": "周工",
+                "text": "9 月 18 日开评审会，我会准备上线核对表。",
+            }
+        ],
+        None,
+        None,
+    )
+    source = active_package.sources[0]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "我会准备上线核对表",
+                "source_1": source.model_source_id,
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+    document = summary_v3_generator.verify_model_response(response, active_package)
+
+    assert calls == 1
+    assert document.action_candidates[0].due_text is None
+
+
+def test_compact_action_unknown_extra_field_still_drops_optional_fact(monkeypatch):
+    active_package = package()
+    first, second = active_package.sources[:2]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "context",
+                "state": "confirmed",
+                "content": "已讨论界面复核安排",
+                "source_1": first.model_source_id,
+            },
+            "f2": {
+                "type": "action",
+                "state": "confirmed",
+                "content": "会后确认截止时间",
+                "source_1": second.model_source_id,
+                "owner": None,
+                "unexpected": "must remain forbidden",
+            },
+        },
+        "relations": {},
+        "actions": {"a1": {"fact": "f2"}},
+    }
+    monkeypatch.setattr(
+        summary_v3_generator,
+        "call_llm",
+        lambda *_args, **_kwargs: json.dumps(compact, ensure_ascii=False),
+    )
+
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.action_candidates == []
+
+
+def test_invalid_optional_compact_fact_does_not_spend_repair_call(monkeypatch):
+    active_package = package()
+    first, second = active_package.sources[:2]
+    compact = {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "context",
+                "state": "confirmed",
+                "content": "已讨论界面复核安排",
+                "source_1": first.model_source_id,
+            },
+            "f2": {
+                "type": "not-a-fact-type",
+                "state": "uncertain",
+                "content": "截止时间需要会后确认",
+                "source_1": second.model_source_id,
+            },
+        },
+        "relations": {
+            "r1": {"type": "depends_on", "from_fact": "f1", "to_fact": "f2"},
+        },
+        "actions": {},
+    }
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return json.dumps(compact, ensure_ascii=False)
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.relations == []
+
+
+def test_nested_limit_stop_recovers_only_complete_fact_slots():
+    raw = (
+        '{"v":3,"facts":{'
+        '"f1":{"type":"context","state":"confirmed","content":"第一条事实",'
+        '"source_1":"transcript:t0"},'
+        '"f2":{"type":"risk","state":"uncertain","content":"第二条事实",'
+        '"source_1":"transcript:t1"},'
+    )
+
+    recovered = json.loads(summary_v3_generator._recover_compact_root_prefix(raw))
+
+    assert recovered == {
+        "v": 3,
+        "facts": {
+            "f1": {
+                "type": "context",
+                "state": "confirmed",
+                "content": "第一条事实",
+                "source_1": "transcript:t0",
+            },
+            "f2": {
+                "type": "risk",
+                "state": "uncertain",
+                "content": "第二条事实",
+                "source_1": "transcript:t1",
+            },
+        },
+        "relations": {},
+        "actions": {},
+    }
+
+
+def test_nested_limit_stop_does_not_recover_incomplete_first_fact():
+    raw = '{"v":3,"facts":{"f1":{"type":"context","content":"未闭合'
+
+    assert summary_v3_generator._recover_compact_root_prefix(raw) == raw
+
+
+def test_truncated_root_array_repair_discards_only_incomplete_relation():
+    raw = (
+        '{"schema_version":3,"overview":{"text":"概述","fact_ids":["f1"]},'
+        '"facts":[{"fact_id":"f1","fact_type":"context","certainty":"confirmed",'
+        '"content":"事实","sources":[{"source_id":"transcript:a","source_type":"transcript",'
+        '"quote":"事实"}]}],'
+        '"relations":[{"relation_type":"supports","from_fact_id":"f1","to_fact_id":"f1"},'
+        '{"relation_type":"supports","from_fact_id":"f1","to_fact_id":"f'
+    )
+    repaired = summary_v3_generator._repair_truncated_root_arrays(raw)
+    parsed = json.loads(repaired)
+    assert parsed["facts"][0]["fact_id"] == "f1"
+    assert parsed["relations"] == [
+        {"relation_type": "supports", "from_fact_id": "f1", "to_fact_id": "f1"},
+    ]
+    assert parsed["action_candidates"] == []
+
+
+def test_model_sanitizer_drops_misplaced_root_containers_inside_fact():
+    value = {
+        "facts": [{
+            "fact_id": "f1",
+            "sources": [],
+            "action_candidates": [],
+        }],
+    }
+    summary_v3_generator._sanitize_model_value(value)
+    assert "action_candidates" not in value["facts"][0]
+
+
+def test_unknown_source_alias_drops_only_affected_fact_without_model_repair(monkeypatch):
+    active_package = package()
+    value = valid_response(active_package)
+    value["overview"]["text"] = "概" * 200
+    value["facts"][1]["sources"][0]["source_id"] = "transcript:unknown"
+    operations: list[str] = []
+
+    def fake_call_llm(*_args, **kwargs):
+        operations.append(kwargs["telemetry_operation"])
+        return json.dumps(value, ensure_ascii=False)
+
+    monkeypatch.setattr(summary_v3_generator, "call_llm", fake_call_llm)
+    response, calls = summary_v3_generator.generate_model_response(active_package)
+
+    assert calls == 1
+    assert operations == ["summary.facts.v3"]
+    assert [fact.fact_id for fact in response.facts] == ["f1"]
+    assert response.overview.fact_ids == ["f1"]
+    assert response.overview.text == "林清在明天下午提交界面复核清单。"
+    assert response.relations == []
+
+
 def test_speaker_correction_changes_source_and_transcript_fingerprints():
     transcript = [{"id": "same", "speaker": "讲话人 1", "text": "界面颜色需要调整。"}]
     _sources, before, before_transcript = normalize_sources(transcript, None, None)
@@ -1100,6 +1618,42 @@ def test_speaker_correction_changes_source_and_transcript_fingerprints():
     _sources, after, after_transcript = normalize_sources(transcript, None, None)
     assert before != after
     assert before_transcript != after_transcript
+
+
+def test_long_transcript_packs_adjacent_rows_without_losing_time_bounds():
+    transcript = [
+        {
+            "id": f"line-{index}",
+            "speaker": "讲话人 1",
+            "text": f"第{index}句关于项目进展的连续发言。",
+            "start_ms": index * 1_000,
+            "end_ms": index * 1_000 + 800,
+        }
+        for index in range(40)
+    ]
+    sources, _fingerprint, _revision = normalize_sources(transcript, None, None)
+
+    assert len(sources) < len(transcript)
+    assert sources[0].source_id.startswith("transcript:line-0--line-")
+    assert sources[0].start_ms == 0
+    assert sources[0].end_ms > sources[0].start_ms
+    assert "第0句" in sources[0].text
+    assert "第1句" in sources[0].text
+    assert sources[0].content_hash == digest(sources[0].text)
+
+
+def test_short_transcript_keeps_line_level_source_identity():
+    transcript = [
+        {"id": "segment-a", "speaker": "讲话人 1", "text": "第一句。", "start_ms": 0, "end_ms": 1_000},
+        {"id": "segment-b", "speaker": "讲话人 1", "text": "第二句。", "start_ms": 1_000, "end_ms": 2_000},
+    ]
+    sources, _fingerprint, _revision = normalize_sources(transcript, None, None)
+
+    assert [source.source_id for source in sources] == [
+        "transcript:segment-a",
+        "transcript:segment-b",
+    ]
+    assert [source.text for source in sources] == ["第一句。", "第二句。"]
 
 
 @pytest.mark.parametrize(
@@ -1120,31 +1674,3 @@ def test_protocol_rejects_rich_markup_and_presentation_code(value):
 def test_protocol_allows_a_meeting_fact_about_visual_design():
     value = OverviewV3(text="客户要求将按钮颜色改成蓝色。", fact_ids=["f1"])
     assert value.text == "客户要求将按钮颜色改成蓝色。"
-
-
-def test_persistent_task_stage_is_monotonic(tmp_path, monkeypatch):
-    database = tmp_path / "tasks.db"
-    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite+aiosqlite:///{database}")
-    summary_task_store.reset_store_for_tests()
-    record, reused = summary_task_store.create_task(
-        task_id="task-v3",
-        task_kind="device-summary-v3",
-        task_scope="device:1:epoch",
-        meeting_id="meeting-a",
-        dedupe_key="identity-a",
-        request={"worker_args": ["payload-a"]},
-        force=False,
-        retain_generated_result=True,
-    )
-    assert not reused and record["stage"] == "queued"
-    assert summary_task_store.claim_task("task-v3", "host:1:worker")
-    assert summary_task_store.get_task("task-v3")["stage"] == "preparing"
-    for stage in ("generating", "verifying", "persisting"):
-        assert summary_task_store.update_stage("task-v3", stage, lease_owner="host:1:worker")
-        assert summary_task_store.get_task("task-v3")["stage"] == stage
-    assert summary_task_store.mark_success(
-        "task-v3",
-        {"schema_version": 3},
-        lease_owner="host:1:worker",
-    )
-    assert summary_task_store.get_task("task-v3")["stage"] == "success"

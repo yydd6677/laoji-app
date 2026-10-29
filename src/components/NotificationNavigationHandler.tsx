@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { useAuth } from '../store/AuthStore';
 import { useEvents } from '../store/EventsStore';
 import { useMeetings } from '../store/MeetingsStore';
 import {
@@ -16,22 +15,16 @@ import { openOccurrenceMeeting } from '../application/meeting';
 import { isScopeKey } from '../domain/meeting';
 import { diagnosticWarn } from '../services/diagnostics';
 import { getNativeRecorderState } from 'laoji-native-platform';
-import { pullOccurrenceMeeting } from '../services/meetingOccurrencePull';
 import { setOccurrenceMeetingLinkState } from '../services/meetingOccurrenceLifecycle';
-import { resolveOccurrenceMeeting } from '../services/occurrenceMeeting';
 
 export function NotificationNavigationHandler() {
-  const { initializing, mode, session, accessToken } = useAuth();
   const { hydratedScope, resolveEventRef } = useEvents();
   const {
     createMeeting,
     meetings,
     loading: meetingsLoading,
-    refreshMeetings,
   } = useMeetings();
-  const scope = mode === 'guest'
-    ? 'guest'
-    : mode === 'authenticated' && session ? `user:${session.user.id}` : null;
+  const scope = 'guest';
 
   useEffect(() => {
     const removeNotificationListener = installNotificationNavigationListener();
@@ -70,18 +63,6 @@ export function NotificationNavigationHandler() {
           selection: 'occurrence',
           state: 'active',
         });
-        const localProjection = await resolveOccurrenceMeeting(scope, ref);
-        if (!localProjection && mode === 'authenticated' && accessToken) {
-          const pulled = await pullOccurrenceMeeting({
-            scopeKey: scope,
-            occurrence: ref,
-            accessToken,
-            refreshRemoteMeetings: refreshMeetings,
-          });
-          if (pulled.outcome === 'meeting_unavailable' || pulled.outcome === 'conflicted') {
-            return { status: 'retryable' };
-          }
-        }
         const target = await openOccurrenceMeeting({
           scopeKey: scope,
           event: resolution.event,
@@ -95,7 +76,7 @@ export function NotificationNavigationHandler() {
       }
     });
     return () => setNotificationOccurrenceMeetingResolver(null);
-  }, [accessToken, createMeeting, mode, refreshMeetings, resolveEventRef, scope]);
+  }, [createMeeting, resolveEventRef, scope]);
 
   useEffect(() => {
     setQuickTileMeetingResolver(async () => {
@@ -125,14 +106,13 @@ export function NotificationNavigationHandler() {
   }, [meetings, meetingsLoading]);
 
   useEffect(() => {
-    if (initializing) return;
     setNotificationNavigationScope(scope);
-    if (!scope || hydratedScope !== scope) return;
+    if (hydratedScope !== scope) return;
     const timer = setTimeout(() => {
       void flushPendingNotificationNavigation();
     }, 0);
     return () => clearTimeout(timer);
-  }, [hydratedScope, initializing, scope]);
+  }, [hydratedScope, scope]);
 
   return null;
 }

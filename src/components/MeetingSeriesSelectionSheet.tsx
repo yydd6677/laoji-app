@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 
 const MOTION_MS = 300;
 
@@ -57,7 +57,8 @@ export function MeetingSeriesSelectionSheet<Result>({
   onCompleted: (result: Result) => void;
   errorMessage: (error: unknown) => string;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -147,10 +148,6 @@ export function MeetingSeriesSelectionSheet<Result>({
   const canSubmit = !saving && !closing;
   const requestClose = () => {
     if (!saving) finishClose(true);
-  };
-  const requestSkip = () => {
-    const skip = skipRef.current;
-    if (!saving && skip) finishClose(true, skip);
   };
   const toggle = (key: string) => {
     if (saving || closing) return;
@@ -328,24 +325,24 @@ export function MeetingSeriesSelectionSheet<Result>({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   sheet: { borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 72, height: 44, alignItems: 'center', justifyContent: 'center' },
-  titleActionText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  titleActionText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
   list: { flexGrow: 0, flexShrink: 1 },
-  sectionTitle: { height: 36, paddingHorizontal: 16, paddingTop: 12, fontSize: 13, lineHeight: 20 },
+  sectionTitle: { height: 36, paddingHorizontal: 16, paddingTop: 12, fontFamily, fontSize: 13, lineHeight: 20 },
   row: { minHeight: 64, paddingLeft: 16, paddingRight: 14, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   rowBody: { flex: 1, paddingVertical: 8, paddingRight: 12 },
-  rowText: { fontSize: 15, lineHeight: 22, fontWeight: '400' },
-  rowMeta: { marginTop: 2, fontSize: 12, lineHeight: 18 },
+  rowText: { fontFamily, fontSize: 15, lineHeight: 22, fontWeight: '400' },
+  rowMeta: { marginTop: 2, fontFamily, fontSize: 12, lineHeight: 18 },
   checkbox: { width: 22, height: 22, borderWidth: 1.5, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   errorSlot: { height: 30, paddingHorizontal: 16, justifyContent: 'center' },
-  errorText: { fontSize: 12, lineHeight: 18 },
+  errorText: { fontFamily, fontSize: 12, lineHeight: 18 },
   footer: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16, paddingTop: 12 },
   submit: { height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  submitText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  submitText: { fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
 });

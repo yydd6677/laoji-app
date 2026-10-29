@@ -46,7 +46,8 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     this.pager = pager
     addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     addView(selection, LayoutParams(LayoutParams.MATCH_PARENT, context.dpRounded(MinutesDetailLayoutContract.RECORDING_SELECTOR_HEIGHT_DP)))
-    addView(tabs, LayoutParams(LayoutParams.MATCH_PARENT, context.dpRounded(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP)))
+    addView(tabs, LayoutParams(LayoutParams.MATCH_PARENT,
+      maxOf(context.dpRounded(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP), tabs.minimumHeight)))
     addView(pager, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
   }
 
@@ -148,7 +149,7 @@ internal class MinutesDetailStickyLayout(context: Context) : ViewGroup(context),
     )
     if (result.consumedY == 0) return
     setHeaderCollapseOffset(result.collapseOffsetPx)
-    // Feishu consumes the whole nested-scroll frame even when scrollTo clamps at an edge.
+    // Consume the whole nested-scroll frame even when scrollTo clamps at an edge.
     consumed[1] += result.consumedY
   }
 

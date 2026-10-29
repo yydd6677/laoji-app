@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import { BackHeader } from '../components/Common';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -20,14 +20,8 @@ import {
   registerDeviceSpeaker,
   renameDeviceSpeaker,
   supplementDeviceSpeaker,
-  deleteSpeaker,
-  fetchSpeakers,
-  registerSpeaker,
-  renameSpeaker,
   SpeakerProfile,
-  supplementSpeaker,
 } from '../services/speakers';
-import { useAuth } from '../store/AuthStore';
 import { Colors as C, withAlpha } from '../theme/colors';
 import { RootStackParamList } from '../types';
 import { meetingAudioLevelPercent } from '../utils/meetingAudioStatus';
@@ -49,8 +43,6 @@ function clock(ms: number): string {
 
 export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
   const speakerId = route.params?.speakerId;
-  const { accessToken, isGuest } = useAuth();
-  const deviceMode = isGuest || !accessToken;
   const { showDialog } = useAppDialog();
   const [speaker, setSpeaker] = useState<SpeakerProfile | null>(null);
   const [name, setName] = useState('');
@@ -88,9 +80,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     setLoading(true);
     setError('');
     try {
-      const profiles = deviceMode
-        ? await fetchDeviceSpeakerProfiles()
-        : await fetchSpeakers(accessToken!);
+      const profiles = await fetchDeviceSpeakerProfiles();
       const found = profiles.find(item => item.speaker_id === speakerId);
       if (!found) throw new Error('讲话人不存在或已被删除');
       setSpeaker(found);
@@ -100,7 +90,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [accessToken, deviceMode, speakerId]);
+  }, [speakerId]);
 
   useEffect(() => {
     void loadSpeaker();
@@ -227,12 +217,8 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     setError('');
     try {
       const result = speakerId
-        ? deviceMode
-          ? await supplementDeviceSpeaker(speakerId, audioUri, fileName)
-          : await supplementSpeaker(speakerId, audioUri, fileName, accessToken!)
-        : deviceMode
-          ? await registerDeviceSpeaker(name, audioUri, fileName)
-          : await registerSpeaker(name, audioUri, fileName, accessToken!);
+        ? await supplementDeviceSpeaker(speakerId, audioUri, fileName)
+        : await registerDeviceSpeaker(name, audioUri, fileName);
       await discardRecording(audioUri);
       audioUriRef.current = '';
       if (!mountedRef.current) return;
@@ -240,8 +226,8 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
       showDialog({
         title: '声纹采集成功',
         message: speakerId
-          ? `已为“${result.speaker.name}”补充声纹，后续会议将自动应用这个名称。`
-          : `已建立“${result.speaker.name}”，后续会议将自动应用这个名称。`,
+          ? `已为“${result.speaker.name}”补充声纹。`
+          : `已建立“${result.speaker.name}”。`,
         tone: 'success',
         actions: [{ text: '完成', role: 'primary', onPress: () => navigation.goBack() }],
       });
@@ -263,9 +249,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
     setBusy(true);
     setError('');
     try {
-      const result = deviceMode
-        ? await renameDeviceSpeaker(speakerId, name)
-        : await renameSpeaker(speakerId, name, accessToken!);
+      const result = await renameDeviceSpeaker(speakerId, name);
       setSpeaker(result.speaker);
       setName(result.speaker.name);
     } catch (reason) {
@@ -288,8 +272,7 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
           onPress: async () => {
             setBusy(true);
             try {
-              if (deviceMode) await deleteDeviceSpeakerProfile(speakerId);
-              else await deleteSpeaker(speakerId, accessToken!);
+              await deleteDeviceSpeakerProfile(speakerId);
               navigation.goBack();
             } catch (reason) {
               setError(readableErrorMessage(reason, '删除失败，请稍后重试。'));
@@ -404,20 +387,14 @@ export function SpeakerEnrollmentScreen({ navigation, route }: Props) {
               </TouchableOpacity>
             ) : null}
           </View>
-          {speaker ? <Text style={s.nameHint}>后续会议将自动应用修改后的名称</Text> : null}
         </View>
 
         <View style={s.groupGap} />
         <View style={s.recordingSection}>
-          <Text style={s.recordingHint}>
-            {speakerId
-              ? '请在安静环境下，点击“开始”后朗读下方文字以补充声纹'
-              : '请在安静环境下，点击“开始”后朗读下方文字'}
-          </Text>
+          <Text style={s.recordingHint}>朗读以下文字</Text>
           <View style={s.readingPanel}>
             <Text style={s.readingText}>{VOICEPRINT_SAMPLE_TEXT}</Text>
           </View>
-          <Text style={s.readingHint}>偶尔读错无需停顿，继续朗读即可</Text>
           <View style={s.recordingMetaRow}>
             <Text style={s.recordingState}>{stateText}</Text>
             <Text style={s.timer}>{clock(elapsedMs)} / 00:15</Text>
@@ -494,13 +471,11 @@ const s = StyleSheet.create({
   saveNameButton: { width: 56, height: 40, alignItems: 'center', justifyContent: 'center' },
   saveNameText: { fontSize: 14, lineHeight: 20, color: C.primary, fontWeight: '500' },
   saveNameTextDisabled: { color: C.faint },
-  nameHint: { marginTop: 8, paddingHorizontal: 16, fontSize: 12, lineHeight: 18, color: C.faint, textAlign: 'center' },
   groupGap: { height: 8, backgroundColor: C.appBg },
   recordingSection: { flex: 1, minHeight: 286, paddingTop: 10, paddingHorizontal: 16, backgroundColor: C.body },
   recordingHint: { marginBottom: 8, fontSize: 14, lineHeight: 20, color: C.text },
   readingPanel: { minHeight: 92, borderRadius: 6, paddingHorizontal: 20, paddingVertical: 16, backgroundColor: C.inputBg, justifyContent: 'center' },
   readingText: { fontSize: 14, lineHeight: 22, color: C.text },
-  readingHint: { marginTop: 8, fontSize: 12, lineHeight: 18, color: C.faint },
   recordingMetaRow: { height: 40, marginTop: 4, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   recordingState: { fontSize: 14, lineHeight: 20, color: C.sub },
   timer: { fontSize: 14, lineHeight: 20, color: C.sub, fontVariant: ['tabular-nums'] },

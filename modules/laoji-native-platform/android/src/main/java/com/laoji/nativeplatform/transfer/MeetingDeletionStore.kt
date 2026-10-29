@@ -51,7 +51,7 @@ internal class MeetingDeletionStore(context: Context) {
     .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
   private fun validateScope(value: String): String = value.trim().also {
-    require(SCOPE_PATTERN.matches(it)) { "invalid meeting scope" }
+    require(it == "guest") { "invalid meeting scope" }
   }
 
   private fun validateMeetingId(value: String): String = value.trim().also {
@@ -62,7 +62,6 @@ internal class MeetingDeletionStore(context: Context) {
     const val PREFERENCES = "laoji-native-deleted-meetings-v1"
     const val MAX_ENTRIES = 512
     const val RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
-    val SCOPE_PATTERN = Regex("^(guest|user:[A-Za-z0-9._-]{1,112})$")
   }
 }
 

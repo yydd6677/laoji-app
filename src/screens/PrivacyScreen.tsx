@@ -6,30 +6,21 @@ import { ScreenContainer } from '../components/ScreenContainer';
 
 import { RootStackParamList } from '../types';
 import { SettingsGroup, SettingsRow, SettingsTitleBar } from '../components/SettingsGroup';
-import { AppActionSheet } from '../components/AppActionSheet';
+import { ThemePickerSheet } from '../components/ThemePickerSheet';
 import { useAppDialog } from '../components/AppDialog';
 import {
   authenticateWithSystem,
   getBiometricUnavailableReason,
   loadPrivacyPrefs,
   savePrivacyPrefs,
+  openSystemSecuritySettings,
 } from '../services/privacy';
-import { clearLocalAppFiles, clearScheduledAppNotifications } from '../services/localData';
-import { clearAppStorage } from '../services/appStorage';
-import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
-import { deleteMeetingDatabase } from '../data/db/openDatabase';
+import { UI_MOTION } from '../theme/uiTokens';
 import { useTheme } from '../theme/ThemeProvider';
-import { THEME_LABELS, type ThemeId } from '../theme/themeIds';
-import { clearThemePreference } from '../services/themePreferences';
-import { closeDeviceDataEpoch } from '../services/deviceApi';
-import { clearDeviceIdentity } from '../services/deviceIdentity';
-import {
-  loadGenerationRetentionPreference,
-  saveGenerationRetentionPreference,
-} from '../services/generationPrivacy';
+import { THEME_LABELS } from '../theme/themeIds';
+import { eraseLocalInstallationData } from '../services/localDataEraseCoordinator';
 import { useAppUpdate } from '../services/appUpdate';
-
-const { colors: F } = getFeishuTokens();
+import { GenerationRetentionSetting } from '../components/GenerationRetentionSetting';
 
 // UI-TOKENS-001 / UI-MOTION-001: privacy controls use semantic colors and fixed motion geometry.
 
@@ -50,12 +41,14 @@ function Toggle({
   disabled: boolean;
   testID: string;
 }) {
+  const { tokens } = useTheme();
+  const colors = tokens.colors;
   const progress = React.useRef(new Animated.Value(on ? 1 : 0)).current;
 
   React.useEffect(() => {
     Animated.timing(progress, {
       toValue: on ? 1 : 0,
-      duration: FEISHU_MOTION.fabSegment,
+      duration: UI_MOTION.fabSegment,
       easing: Easing.inOut(Easing.ease),
       useNativeDriver: true,
     }).start();
@@ -74,13 +67,15 @@ function Toggle({
       testID={testID}
     >
       <View
-        style={[s.toggleTrack, { backgroundColor: on ? F.primary : F.iconDisabled }]}
+        style={[s.toggleTrack, { backgroundColor: on ? colors.primary : colors.iconDisabled }]}
         testID={`${testID}-track`}
       />
       <Animated.View
         style={[
           s.toggleThumb,
           {
+            backgroundColor: colors.backgroundFloat,
+            shadowColor: colors.shadow,
             transform: [{
               translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [0, 16] }),
             }],
@@ -97,41 +92,25 @@ export function PrivacyScreen({ navigation }: Props) {
   const [faceId, setFaceId] = useState(false);
   const [appLock, setAppLock] = useState(false);
   const [hideWidgetTitles, setHideWidgetTitles] = useState(true);
-  const [retainGeneratedResults, setRetainGeneratedResults] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const { showDialog } = useAppDialog();
-  const { themeId, setTheme } = useTheme();
+  const { themeId, setTheme, tokens } = useTheme();
   const [themeSheetVisible, setThemeSheetVisible] = useState(false);
   const scope = 'guest' as const;
 
   useEffect(() => {
     let alive = true;
-    Promise.all([loadPrivacyPrefs(scope), loadGenerationRetentionPreference()]).then(([saved, retain]) => {
+    loadPrivacyPrefs(scope).then(saved => {
       if (!alive) return;
       setFaceId(saved.biometricEnabled);
       setAppLock(saved.appLockEnabled);
       setHideWidgetTitles(saved.hideWidgetTitles);
-      setRetainGeneratedResults(retain);
     }).catch(() => {
       if (!alive) return;
       showDialog({ title: '读取失败', message: '隐私设置暂时无法读取，请返回后重试。', tone: 'error' });
     });
     return () => { alive = false; };
   }, [scope, showDialog]);
-
-  const handleGenerationRetentionToggle = async () => {
-    if (privacyBusy) return;
-    setPrivacyBusy(true);
-    const next = !retainGeneratedResults;
-    try {
-      await saveGenerationRetentionPreference(next);
-      setRetainGeneratedResults(next);
-    } catch {
-      showDialog({ title: '设置未保存', message: '生成质量设置暂时无法保存，请稍后重试。', tone: 'error' });
-    } finally {
-      setPrivacyBusy(false);
-    }
-  };
 
   const persistPrivacy = async (
     nextFaceId: boolean,
@@ -157,7 +136,12 @@ export function PrivacyScreen({ navigation }: Props) {
   const enableBiometric = async () => {
     const unavailable = await getBiometricUnavailableReason();
     if (unavailable) {
-      showDialog({ title: '无法启用系统验证', message: unavailable, tone: 'warning' });
+      showDialog({ title: '无法启用系统验证', message: unavailable, tone: 'warning', actions: [
+        { text: '系统设置', onPress: () => { void openSystemSecuritySettings().catch(() => {
+          showDialog({ title: '无法打开系统设置', message: '请在手机设置中配置锁屏密码或指纹。', tone: 'warning' });
+        }); } },
+        { text: '取消', role: 'cancel' },
+      ] });
       return false;
     }
     const ok = await authenticateWithSystem('启用老记系统验证');
@@ -173,15 +157,11 @@ export function PrivacyScreen({ navigation }: Props) {
     setPrivacyBusy(true);
     try {
       if (faceId) {
-        if (await persistPrivacy(false, false)) {
-          showDialog({ title: '已关闭系统验证', message: '启动时验证也已同步关闭。', tone: 'success' });
-        }
+        await persistPrivacy(false, false);
         return;
       }
       if (await enableBiometric()) {
-        if (await persistPrivacy(true, appLock)) {
-          showDialog({ title: '已启用系统验证', message: '现在可以用系统生物识别或设备密码验证身份。', tone: 'success' });
-        }
+        await persistPrivacy(true, appLock);
       }
     } finally {
       setPrivacyBusy(false);
@@ -193,16 +173,12 @@ export function PrivacyScreen({ navigation }: Props) {
     setPrivacyBusy(true);
     try {
       if (appLock) {
-        if (await persistPrivacy(faceId, false)) {
-          showDialog({ title: '已关闭启动验证', message: '再次打开老记时不会自动要求验证。', tone: 'success' });
-        }
+        await persistPrivacy(faceId, false);
         return;
       }
       const biometricReady = faceId || await enableBiometric();
       if (!biometricReady) return;
-      if (await persistPrivacy(true, true)) {
-        showDialog({ title: '已开启启动验证', message: '老记进入前台后会要求系统验证。', tone: 'success' });
-      }
+      await persistPrivacy(true, true);
     } finally {
       setPrivacyBusy(false);
     }
@@ -228,33 +204,17 @@ export function PrivacyScreen({ navigation }: Props) {
           text: '清除',
           role: 'destructive',
           onPress: async () => {
-            let deviceCleanupFailed = false;
-            try {
-              await closeDeviceDataEpoch();
-              await clearDeviceIdentity();
-            } catch {
-              // Keep the identity when the service is unreachable so a later
-              // foreground run can retry deleting the generated device data.
-              deviceCleanupFailed = true;
-            }
-            const cleanupResults = await Promise.allSettled([
-              clearLocalAppFiles(),
-              clearScheduledAppNotifications(),
-              clearAppStorage(),
-              deleteMeetingDatabase(),
-              clearThemePreference(),
-            ]);
-            const failures = cleanupResults.filter(result => result.status === 'rejected').length
-              + (deviceCleanupFailed ? 1 : 0);
+            const result = await eraseLocalInstallationData();
+            const failures = result.failedSteps.length + (result.remoteCleanup === 'pending' ? 1 : 0);
             showDialog(failures > 0
               ? {
                 title: '已退出，清理未完成',
-                message: deviceCleanupFailed
+                message: result.remoteCleanup === 'pending'
                   ? '本机文件已清除，但服务端设备数据尚未删除；联网后请再次执行清除本机数据。'
                   : `有 ${failures} 项本机数据未能清除。请在系统设置中清除老记的应用存储后再使用。`,
                 tone: 'error',
               }
-              : { title: '本机数据已清除', message: '日程、会议文件、提醒和缓存均已清除。', tone: 'success' });
+              : { title: '本机数据已清除', tone: 'success' });
           },
         },
         { text: '取消', role: 'cancel' },
@@ -263,7 +223,7 @@ export function PrivacyScreen({ navigation }: Props) {
   };
 
   return (
-    <ScreenContainer edges={['top', 'bottom']} bg={F.backgroundBase}>
+    <ScreenContainer edges={['top', 'bottom']} bg={tokens.colors.backgroundBase}>
       <SettingsTitleBar title="设置" onBack={() => navigation.goBack()} />
       <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <SettingsGroup testID="privacy-settings-group">
@@ -272,7 +232,10 @@ export function PrivacyScreen({ navigation }: Props) {
             value={THEME_LABELS[themeId]}
             onPress={() => setThemeSheetVisible(true)}
             testID="privacy-theme-row"
+            last
           />
+        </SettingsGroup>
+        <SettingsGroup testID="security-settings-group">
           <SettingsRow
             label="系统验证"
             right={(
@@ -296,6 +259,7 @@ export function PrivacyScreen({ navigation }: Props) {
                 testID="privacy-app-lock-toggle"
               />
             )}
+            last={!appLock}
           />
           {appLock ? (
             <SettingsRow
@@ -309,54 +273,44 @@ export function PrivacyScreen({ navigation }: Props) {
                   testID="privacy-widget-title-toggle"
                 />
               )}
+              last
             />
           ) : null}
-          <SettingsRow
-            label="帮助改进生成质量"
-            right={(
-              <Toggle
-                label="帮助改进生成质量"
-                on={retainGeneratedResults}
-                onToggle={() => { void handleGenerationRetentionToggle(); }}
-                disabled={privacyBusy}
-                testID="privacy-generation-retention-toggle"
-              />
-            )}
-          />
+        </SettingsGroup>
+        <SettingsGroup testID="data-settings-group">
+          <GenerationRetentionSetting />
           <SettingsRow label="清除本机数据" onPress={handleClearLocalData} destructive last />
         </SettingsGroup>
 
         <SettingsGroup testID="support-settings-group">
-          <SettingsRow label="用户协议" onPress={() => navigation.navigate('Legal', { kind: 'terms' })} />
-          <SettingsRow label="隐私政策" onPress={() => navigation.navigate('Legal', { kind: 'privacy' })} />
-          <SettingsRow label="帮助中心" onPress={() => navigation.navigate('Legal', { kind: 'help' })} />
-          <SettingsRow label="使用指南" onPress={() => navigation.navigate('Legal', { kind: 'guide' })} />
           <SettingsRow
             label="版本信息"
             value={appUpdate.status === 'available' && appUpdate.manifest
-              ? `新版本 ${appUpdate.manifest.version_name}`
+              ? `${APP_VERSION}  有更新`
               : APP_VERSION}
             onPress={() => navigation.navigate('Legal', { kind: 'version' })}
+            testID="privacy-version-row"
           />
+          <SettingsRow label="帮助中心" onPress={() => navigation.navigate('Legal', { kind: 'help' })} />
           <SettingsRow label="联系我们" onPress={() => navigation.navigate('Legal', { kind: 'contact' })} last />
         </SettingsGroup>
+        <SettingsGroup testID="policy-settings-group">
+          <SettingsRow label="用户协议" onPress={() => navigation.navigate('Legal', { kind: 'terms' })} />
+          <SettingsRow label="隐私政策" onPress={() => navigation.navigate('Legal', { kind: 'privacy' })} last />
+        </SettingsGroup>
       </ScrollView>
-      <AppActionSheet
+      <ThemePickerSheet
         visible={themeSheetVisible}
-        title="皮肤主题"
-        items={([
-          ['neutral', THEME_LABELS.neutral],
-          ['vivid', THEME_LABELS.vivid],
-        ] as const).map(([id, label]) => ({
-          key: id,
-          label: id === themeId ? `${label}（当前）` : label,
-          onPress: () => {
+        selected={themeId}
+        onSelect={id => {
+          if (id === themeId) {
             setThemeSheetVisible(false);
-            void setTheme(id as ThemeId).catch(() => {
-              showDialog({ title: '主题未保存', message: '皮肤主题暂时无法保存，请稍后重试。', tone: 'error' });
-            });
-          },
-        }))}
+            return;
+          }
+          void setTheme(id).catch(() => {
+            showDialog({ title: '主题未保存', message: '请重试。', tone: 'error' });
+          });
+        }}
         onClose={() => setThemeSheetVisible(false)}
       />
     </ScreenContainer>
@@ -375,8 +329,6 @@ const s = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: F.backgroundFloat,
-    shadowColor: F.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.18,
     shadowRadius: 2,

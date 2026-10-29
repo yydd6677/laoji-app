@@ -33,7 +33,7 @@ import android.widget.TextView
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
-import com.laoji.nativeplatform.evidence.FeishuEvidence
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -43,12 +43,6 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence(
-  "CAL-DETAIL-EDIT-001",
-  "CAL-PICKER-WHEEL-TAP-001",
-  "CAL-REPEAT-RRULE-001",
-  "UI-TITLE-COMMON-001",
-)
 class CalendarEditPageView(
   context: Context,
   appContext: AppContext,
@@ -57,6 +51,8 @@ class CalendarEditPageView(
 
   private val paletteReady = CalendarPagePalette.configure(context)
   private val onAction by EventDispatcher<Map<String, Any?>>()
+  private var bridgeEventsEnabled = true
+  private var actionListener: ((Map<String, Any?>) -> Unit)? = null
   private val root = FrameLayout(context)
   private val titleBar = CalendarCommonTitleBar(context)
   private val scroll = ScrollView(context).apply {
@@ -70,10 +66,10 @@ class CalendarEditPageView(
   }
   private val titleInput = EditText(context).apply {
     hint = "添加主题"
-    setHintTextColor(CalendarPagePalette.placeholder)
-    setTextColor(CalendarPagePalette.text)
+    pageDrawing { setHintTextColor(CalendarPagePalette.placeholder) }
+    pageTextColor { CalendarPagePalette.text }
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    pageTypeface(Typeface.BOLD)
     background = null
     minHeight = context.pageDp(52)
     maxLines = 4
@@ -99,8 +95,9 @@ class CalendarEditPageView(
   private val reminderValue = context.pageText(sizeSp = 16f)
   private val locationInput = EditText(context).apply {
     hint = "添加地点"
-    setHintTextColor(CalendarPagePalette.placeholder)
-    setTextColor(CalendarPagePalette.text)
+    pageDrawing { setHintTextColor(CalendarPagePalette.placeholder) }
+    pageTextColor { CalendarPagePalette.text }
+    pageTypeface(Typeface.NORMAL)
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
     background = null
     isSingleLine = true
@@ -111,12 +108,12 @@ class CalendarEditPageView(
   }
   private val locateIcon = ImageView(context).apply {
     setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_located_outline)
-    imageTintList = ColorStateList.valueOf(CalendarPagePalette.primary)
+    pageIconTint { ColorStateList.valueOf(CalendarPagePalette.primary) }
     setPadding(context.pageDp(12), context.pageDp(12), context.pageDp(12), context.pageDp(12))
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
   }
   private val locateProgress = ProgressBar(context, null, android.R.attr.progressBarStyleSmall).apply {
-    indeterminateTintList = ColorStateList.valueOf(CalendarPagePalette.primary)
+    pageDrawing { indeterminateTintList = ColorStateList.valueOf(CalendarPagePalette.primary) }
     visibility = View.GONE
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
   }
@@ -126,14 +123,14 @@ class CalendarEditPageView(
     isClickable = true
     isFocusable = true
     contentDescription = "获取当前位置"
-    background = RippleDrawable(
+    pageBackground { RippleDrawable(
       ColorStateList.valueOf(CalendarPagePalette.primarySoft),
       null,
       GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(CalendarPagePalette.float)
       },
-    )
+    ) }
     addView(locateIcon, FrameLayout.LayoutParams(context.pageDp(48), context.pageDp(48), Gravity.CENTER))
     addView(locateProgress, FrameLayout.LayoutParams(context.pageDp(20), context.pageDp(20), Gravity.CENTER))
     setOnClickListener {
@@ -144,8 +141,9 @@ class CalendarEditPageView(
   }
   private val notesInput = EditText(context).apply {
     hint = "添加备注"
-    setHintTextColor(CalendarPagePalette.placeholder)
-    setTextColor(CalendarPagePalette.text)
+    pageDrawing { setHintTextColor(CalendarPagePalette.placeholder) }
+    pageTextColor { CalendarPagePalette.text }
+    pageTypeface(Typeface.NORMAL)
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
     background = null
     gravity = Gravity.TOP
@@ -158,13 +156,13 @@ class CalendarEditPageView(
   private val deleteRow = buildActionRow(
     com.laoji.nativeplatform.R.drawable.laoji_ic_delete_outline,
     "删除日程",
-    CalendarPagePalette.danger,
+    { CalendarPagePalette.danger },
   ) { requestDelete() }
   private val stateView = CalendarPageStateView(context) {
     dispatchAction(mapOf("type" to "retry"))
   }
   private val busyOverlay = FrameLayout(context).apply {
-    setBackgroundColor(CalendarPagePalette.scrim)
+    pageBackgroundColor { CalendarPagePalette.scrim }
     isClickable = true
     isFocusable = true
     contentDescription = "正在保存日程"
@@ -194,7 +192,7 @@ class CalendarEditPageView(
     // CAL-EDIT-001: Keep Android-managed page children visible inside ExpoView.
     setWillNotDraw(false)
     clipToPadding = false
-    setBackgroundColor(CalendarPagePalette.body)
+    pageBackgroundColor { CalendarPagePalette.body }
     scroll.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     val page = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
@@ -216,6 +214,14 @@ class CalendarEditPageView(
 
   fun setSnapshot(value: Map<String, Any?>) {
     pendingSnapshot = value
+  }
+
+  fun setBridgeEventsEnabled(value: Boolean) {
+    bridgeEventsEnabled = value
+  }
+
+  fun setActionListener(listener: ((Map<String, Any?>) -> Unit)?) {
+    actionListener = listener
   }
 
   fun commitProps() {
@@ -313,7 +319,7 @@ class CalendarEditPageView(
       saving = state.saving,
       draftValid = CalendarEditValidator.validate(draft).valid,
     )
-    titleBar.addRightTextAction("保存", CalendarTitleSaveContract.color(saveType), debounce = true) {
+    titleBar.addRightTextAction("保存", { CalendarTitleSaveContract.color(saveType) }, debounce = true) {
       when (saveType) {
         CalendarTitleSaveType.ENABLE_SAVE,
         CalendarTitleSaveType.DISABLE_SAVE_WITH_FEEDBACK -> requestSave()
@@ -373,13 +379,13 @@ class CalendarEditPageView(
     repeatRow.isClickable = true
     repeatEndRow.isEnabled = true
     repeatEndRow.isClickable = true
-    val repeatTextColor = if (state.recurrenceRuleEditable) CalendarPagePalette.text else CalendarPagePalette.disabled
-    val repeatIconColor = if (state.recurrenceRuleEditable) CalendarPagePalette.placeholder else CalendarPagePalette.disabled
-    repeatValue.setTextColor(repeatTextColor)
-    repeatEndValue.setTextColor(repeatTextColor)
-    repeatIcon.imageTintList = ColorStateList.valueOf(repeatIconColor)
-    repeatArrow.imageTintList = ColorStateList.valueOf(repeatIconColor)
-    repeatEndArrow.imageTintList = ColorStateList.valueOf(repeatIconColor)
+    val repeatTextColor = { if (state.recurrenceRuleEditable) CalendarPagePalette.text else CalendarPagePalette.disabled }
+    val repeatIconColor = { if (state.recurrenceRuleEditable) CalendarPagePalette.placeholder else CalendarPagePalette.disabled }
+    repeatValue.pageTextColor(repeatTextColor)
+    repeatEndValue.pageTextColor(repeatTextColor)
+    repeatIcon.pageIconTint { ColorStateList.valueOf(repeatIconColor()) }
+    repeatArrow.pageIconTint { ColorStateList.valueOf(repeatIconColor()) }
+    repeatEndArrow.pageIconTint { ColorStateList.valueOf(repeatIconColor()) }
     reminderValue.text = reminderLabel(draft.reminderMinutes)
     val showTime = !draft.allDay && draft.hasTime
     startTimeRow.visibility = if (showTime) View.VISIBLE else View.GONE
@@ -533,7 +539,8 @@ class CalendarEditPageView(
   }
 
   private fun dispatchAction(payload: Map<String, Any?>) {
-    if (context !is ComponentActivity) onAction(payload)
+    actionListener?.invoke(payload)
+    if (bridgeEventsEnabled) onAction(payload)
   }
 
   private fun valueRow(iconRes: Int, label: String, value: TextView, onClick: () -> Unit): View =
@@ -542,7 +549,7 @@ class CalendarEditPageView(
       gravity = Gravity.CENTER_VERTICAL
       minimumHeight = context.pageDp(48)
       addIcon(iconRes)
-      addView(context.pageText(label, 16f, CalendarPagePalette.secondary),
+      addView(context.pageText(label, 16f, { CalendarPagePalette.secondary }),
         LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
       addView(value.apply {
         gravity = Gravity.CENTER_VERTICAL or Gravity.END
@@ -578,7 +585,7 @@ class CalendarEditPageView(
     }, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
     addView(ImageView(context).apply {
       setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_chevron_right_bold)
-      imageTintList = ColorStateList.valueOf(CalendarPagePalette.placeholder)
+      pageIconTint { ColorStateList.valueOf(CalendarPagePalette.placeholder) }
     }, LinearLayout.LayoutParams(context.pageDp(12), context.pageDp(12)).apply {
       rightMargin = context.pageDp(16)
     })
@@ -600,14 +607,14 @@ class CalendarEditPageView(
       }
     }
 
-  private fun buildActionRow(iconRes: Int, label: String, color: Int, onClick: () -> Unit): View =
+  private fun buildActionRow(iconRes: Int, label: String, color: () -> Int, onClick: () -> Unit): View =
     LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
       minimumHeight = context.pageDp(48)
       addView(ImageView(context).apply {
         setImageResource(iconRes)
-        imageTintList = ColorStateList.valueOf(color)
+        pageIconTint { ColorStateList.valueOf(color()) }
         setPadding(context.pageDp(14), context.pageDp(14), context.pageDp(14), context.pageDp(14))
       }, LinearLayout.LayoutParams(context.pageDp(46), context.pageDp(48)))
       addView(context.pageText(label, 16f, color), LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
@@ -620,7 +627,7 @@ class CalendarEditPageView(
   private fun LinearLayout.addIcon(iconRes: Int) {
     addView(ImageView(context).apply {
       setImageResource(iconRes)
-      imageTintList = ColorStateList.valueOf(CalendarPagePalette.placeholder)
+      pageIconTint { ColorStateList.valueOf(CalendarPagePalette.placeholder) }
       setPadding(context.pageDp(14), context.pageDp(14), context.pageDp(14), context.pageDp(14))
     }, LinearLayout.LayoutParams(context.pageDp(46), context.pageDp(48)))
   }

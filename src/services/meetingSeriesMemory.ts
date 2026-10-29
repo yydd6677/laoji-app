@@ -1,11 +1,6 @@
 import type { CalEvent } from '../types';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-  SummaryCitationRecord,
-  SummarySectionRecord,
-} from '../data/repositories';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository, SummaryCitationRecord, SummarySectionRecord } from "../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import {
   assertScopeKey,
   calendarMeetingSeriesKey,
@@ -30,7 +25,6 @@ export interface MeetingSeriesMemoryDecision {
   content: string;
   canonicalMeetingId: string;
   legacyMeetingId: string;
-  sourceMeetingRemoteId: string | null;
   sourceSectionKey: string;
   sourceOrdinal: number;
   sourceMeetingTitle: string;
@@ -45,8 +39,6 @@ export interface MeetingSeriesMemoryAction {
   dueAtMs: number | null;
   canonicalMeetingId: string;
   legacyMeetingId: string;
-  sourceMeetingRemoteId: string | null;
-  sourceRemoteItemId: string | null;
   sourceMeetingTitle: string;
   occurrenceDate: string;
   sourceSegmentId: string | null;
@@ -59,7 +51,6 @@ export interface MeetingSeriesMemoryProjection {
   previousMeeting: {
     canonicalMeetingId: string;
     legacyMeetingId: string;
-    remoteMeetingId: string | null;
     title: string;
     occurrenceDate: string;
     endedAtMs: number | null;
@@ -85,7 +76,7 @@ export function isFutureMeetingSeriesOccurrence(event: CalEvent, nowMs = Date.no
 }
 
 function legacyMeetingId(aggregate: MeetingNoteAggregate): string {
-  return aggregate.note.legacySourceId ?? aggregate.note.remoteId ?? aggregate.note.id;
+  return aggregate.note.legacySourceId ?? aggregate.note.id;
 }
 
 function visibleMeetingTitle(aggregate: MeetingNoteAggregate): string {
@@ -162,7 +153,6 @@ async function resolveMeetingSeriesMemoryForReference(
         content,
         canonicalMeetingId: previous.note.id,
         legacyMeetingId: previousLegacyId,
-        sourceMeetingRemoteId: previous.note.remoteId,
         sourceSectionKey: section.stableKey,
         sourceOrdinal: index,
         sourceMeetingTitle: previousTitle,
@@ -179,7 +169,6 @@ async function resolveMeetingSeriesMemoryForReference(
     previousMeeting: {
       canonicalMeetingId: previous.note.id,
       legacyMeetingId: previousLegacyId,
-      remoteMeetingId: previous.note.remoteId,
       title: previousTitle,
       occurrenceDate: previousOccurrenceDate,
       endedAtMs: previous.note.endedAtMs,
@@ -192,8 +181,6 @@ async function resolveMeetingSeriesMemoryForReference(
       dueAtMs: record.action.dueAtMs,
       canonicalMeetingId: record.canonicalMeetingId,
       legacyMeetingId: record.legacyMeetingId,
-      sourceMeetingRemoteId: record.remoteMeetingId,
-      sourceRemoteItemId: record.action.remoteId,
       sourceMeetingTitle: record.meetingTitle.trim() || '(无主题)',
       occurrenceDate: record.occurrenceDate,
       sourceSegmentId: record.action.sourceSegmentId,

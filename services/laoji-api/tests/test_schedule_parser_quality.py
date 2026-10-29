@@ -5,14 +5,18 @@ import pytest
 from app.services import schedule_parser_service as parser
 
 
-def test_schedule_llm_context_defaults_to_shared_8192_runner(monkeypatch):
+def test_schedule_llm_context_uses_shared_generation_runner(monkeypatch):
     monkeypatch.delenv("SCHEDULE_LLM_NUM_CTX", raising=False)
-    assert parser._schedule_llm_num_ctx() == 8192
+    monkeypatch.delenv("LAOJI_GENERATION_NUM_CTX", raising=False)
+    monkeypatch.delenv("MEETING_SUMMARY_NUM_CTX", raising=False)
+    assert parser._schedule_llm_num_ctx() == 16384
 
+    # The retired schedule-specific knob must not fork an 8k runner from the
+    # Summary/Q2 16k runner.
     monkeypatch.setenv("SCHEDULE_LLM_NUM_CTX", "4096")
-    assert parser._schedule_llm_num_ctx() == 4096
+    assert parser._schedule_llm_num_ctx() == 16384
 
-    monkeypatch.setenv("SCHEDULE_LLM_NUM_CTX", "invalid")
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "8192")
     assert parser._schedule_llm_num_ctx() == 8192
 
 
@@ -1111,8 +1115,11 @@ def test_quick_path_does_not_treat_conversation_context_as_location(monkeypatch,
 def test_compact_prompt_only_requires_model_owned_fields():
     prompt = parser._SYSTEM_PROMPT_TEMPLATE
 
-    assert len(prompt) < 1800
-    assert "JSON 必须包含：title、event_type、start_date、category、needs_clarification" in prompt
+    # vNext keeps calendar dates/times as evidence phrases and resolves them
+    # deterministically after generation; the old start_date-only contract is
+    # intentionally no longer part of the model-owned prompt.
+    assert len(prompt) < 2600
+    assert "JSON 必须包含：title、event_type、category、needs_clarification、date_phrase、time_phrase、recurrence_phrase" in prompt
     assert "color" not in prompt
     assert "confidence" not in prompt
     assert "reminder_minutes" not in prompt
@@ -1143,6 +1150,51 @@ def test_compact_model_fields_are_overridden_by_spoken_schedule_facts(monkeypatc
     assert parsed["start_time"] == "10:20"
     assert parsed["end_time"] == "11:20"
     assert parsed["reminder_minutes"] == 10
+
+
+def test_model_only_range_evidence_supplies_both_clocks(monkeypatch):
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 8, 19)
+
+    monkeypatch.setattr(parser, "date", FixedDate)
+    parsed = parser._normalize_model_only_result(
+        {
+            "title": "开会",
+            "event_type": "once",
+            "category": "工作",
+            "needs_clarification": False,
+            "date_phrase": "明天",
+            "time_phrase": "下午三点半到五点",
+            "end_time_phrase": "五点",
+        },
+        "明天下午三点半到五点开会",
+    )
+
+    assert parsed is not None
+    assert parsed["start_date"] == "2026-08-20"
+    assert parsed["start_time"] == "15:30"
+    assert parsed["end_time"] == "17:00"
+
+
+def test_model_only_range_requires_contiguous_source_evidence():
+    parsed = parser._normalize_model_only_result(
+        {
+            "title": "开会",
+            "event_type": "once",
+            "category": "工作",
+            "needs_clarification": False,
+            "date_phrase": "明天",
+            "time_phrase": "下午三点半开会到五点",
+            "end_time_phrase": "五点",
+        },
+        "明天下午三点半开会到五点",
+    )
+
+    assert parsed is not None
+    assert parsed["start_time"] == "15:30"
+    assert parsed["end_time"] == "17:00"
 
 
 def test_corrected_weekday_with_clock_range_is_not_a_date_range(monkeypatch):

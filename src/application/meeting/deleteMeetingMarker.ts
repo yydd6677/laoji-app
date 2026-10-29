@@ -1,4 +1,4 @@
-import type { MarkerRecord, MeetingNoteRepository } from '../../data/repositories';
+import type { MarkerRecord, MeetingNoteRepository } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
 

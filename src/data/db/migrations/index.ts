@@ -37,6 +37,18 @@ import { summaryCitationUserOverridesV36 } from './0036SummaryCitationUserOverri
 import { summaryVersionSyncV37 } from './0037SummaryVersionSync';
 import { localScheduleEventsV38 } from './0038LocalScheduleEvents';
 import { summaryFactsV3 } from './0039SummaryFactsV3';
+import { vnextAuthorityAndOperations } from './0040VNextAuthorityAndOperations';
+import { vnextCutoverTombstones } from './0041VNextCutoverTombstones';
+import { immutableSourcesAndQuestionQ2 } from './0042ImmutableSourcesAndQuestionQ2';
+import { transcriptOverlayAndSearchVNext } from './0043TranscriptOverlayAndSearchVNext';
+import { mediaGenerationAndTrashVNext } from './0044MediaGenerationAndTrashVNext';
+import { scheduleMentionGraphVNext } from './0045ScheduleMentionGraphVNext';
+import { deviceUploadExecutorV46 } from './0046DeviceUploadExecutor';
+import { transcriptStableIdentityV47 } from './0047TranscriptStableIdentity';
+import { summaryFactsGenerationsV48 } from './0048SummaryFactsGenerations';
+import { questionQ2ActivationFenceV49 } from './0049QuestionQ2ActivationFence';
+import { questionQ2AttachmentFenceV50 } from './0050QuestionQ2AttachmentFence';
+import { retireCutoverAndSummaryUpgradeV51 } from './0051RetireCutoverAndSummaryUpgrade';
 import type { MeetingDatabaseMigration } from './types';
 
 export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
@@ -79,6 +91,18 @@ export const meetingDatabaseMigrations: readonly MeetingDatabaseMigration[] = [
   summaryVersionSyncV37,
   localScheduleEventsV38,
   summaryFactsV3,
+  vnextAuthorityAndOperations,
+  vnextCutoverTombstones,
+  immutableSourcesAndQuestionQ2,
+  transcriptOverlayAndSearchVNext,
+  mediaGenerationAndTrashVNext,
+  scheduleMentionGraphVNext,
+  deviceUploadExecutorV46,
+  transcriptStableIdentityV47,
+  summaryFactsGenerationsV48,
+  questionQ2ActivationFenceV49,
+  questionQ2AttachmentFenceV50,
+  retireCutoverAndSummaryUpgradeV51,
 ];
 
 export { MEETING_MEMORY_SCHEMA_V1_SQL } from './0001MeetingMemorySchema';
@@ -120,4 +144,22 @@ export { SUMMARY_CITATION_USER_OVERRIDES_V36_SQL } from './0036SummaryCitationUs
 export { SUMMARY_VERSION_SYNC_V37_SQL } from './0037SummaryVersionSync';
 export { LOCAL_SCHEDULE_EVENTS_V38_SQL } from './0038LocalScheduleEvents';
 export { SUMMARY_FACTS_V3_SQL } from './0039SummaryFactsV3';
+export { VNEXT_AUTHORITY_AND_OPERATIONS_V40_SQL } from './0040VNextAuthorityAndOperations';
+export { VNEXT_CUTOVER_TOMBSTONES_V41_SQL } from './0041VNextCutoverTombstones';
+export { IMMUTABLE_SOURCES_AND_Q2_V42_SQL } from './0042ImmutableSourcesAndQuestionQ2';
+export { TRANSCRIPT_OVERLAY_AND_SEARCH_VNEXT_V43_SQL } from './0043TranscriptOverlayAndSearchVNext';
+export { MEDIA_GENERATION_AND_TRASH_VNEXT_V44_SQL } from './0044MediaGenerationAndTrashVNext';
+export {
+  NATIVE_PROJECTION_CHECKPOINTS_V45_SQL,
+  SCHEDULE_MENTION_GRAPH_VNEXT_V45_SQL,
+} from './0045ScheduleMentionGraphVNext';
+export { DEVICE_UPLOAD_EXECUTOR_V46_SQL } from './0046DeviceUploadExecutor';
+export { TRANSCRIPT_STABLE_IDENTITY_V47_SQL } from './0047TranscriptStableIdentity';
+export { SUMMARY_FACTS_GENERATIONS_V48_SQL } from './0048SummaryFactsGenerations';
+export { questionQ2ActivationFenceV49 } from './0049QuestionQ2ActivationFence';
+export { questionQ2AttachmentFenceV50 } from './0050QuestionQ2AttachmentFence';
+export {
+  RETIRE_CUTOVER_AND_SUMMARY_UPGRADE_V51_SQL,
+  retireCutoverAndSummaryUpgradeV51,
+} from './0051RetireCutoverAndSummaryUpgrade';
 export type { MeetingDatabaseMigration } from './types';

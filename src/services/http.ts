@@ -14,6 +14,9 @@ function requestAbortError(): Error {
 }
 
 export function requestTimeoutMs(url: string): number {
+  // This is a small, idempotent control-plane GET, not inference. A stalled
+  // connection must leave time for its bounded recovery in deviceV2Api.
+  if (/\/api\/device\/v2\/capabilities(?:\?|$)/.test(url)) return 5_000;
   // R2 multipart completion verifies the remote object, streams it to the
   // bounded server-side audio area, and checks its SHA-256 before returning.
   // That work is intentionally synchronous so the following transcription

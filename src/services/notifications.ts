@@ -11,7 +11,8 @@ import {
 } from '../utils/eventIdentity';
 import { expandEventsForMonths } from '../utils/eventRecurrence';
 import { eventListTitle } from '../utils/eventTitle';
-import { sqliteMeetingNoteRepository, type MeetingActionReminderRecord } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
+import type { MeetingActionReminderRecord } from "../data/repositories/meetingNoteRepository";
 import { isScopeKey, type ScopeKey } from '../domain/meeting';
 
 export const DEFAULT_REMINDER_MINUTES = 15;

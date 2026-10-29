@@ -1,9 +1,6 @@
 import type { CalEvent, Meeting } from '../types';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-} from '../data/repositories';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository } from "../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type {
   OccurrenceReference,
   ScheduleSnapshot,
@@ -25,7 +22,6 @@ export interface OccurrenceMeetingProjection {
   action: OccurrenceMeetingActionKind;
   label: '开始记录' | '继续记录' | '查看记录';
   statusLabel: string;
-  syncConflict: boolean;
 }
 
 export interface CalendarMeetingContext {
@@ -76,13 +72,6 @@ export function calendarMeetingContext(
 
 function legacyFacingMeetingId(aggregate: MeetingNoteAggregate): string {
   if (aggregate.note.legacySourceId) return aggregate.note.legacySourceId;
-  // Keep occurrence navigation on the same identity exposed by the canonical
-  // meeting-list projection. Newly created account meetings retain their local
-  // canonical ID after the remote ACK; only imported legacy-store rows use the
-  // remote ID as their compatibility identity.
-  if (aggregate.note.entryPoint === 'legacy_store' && aggregate.note.remoteId) {
-    return aggregate.note.remoteId;
-  }
   return aggregate.note.id;
 }
 
@@ -111,7 +100,6 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
       action: 'continue',
       label: '继续记录',
       statusLabel: presentation.label,
-      syncConflict: false,
     };
   }
   if (aggregate.note.lifecycle === 'ended' || hasContent) {
@@ -121,7 +109,6 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
       action: 'view',
       label: '查看记录',
       statusLabel: presentation.label,
-      syncConflict: false,
     };
   }
   return {
@@ -130,7 +117,6 @@ function projectAggregate(aggregate: MeetingNoteAggregate): OccurrenceMeetingPro
     action: 'start',
     label: '开始记录',
     statusLabel: presentation.label,
-    syncConflict: false,
   };
 }
 
@@ -142,16 +128,11 @@ export async function resolveOccurrenceMeeting(
   assertScopeKey(scopeKey);
   const aggregate = await repository.findByOccurrence(occurrence, scopeKey);
   if (!aggregate || aggregate.note.lifecycle === 'deleted') return null;
-  const projection = projectAggregate(aggregate);
-  return {
-    ...projection,
-    syncConflict: await repository.hasOccurrenceSyncConflict(occurrence, scopeKey),
-  };
+  return projectAggregate(aggregate);
 }
 
 export interface DeletedOccurrenceMeetingIdentity {
   localMeetingId: string;
-  remoteMeetingId: string | null;
 }
 
 export async function resolveDeletedOccurrenceMeetingIdentity(
@@ -163,7 +144,6 @@ export async function resolveDeletedOccurrenceMeetingIdentity(
   const aggregate = await repository.findByOccurrence(occurrence, scopeKey);
   return aggregate?.note.lifecycle === 'deleted' ? {
     localMeetingId: aggregate.note.id,
-    remoteMeetingId: aggregate.note.remoteId?.trim() || null,
   } : null;
 }
 

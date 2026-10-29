@@ -12,19 +12,17 @@ import { AppActionSheet, type AppActionSheetItem } from '../components/AppAction
 import { AppToast } from '../components/AppToast';
 import { useAppDialog } from '../components/AppDialog';
 import { useEvents } from '../store/EventsStore';
-import { useAuth } from '../store/AuthStore';
 import type { CalEvent, EventRecurrenceScope, EventRef, RootStackParamList } from '../types';
 import type { ScopeKey } from '../domain/meeting';
 import {
-  DEFAULT_REMINDER_MINUTES,
   REMINDER_OPTIONS,
   defaultReminderForEvent,
   loadNotificationPrefs,
   reminderUnavailableMessage,
-  type ReminderMinutes,
 } from '../services/notifications';
 import { normalizeEventCategory, type EventCategory } from '../utils/eventColors';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
+import { finishScheduleInput } from '../data/repositories/scheduleInputRepository';
 import { eventRefForEvent } from '../utils/eventIdentity';
 import { resolveEventReference } from '../utils/eventRecurrence';
 import { validateEventDraft } from '../utils/eventDraftValidation';
@@ -43,7 +41,7 @@ import {
   nativeCalendarEditDraft,
 } from '../native/nativeCalendarPages';
 import { linkMeetingActionFollowup } from '../services/meetingActionFollowup';
-import { Colors as C } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'AddEvent'>;
@@ -98,8 +96,8 @@ function initialDraft(
 // CAL-EDIT-001 / CAL-REPEAT-RRULE-001 / UI-FORM-001: native inputs emit complete drafts;
 // this route owns validation and writes.
 export function AddEventScreen({ navigation, route }: Props) {
+  const { colors: C } = useTheme();
   const { events, searchableEvents, addEvent, updateEvent, deleteEvent } = useEvents();
-  const { mode, session } = useAuth();
   const { showDialog } = useAppDialog();
   const editingRef = route.params?.eventRef;
   const editingEvent = editingRef
@@ -139,12 +137,8 @@ export function AddEventScreen({ navigation, route }: Props) {
   const dirty = JSON.stringify(draft) !== baselineRef.current;
   draftRef.current = draft;
 
-  const notificationScope = mode === 'authenticated' && session
-    ? `user:${session.user.id}`
-    : mode === 'guest' ? 'guest' : 'signed_out';
-  const meetingScopeKey: ScopeKey | null = mode === 'authenticated' && session
-    ? `user:${session.user.id}`
-    : mode === 'guest' ? 'guest' : null;
+  const notificationScope = 'guest';
+  const meetingScopeKey: ScopeKey = 'guest';
 
   useEffect(() => {
     mountedRef.current = true;
@@ -246,7 +240,13 @@ export function AddEventScreen({ navigation, route }: Props) {
     detail: route.params?.draft?.detail,
     status: route.params?.draft?.status,
     reminderMinutes: value.isAllDay || !value.startTime ? null : value.reminderMinutes,
-  }), [route.params?.draft]);
+    ...(route.params?.draft?.draftSourceSha256 ? {
+      eventRevision: route.params.draft.eventRevision,
+      draftSourceSha256: route.params.draft.draftSourceSha256,
+      producerRevision: route.params.draft.producerRevision,
+      graphSchemaRevision: route.params.draft.graphSchemaRevision,
+    } : {}),
+  }), [C.primary, route.params?.draft]);
 
   const activeSave = (runId: number) => mountedRef.current
     && saveLockRef.current
@@ -265,11 +265,10 @@ export function AddEventScreen({ navigation, route }: Props) {
     recurrenceScope: EventRecurrenceScope,
   ) => {
     let reminderDelivery: Awaited<ReturnType<typeof addEvent>>['reminderDelivery'] | undefined;
-    let syncStatus: Awaited<ReturnType<typeof addEvent>>['syncStatus'] | undefined;
     let followupEventSaved = false;
     try {
       if (editingEvent) {
-        ({ reminderDelivery, syncStatus } = await updateEvent(eventRefForEvent(editingEvent), payload, recurrenceScope));
+        ({ reminderDelivery } = await updateEvent(eventRefForEvent(editingEvent), payload, recurrenceScope));
       } else {
         let createdEventRef = createdFollowupEventRef.current;
         if (!createdEventRef) {
@@ -278,17 +277,17 @@ export function AddEventScreen({ navigation, route }: Props) {
           }
           const created = await addEvent({
             ...payload,
-            clientRequestId: createRequestRef.current.id,
+            clientRequestId: route.params?.draft?.clientRequestId ?? createRequestRef.current.id,
           });
-          ({ reminderDelivery, syncStatus } = created);
+          ({ reminderDelivery } = created);
           createdEventRef = created.eventRef;
           if (followup) createdFollowupEventRef.current = createdEventRef;
         }
         if (followup) {
           followupEventSaved = true;
-          if (!meetingScopeKey) throw new Error('当前登录状态无法关联后续日程');
           await linkMeetingActionFollowup(followup, meetingScopeKey, createdEventRef.sourceEventId);
         }
+        if (route.params?.draft?.inputJobId) await finishScheduleInput(route.params.draft.inputJobId, 'saved');
       }
     } catch (reason) {
       if (!activeSave(runId)) return;
@@ -297,9 +296,9 @@ export function AddEventScreen({ navigation, route }: Props) {
       showDialog({
         title: followupEventSaved ? '日程已创建，关联未完成' : stale ? '日程已发生变化' : '保存失败',
         message: followupEventSaved
-          ? '再次点击保存可重试关联，不会重复创建日程。'
+          ? '日程已保存，但未能关联到会议。'
           : stale
-            ? '该日程可能已在其他设备修改，请返回后重新打开再编辑。'
+            ? '该日程内容已发生变化，请返回后重新打开再编辑。'
             : readableErrorMessage(reason, '请检查网络后重试'),
         tone: followupEventSaved || stale ? 'warning' : 'error',
       });
@@ -307,8 +306,7 @@ export function AddEventScreen({ navigation, route }: Props) {
     }
     if (!activeSave(runId)) return;
     let warning: string | undefined;
-    if (syncStatus === 'pending') warning = '保存请求已记录，将在网络恢复后自动确认。';
-    else if (reminderDelivery === 'unavailable') {
+    if (reminderDelivery === 'unavailable') {
       warning = await reminderUnavailableMessage().catch(() => '本机提醒创建失败，请重新打开日程并保存提醒。');
     } else if (reminderDelivery === 'unconfirmed') {
       warning = '本机提醒状态未能确认，可重新打开日程并保存提醒。';
@@ -326,7 +324,7 @@ export function AddEventScreen({ navigation, route }: Props) {
       navigation.goBack();
     }
     if (warning) showDialog({
-      title: syncStatus === 'pending' ? '日程等待同步' : '日程已保存',
+      title: '日程已保存',
       message: warning,
       tone: 'warning',
     });
@@ -525,7 +523,6 @@ export function AddEventScreen({ navigation, route }: Props) {
         collapsableChildren={false}
       >
         <LaojiCalendarEditView
-          nativeID="feishu:CAL-REPEAT-RRULE-001:calendar-edit-native-surface"
           style={styles.surface}
           snapshot={snapshot}
           onAction={event => handleAction(event.nativeEvent)}
@@ -533,7 +530,6 @@ export function AddEventScreen({ navigation, route }: Props) {
         />
       </View>
       <AppActionSheet
-        feishuEvidence="feishu:CAL-REPEAT-RRULE-001:calendar-edit-repeat-choice-sheet"
         visible={choice !== null || scopeRequest !== null}
         title={scopeRequest ? undefined : choice === 'repeat' ? '重复' : '提醒'}
         items={choiceItems}
@@ -543,7 +539,6 @@ export function AddEventScreen({ navigation, route }: Props) {
         }}
       />
       <AppToast
-        feishuEvidence="feishu:CAL-REPEAT-RRULE-001:calendar-edit-feedback-toast"
         visible={feedback !== null}
         message={feedback?.message ?? ''}
         autoHideDurationMs={feedback?.durationMs ?? 3000}

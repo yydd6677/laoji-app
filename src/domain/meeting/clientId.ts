@@ -20,3 +20,7 @@ export const secureClientIdFactory: ClientIdFactory = {
     return id.toLowerCase();
   },
 };
+
+export function createSecureAssetGeneration(): string {
+  return secureClientIdFactory.create().replace(/-/g, '');
+}

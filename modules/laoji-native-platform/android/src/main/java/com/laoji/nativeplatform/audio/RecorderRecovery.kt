@@ -19,6 +19,8 @@ object RecorderRecovery {
     val future = CompletableFuture<RecordingRecoveryReport>()
     executor.execute {
       try {
+        DeviceV2RealtimeDurableStore.cleanupExpired(context)
+        DeviceV2RealtimeCursorStore.cleanupExpired(context)
         val report = RecordingRepository(context).recover(excludedSessionId, includeFinalized)
         if (!includeFinalized) {
           report.recordings.forEach { recording ->

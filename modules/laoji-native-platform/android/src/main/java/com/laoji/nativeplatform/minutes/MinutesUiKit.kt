@@ -7,6 +7,8 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.StateListDrawable
 import android.util.TypedValue
 import android.view.Gravity
@@ -14,90 +16,128 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.laoji.nativeplatform.ui.ProfileEntryView
+import com.laoji.nativeplatform.ui.GeneratedUiTokens
 import com.laoji.nativeplatform.ui.NativeUiTokens
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import com.laoji.nativeplatform.NativeThemePreference
 import expo.modules.kotlin.AppContext
 import kotlin.math.roundToInt
 
 internal object MinutesPalette {
   var vivid = false
-  var page = Color.rgb(248, 249, 250)
-  var surface = Color.WHITE
-  var filler = Color.rgb(239, 240, 241)
-  var text = Color.rgb(31, 35, 41)
-  var secondary = Color.rgb(100, 106, 115)
-  var faint = Color.rgb(143, 149, 158)
-  var disabled = Color.rgb(187, 191, 196)
-  var divider = Color.rgb(222, 224, 227)
+  var paper = false
+  var midnight = false
+  var cardRadiusDp = 10
+  var coverRadiusDp = 0
+  const val gridSidePaddingDp = 8
+  var page = GeneratedUiTokens.palette("neutral").appBg
+  var surface = GeneratedUiTokens.palette("neutral").card
+  var filler = GeneratedUiTokens.palette("neutral").inputBg
+  var text = GeneratedUiTokens.palette("neutral").text
+  var secondary = GeneratedUiTokens.palette("neutral").sub
+  var faint = GeneratedUiTokens.palette("neutral").faint
+  var disabled = GeneratedUiTokens.palette("neutral").disabled
+  var divider = GeneratedUiTokens.palette("neutral").border
   var timelineTrack = Color.argb(13, 31, 35, 41)
-  var primary = Color.rgb(20, 86, 240)
-  var primarySoft = Color.rgb(240, 244, 255)
+  var primary = GeneratedUiTokens.palette("neutral").primary
+  var primarySoft = GeneratedUiTokens.palette("neutral").primaryLight
   var primaryTransparent = Color.argb(38, 51, 109, 244)
   var primaryTransparentStrong = Color.argb(76, 51, 109, 244)
   var coverDefault = Color.rgb(220, 229, 250)
   var coverSummary = Color.rgb(230, 238, 247)
   var coverContent = Color.rgb(240, 241, 242)
-  var danger = Color.rgb(226, 46, 40)
+  var danger = GeneratedUiTokens.palette("neutral").red
   var dangerSoft = Color.rgb(255, 243, 243)
   var warning = Color.rgb(194, 87, 5)
   var success = Color.rgb(37, 136, 50)
-  var recordGradientStart = Color.rgb(85, 95, 242)
-  var recordGradientEnd = Color.rgb(139, 118, 245)
+  var recordGradientStart = GeneratedUiTokens.palette("neutral").gradFrom
+  var recordGradientEnd = GeneratedUiTokens.palette("neutral").gradTo
 
   fun configure(context: Context) {
-    vivid = NativeThemePreference.isVivid(context)
-    if (!vivid) {
-      page = Color.rgb(248, 249, 250)
-      surface = Color.WHITE
-      filler = Color.rgb(239, 240, 241)
-      text = Color.rgb(31, 35, 41)
-      secondary = Color.rgb(100, 106, 115)
-      faint = Color.rgb(143, 149, 158)
-      disabled = Color.rgb(187, 191, 196)
-      divider = Color.rgb(222, 224, 227)
-      timelineTrack = Color.argb(13, 31, 35, 41)
-      primary = Color.rgb(20, 86, 240)
-      primarySoft = Color.rgb(240, 244, 255)
-      primaryTransparent = Color.argb(38, 51, 109, 244)
-      primaryTransparentStrong = Color.argb(76, 51, 109, 244)
-      coverDefault = Color.rgb(220, 229, 250)
-      coverSummary = Color.rgb(230, 238, 247)
-      coverContent = Color.rgb(240, 241, 242)
-      danger = Color.rgb(226, 46, 40)
-      dangerSoft = Color.rgb(255, 243, 243)
-      warning = Color.rgb(194, 87, 5)
-      success = Color.rgb(37, 136, 50)
-      recordGradientStart = Color.rgb(85, 95, 242)
-      recordGradientEnd = Color.rgb(139, 118, 245)
-      return
+    val theme = NativeThemePreference.read(context)
+    vivid = theme == "vivid"
+    paper = theme == "paper"
+    midnight = theme == "midnight"
+    val colors = GeneratedUiTokens.palette(theme)
+    page = colors.appBg
+    surface = if (paper) colors.body else colors.card
+    filler = colors.inputBg
+    text = colors.text
+    secondary = colors.sub
+    faint = colors.faint
+    disabled = colors.disabled
+    divider = colors.border
+    primary = colors.primary
+    primarySoft = colors.primaryLight
+    danger = colors.red
+    recordGradientStart = colors.gradFrom
+    recordGradientEnd = colors.gradTo
+    when (theme) {
+      "vivid" -> configureVivid()
+      "paper" -> configurePaper()
+      "midnight" -> configureMidnight()
+      else -> configureNeutral()
     }
-    page = Color.rgb(255, 240, 246)
-    surface = Color.rgb(253, 234, 245)
-    filler = Color.rgb(240, 232, 255)
-    text = Color.rgb(28, 27, 51)
-    secondary = Color.rgb(148, 144, 181)
-    faint = Color.rgb(184, 180, 212)
-    disabled = Color.rgb(210, 206, 227)
-    divider = Color.rgb(229, 207, 232)
-    timelineTrack = Color.argb(18, 123, 92, 184)
-    primary = Color.rgb(123, 92, 184)
-    primarySoft = Color.rgb(237, 232, 255)
-    primaryTransparent = Color.argb(38, 146, 104, 224)
-    primaryTransparentStrong = Color.argb(76, 146, 104, 224)
-    coverDefault = Color.rgb(231, 217, 255)
-    coverSummary = Color.rgb(252, 224, 240)
-    coverContent = Color.rgb(244, 240, 255)
-    danger = Color.rgb(255, 77, 79)
+  }
+
+  private fun configureNeutral() {
+    cardRadiusDp = 10
+    coverRadiusDp = 0
+    timelineTrack = Color.argb(13, 23, 32, 51)
+    primaryTransparent = Color.argb(38, 39, 104, 232)
+    primaryTransparentStrong = Color.argb(76, 39, 104, 232)
+    coverDefault = Color.rgb(220, 230, 248)
+    coverSummary = Color.rgb(230, 238, 248)
+    coverContent = Color.rgb(239, 243, 248)
+    dangerSoft = Color.rgb(255, 243, 243)
+    warning = Color.rgb(194, 87, 5)
+    success = Color.rgb(37, 136, 50)
+  }
+
+  private fun configureVivid() {
+    cardRadiusDp = 16
+    coverRadiusDp = 12
+    timelineTrack = Color.argb(16, 114, 85, 201)
+    primaryTransparent = Color.argb(38, 130, 101, 212)
+    primaryTransparentStrong = Color.argb(76, 130, 101, 212)
+    coverDefault = Color.rgb(235, 226, 250)
+    coverSummary = Color.rgb(250, 228, 238)
+    coverContent = Color.rgb(243, 239, 249)
     dangerSoft = Color.rgb(255, 240, 248)
-    warning = Color.rgb(255, 149, 0)
-    success = Color.rgb(82, 196, 26)
-    // [PRODUCT] The historical LaoJi vivid skin uses a warmer pink-purple
-    // recording action while preserving the source control geometry.
-    recordGradientStart = Color.rgb(227, 91, 196)
-    recordGradientEnd = Color.rgb(126, 80, 221)
+    warning = Color.rgb(224, 139, 51)
+    success = Color.rgb(75, 157, 73)
+  }
+
+  private fun configurePaper() {
+    cardRadiusDp = 10
+    coverRadiusDp = 4
+    timelineTrack = Color.argb(15, 37, 38, 33)
+    primaryTransparent = Color.argb(38, 99, 120, 36)
+    primaryTransparentStrong = Color.argb(76, 99, 120, 36)
+    coverDefault = Color.rgb(228, 231, 207)
+    coverSummary = Color.rgb(235, 229, 213)
+    coverContent = Color.rgb(239, 238, 230)
+    dangerSoft = Color.rgb(249, 232, 228)
+    warning = Color.rgb(181, 106, 34)
+    success = Color.rgb(95, 125, 40)
+  }
+
+  private fun configureMidnight() {
+    cardRadiusDp = 12
+    coverRadiusDp = 8
+    timelineTrack = Color.argb(22, 222, 231, 242)
+    primaryTransparent = Color.argb(46, 116, 167, 255)
+    primaryTransparentStrong = Color.argb(82, 116, 167, 255)
+    coverDefault = Color.rgb(31, 55, 84)
+    coverSummary = Color.rgb(36, 51, 69)
+    coverContent = Color.rgb(32, 40, 52)
+    dangerSoft = Color.rgb(74, 41, 43)
+    warning = Color.rgb(224, 164, 92)
+    success = Color.rgb(103, 197, 135)
   }
 }
 
@@ -119,31 +159,95 @@ internal fun Context.dpRounded(value: Int): Int =
 internal fun Context.sp(value: Int): Float =
   TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value.toFloat(), resources.displayMetrics)
 
+/** View-owned consumption of the shared theme; no content binding or state replay. */
+private class MinutesAppearance(private val view: View) {
+  var textColors: (() -> ColorStateList)? = null
+  var fontWeight: Int? = null
+  var iconColors: (() -> ColorStateList?)? = null
+  var background: (() -> Drawable?)? = null
+  var drawing: (() -> Unit)? = null
+
+  fun apply() {
+    MinutesPalette.configure(view.context)
+    (view as? TextView)?.let { text ->
+      textColors?.let { text.setTextColor(it()) }
+      fontWeight?.let { text.typeface = LaojiThemeTypography.typeface(view.context, it) }
+    }
+    (view as? ImageView)?.let { image -> iconColors?.let { image.imageTintList = it() } }
+    background?.let { view.background = it() }
+    drawing?.invoke()
+  }
+}
+
+private fun View.minutesAppearance(): MinutesAppearance {
+  val key = com.laoji.nativeplatform.R.id.laoji_minutes_appearance
+  (getTag(key) as? MinutesAppearance)?.let { return it }
+  val appearance = MinutesAppearance(this)
+  setTag(key, appearance)
+  NativeUiTokens.bindTheme(this) { appearance.apply() }
+  return appearance
+}
+
+internal fun TextView.minutesTextColor(color: () -> Int) {
+  minutesTextColors { ColorStateList.valueOf(color()) }
+}
+
+internal fun TextView.minutesTextColors(colors: () -> ColorStateList) {
+  minutesAppearance().textColors = colors
+  setTextColor(colors())
+}
+
+internal fun TextView.minutesTypeface(weight: Int) {
+  minutesAppearance().fontWeight = weight
+  typeface = LaojiThemeTypography.typeface(context, weight)
+}
+
+internal fun ImageView.minutesIconColors(colors: () -> ColorStateList?) {
+  minutesAppearance().iconColors = colors
+  imageTintList = colors()
+}
+
+internal fun View.minutesBackground(drawable: () -> Drawable?) {
+  minutesAppearance().background = drawable
+  background = drawable()
+}
+
+internal fun View.minutesBackgroundColor(color: () -> Int) {
+  minutesBackground { ColorDrawable(color()) }
+}
+
+internal fun View.minutesDrawing(apply: () -> Unit) {
+  minutesAppearance().drawing = apply
+  apply()
+}
+
 internal fun View.backgroundShape(
-  color: Int,
-  radiusDp: Int = 0,
-  strokeColor: Int? = null,
-  strokeWidthDp: Int = 0,
+  color: () -> Int,
+  radiusDp: () -> Int = { 0 },
+  strokeColor: (() -> Int)? = null,
+  strokeWidthDp: () -> Int = { 0 },
 ) {
-  background = GradientDrawable().apply {
-    setColor(color)
-    cornerRadius = context.dp(radiusDp).toFloat()
-    if (strokeColor != null && strokeWidthDp > 0) {
-      setStroke(context.dp(strokeWidthDp), strokeColor)
+  minutesBackground {
+    GradientDrawable().apply {
+      setColor(color())
+      cornerRadius = context.dp(radiusDp()).toFloat()
+      if (strokeColor != null && strokeWidthDp() > 0) {
+        setStroke(context.dp(strokeWidthDp()), strokeColor())
+      }
     }
   }
 }
 
 internal fun View.backgroundHorizontalGradient(
-  startColor: Int,
-  endColor: Int,
-  radiusDp: Int,
+  startColor: () -> Int,
+  endColor: () -> Int,
+  radiusDp: () -> Int,
 ) {
-  background = GradientDrawable(
-    GradientDrawable.Orientation.LEFT_RIGHT,
-    intArrayOf(startColor, endColor),
-  ).apply {
-    cornerRadius = context.dp(radiusDp).toFloat()
+  minutesBackground {
+    GradientDrawable(
+      GradientDrawable.Orientation.LEFT_RIGHT,
+      intArrayOf(startColor(), endColor()),
+    ).apply { cornerRadius = context.dp(radiusDp()).toFloat() }
   }
 }
 
@@ -177,13 +281,13 @@ internal fun statefulIconTint(defaultColor: Int, pressedColor: Int, disabledColo
 internal fun Context.textView(
   text: CharSequence = "",
   textSizeSp: Int = 14,
-  color: Int = MinutesPalette.text,
+  color: () -> Int = { MinutesPalette.text },
   weight: Int = Typeface.NORMAL,
 ): TextView = TextView(this).apply {
   this.text = text
   setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp.toFloat())
-  setTextColor(color)
-  typeface = Typeface.create(Typeface.DEFAULT, weight)
+  minutesTextColor(color)
+  minutesTypeface(weight)
   includeFontPadding = false
 }
 
@@ -192,7 +296,7 @@ internal fun Context.iconButton(
   description: String,
 ): ImageButton = ImageButton(this).apply {
   setImageResource(drawableRes)
-  imageTintList = ColorStateList.valueOf(MinutesPalette.text)
+  minutesIconColors { ColorStateList.valueOf(MinutesPalette.text) }
   background = null
   contentDescription = description
   isFocusable = true
@@ -203,6 +307,16 @@ internal fun Context.iconButton(
 }
 
 internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
+  private data class Configuration(
+    val title: String,
+    val showBack: Boolean,
+    val showSearch: Boolean,
+    val showShare: Boolean,
+    val showMore: Boolean,
+    val shareEnabled: Boolean,
+    val showDone: Boolean,
+  )
+
   private val titleView = context.textView(textSizeSp = 20, weight = Typeface.BOLD).apply {
     gravity = Gravity.CENTER
     maxLines = 1
@@ -213,7 +327,7 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
     visibility = View.GONE
   }
   private val editTitle = context.textView(textSizeSp = 17, weight = Typeface.BOLD).apply { maxLines = 1 }
-  private val editStatus = context.textView("已保存", textSizeSp = 12, color = MinutesPalette.faint).apply { maxLines = 1 }
+  private val editStatus = context.textView("已保存", textSizeSp = 12, color = { MinutesPalette.faint }).apply { maxLines = 1 }
   private val leftActions = LinearLayout(context).apply {
     orientation = LinearLayout.HORIZONTAL
     gravity = Gravity.CENTER_VERTICAL
@@ -222,21 +336,52 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
     orientation = LinearLayout.HORIZONTAL
     gravity = Gravity.CENTER_VERTICAL
   }
-  private var actionConfiguration = ""
   private var actionHandler: ((String) -> Unit)? = null
-  private var doneAction: View? = null
+  private var renderedConfiguration: Configuration? = null
+  private val backButton = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back,
+    "返回",
+  ).apply {
+    setOnClickListener { actionHandler?.invoke("back") }
+  }
+  private val moreButton = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline,
+    "更多会议记录操作",
+  ).apply {
+    setOnClickListener { actionHandler?.invoke("more") }
+  }
+  private val searchButton = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline,
+    "搜索文字记录",
+  ).apply {
+    setOnClickListener { actionHandler?.invoke("search") }
+  }
+  private val shareButton = context.iconButton(
+    com.laoji.nativeplatform.R.drawable.laoji_ic_share_outline,
+    "分享会议资料",
+  ).apply {
+    setOnClickListener { actionHandler?.invoke("share") }
+  }
+  private val doneButton = context.textView("完成", 17, { MinutesPalette.primary }).apply {
+    gravity = Gravity.CENTER
+    isClickable = true
+    isFocusable = true
+    contentDescription = "完成编辑会议记录标题"
+    visibility = View.GONE
+    setOnClickListener { actionHandler?.invoke("done") }
+  }
 
   val activeDoneAction: View?
-    get() = doneAction
+    get() = doneButton.takeIf { it.visibility == View.VISIBLE }
 
   fun setEditDirty(value: Boolean) {
     editStatus.text = if (value) "未保存" else "已保存"
-    editStatus.setTextColor(if (value) MinutesPalette.warning else MinutesPalette.faint)
+    editStatus.minutesTextColor { if (value) MinutesPalette.warning else MinutesPalette.faint }
     editStatus.contentDescription = editStatus.text
   }
 
   init {
-    setBackgroundColor(MinutesPalette.surface)
+    minutesBackgroundColor { MinutesPalette.surface }
     minimumHeight = context.dp(44)
     addView(
       titleView,
@@ -254,6 +399,13 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
       editStatus,
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT),
     )
+    leftActions.addView(
+      backButton,
+      LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { leftMargin = context.dp(6) },
+    )
+    rightActions.addView(searchButton, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
+    rightActions.addView(moreButton, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
+    rightActions.addView(shareButton, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
     addView(
       editTitleContainer,
       LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
@@ -268,9 +420,16 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
     )
     addView(
       rightActions,
-      LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
+      LayoutParams(context.dp(132), context.dp(44)).apply {
         gravity = Gravity.END
         rightMargin = context.dp(6)
+      },
+    )
+    addView(
+      doneButton,
+      LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
+        gravity = Gravity.END
+        rightMargin = context.dp(20)
       },
     )
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -286,65 +445,33 @@ internal class MinutesTitleBar(context: Context) : FrameLayout(context) {
     showDone: Boolean = false,
     onAction: (String) -> Unit,
   ) {
+    val next = Configuration(
+      title = title,
+      showBack = showBack,
+      showSearch = showSearch,
+      showShare = showShare,
+      showMore = showMore,
+      shareEnabled = shareEnabled,
+      showDone = showDone,
+    )
+    actionHandler = onAction
+    if (renderedConfiguration == next) return
+    renderedConfiguration = next
     if (titleView.text.toString() != title) titleView.text = title
     if (editTitle.text.toString() != title) editTitle.text = title
     titleView.visibility = if (showDone) View.GONE else View.VISIBLE
     editTitleContainer.visibility = if (showDone) View.VISIBLE else View.GONE
-    actionHandler = onAction
-    val nextConfiguration = listOf(showBack, showSearch, showShare, showMore, shareEnabled, showDone).joinToString("|")
-    if (nextConfiguration == actionConfiguration) return
-    actionConfiguration = nextConfiguration
-    leftActions.removeAllViews()
-    rightActions.removeAllViews()
-    doneAction = null
-    if (showBack && !showDone) {
-      leftActions.addView(
-        context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "返回").apply {
-          setOnClickListener { actionHandler?.invoke("back") }
-        },
-        LinearLayout.LayoutParams(context.dp(44), context.dp(44)).apply { leftMargin = context.dp(6) },
-      )
-    }
-    if (showDone) {
-      doneAction = context.textView("完成", 17, MinutesPalette.primary).apply {
-        gravity = Gravity.CENTER
-        isClickable = true
-        isFocusable = true
-        contentDescription = "完成编辑会议记录标题"
-        setOnClickListener { actionHandler?.invoke("done") }
-      }
-      (rightActions.layoutParams as? LayoutParams)?.rightMargin = context.dp(20)
-      rightActions.requestLayout()
-      rightActions.addView(doneAction, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)))
-    } else {
-      (rightActions.layoutParams as? LayoutParams)?.rightMargin = context.dp(6)
-      rightActions.requestLayout()
-      if (showMore) {
-        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_more_outline, "更多会议记录操作", action = "more")
-      }
-      if (showSearch) {
-        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline, "搜索文字记录", action = "search")
-      }
-      if (showShare) {
-        addRightAction(com.laoji.nativeplatform.R.drawable.laoji_ic_share_outline, "分享会议资料", shareEnabled, "share")
-      }
-    }
-  }
-
-  private fun addRightAction(
-    drawableRes: Int,
-    description: String,
-    enabled: Boolean = true,
-    action: String,
-  ) {
-    rightActions.addView(
-      context.iconButton(drawableRes, description).apply {
-        isEnabled = enabled
-        alpha = if (enabled) 1f else 0.35f
-        setOnClickListener { actionHandler?.invoke(action) }
-      },
-      LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
-    )
+    // Keep every action in one permanent slot. Tab changes only alter
+    // visibility, so the shared title bar never destroys/recreates buttons or
+    // shifts the remaining actions by one frame.
+    backButton.visibility = if (showBack && !showDone) View.VISIBLE else View.INVISIBLE
+    rightActions.visibility = if (showDone) View.INVISIBLE else View.VISIBLE
+    moreButton.visibility = if (showMore) View.VISIBLE else View.INVISIBLE
+    searchButton.visibility = if (showSearch) View.VISIBLE else View.INVISIBLE
+    shareButton.visibility = if (showShare) View.VISIBLE else View.INVISIBLE
+    shareButton.isEnabled = shareEnabled
+    shareButton.alpha = if (shareEnabled) 1f else 0.35f
+    doneButton.visibility = if (showDone) View.VISIBLE else View.GONE
   }
 }
 
@@ -385,7 +512,7 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
   }
 
   init {
-    setBackgroundColor(MinutesPalette.page)
+    minutesBackgroundColor { MinutesPalette.page }
     minimumHeight = context.dp(44)
     addView(
       titleView,
@@ -417,6 +544,8 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
     title: String,
     viewMode: MinutesHomeViewMode,
     recycleBin: Boolean,
+    canEmptyRecycleBin: Boolean,
+    recycleBinEmptying: Boolean,
     onAction: (String) -> Unit,
   ) {
     titleView.text = title
@@ -433,14 +562,18 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
     } else {
       "切换到网格视图"
     }
-    val nextConfiguration = if (recycleBin) "recycle" else "meetings"
+    val nextConfiguration = listOf(
+      if (recycleBin) "recycle" else "meetings",
+      canEmptyRecycleBin,
+      recycleBinEmptying,
+    ).joinToString("|")
     if (actionConfiguration == nextConfiguration) return
     actionConfiguration = nextConfiguration
     leading.removeAllViews()
     actions.removeAllViews()
     (titleView.layoutParams as LayoutParams).apply {
-      leftMargin = context.dp(if (recycleBin) 54 else 98)
-      rightMargin = context.dp(if (recycleBin) 54 else 98)
+      leftMargin = context.dp(if (recycleBin) 70 else 98)
+      rightMargin = context.dp(if (recycleBin) 70 else 98)
     }.also(titleView::setLayoutParams)
     if (recycleBin) {
       leading.addView(
@@ -449,6 +582,23 @@ internal class MinutesMainTitleBar(context: Context, appContext: AppContext) : F
           "返回会议记录",
         ).apply { setOnClickListener { actionHandler?.invoke("closeRecycleBin") } },
         LinearLayout.LayoutParams(context.dp(44), context.dp(44)),
+      )
+      actions.addView(
+        context.textView(
+          if (recycleBinEmptying) "清理中" else "清空",
+          textSizeSp = 15,
+          color = { if (canEmptyRecycleBin) MinutesPalette.danger else MinutesPalette.faint },
+          weight = Typeface.BOLD,
+        ).apply {
+          gravity = Gravity.CENTER
+          isClickable = canEmptyRecycleBin && !recycleBinEmptying
+          isFocusable = canEmptyRecycleBin && !recycleBinEmptying
+          isEnabled = canEmptyRecycleBin && !recycleBinEmptying
+          visibility = if (canEmptyRecycleBin || recycleBinEmptying) View.VISIBLE else View.INVISIBLE
+          contentDescription = if (recycleBinEmptying) "正在清空回收站" else "清空回收站"
+          setOnClickListener { actionHandler?.invoke("emptyRecycleBin") }
+        },
+        LinearLayout.LayoutParams(context.dp(64), context.dp(44)),
       )
       return
     }

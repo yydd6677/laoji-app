@@ -9,8 +9,11 @@ meeting text to the cloud.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
+import hashlib
 import itertools
+import json
 import math
 import os
 import queue
@@ -37,6 +40,12 @@ PRIORITIES = {"interactive": 0, "background": 1}
 
 
 class LlmProviderError(RuntimeError):
+    pass
+
+
+class LlmProviderPreempted(LlmProviderError):
+    """A checkpointed background generation yielded to interactive work."""
+
     pass
 
 
@@ -101,6 +110,28 @@ def canonical_ollama_base_url() -> str:
     return raw
 
 
+def canonical_generation_num_ctx() -> int:
+    """Return the one resident context size for the shared generation model.
+
+    Ollama keys a loaded runner by model options. Letting schedule, Summary
+    and Q2 request differently sized variants of the same 9B model causes a
+    costly unload/reload on capability switches. vNext has one generation
+    provider, so it must also have one resident runner shape.
+
+    ``MEETING_SUMMARY_NUM_CTX`` remains a compatibility input for existing
+    deployments, but individual business callers cannot override the value.
+    """
+    raw = os.getenv(
+        "LAOJI_GENERATION_NUM_CTX",
+        os.getenv("MEETING_SUMMARY_NUM_CTX", "16384"),
+    )
+    try:
+        configured = int(raw)
+    except (TypeError, ValueError):
+        configured = 16_384
+    return min(16_384, max(4_096, configured))
+
+
 def canonical_dashscope_base_url() -> str:
     """Validate a DashScope/OpenAI-compatible base URL from server config."""
     raw = os.getenv(
@@ -137,10 +168,12 @@ class _ProviderJob:
     finished: threading.Event = field(default_factory=threading.Event)
     result: Any = None
     error: Exception | None = None
+    handoff_waited: bool = False
+    preempt_requested: threading.Event = field(default_factory=threading.Event)
 
 
 class _ProviderCoordinator:
-    def __init__(self) -> None:
+    def __init__(self, *, background_handoff_ms: int | None = None) -> None:
         self._queue: queue.PriorityQueue[tuple[int, int, _ProviderJob]] = queue.PriorityQueue(
             maxsize=max(8, int(os.getenv("LAOJI_LLM_QUEUE_CAPACITY", "128")))
         )
@@ -148,8 +181,22 @@ class _ProviderCoordinator:
         self._lock = threading.Lock()
         self._pending = {name: 0 for name in PRIORITIES}
         self._active: dict[str, Any] | None = None
+        self._active_job: _ProviderJob | None = None
         self._last: dict[str, Any] | None = None
         self._last_by_operation: dict[str, dict[str, Any]] = {}
+        configured_handoff = background_handoff_ms
+        if configured_handoff is None:
+            try:
+                configured_handoff = int(
+                    os.getenv("LAOJI_LLM_BACKGROUND_HANDOFF_MS", "1000")
+                )
+            except ValueError:
+                configured_handoff = 1000
+        self._background_handoff_seconds = max(
+            0.0,
+            min(5.0, int(configured_handoff) / 1000.0),
+        )
+        self._interactive_arrived = threading.Event()
         threading.Thread(target=self._worker, name="laoji-llm-provider", daemon=True).start()
 
     def submit(
@@ -170,6 +217,14 @@ class _ProviderCoordinator:
             raise LlmProviderError("llm_queue_full") from exc
         with self._lock:
             self._pending[normalized] += 1
+            if (
+                normalized == "interactive"
+                and self._active_job is not None
+                and self._active_job.priority == "background"
+            ):
+                self._active_job.preempt_requested.set()
+        if normalized == "interactive":
+            self._interactive_arrived.set()
         if not job.finished.wait(max(1.0, wait_seconds)):
             raise LlmProviderError("llm_queue_timeout")
         if job.error is not None:
@@ -191,14 +246,45 @@ class _ProviderCoordinator:
 
     def _worker(self) -> None:
         while True:
-            _rank, _sequence, job = self._queue.get()
+            rank, sequence, job = self._queue.get()
+            if (
+                job.priority == "background"
+                and not job.handoff_waited
+                and self._background_handoff_seconds > 0
+            ):
+                # A Q2 request usually needs a few hundred milliseconds after
+                # the previous Summary completes to seal and load its source
+                # stream. Without a bounded handoff window, the next Summary
+                # can seize the non-preemptible local model just before that
+                # interactive job reaches this queue, adding a full chapter
+                # generation to user-visible latency.
+                job.handoff_waited = True
+                self._interactive_arrived.clear()
+                with self._lock:
+                    interactive_pending = self._pending["interactive"] > 0
+                if not interactive_pending:
+                    self._interactive_arrived.wait(self._background_handoff_seconds)
+                    with self._lock:
+                        interactive_pending = self._pending["interactive"] > 0
+                if interactive_pending:
+                    try:
+                        self._queue.put_nowait((rank, sequence, job))
+                    except queue.Full:
+                        # The queue filled after this job was removed. Running
+                        # it is safer than dropping an admitted generation.
+                        pass
+                    else:
+                        self._queue.task_done()
+                        continue
             with self._lock:
                 self._pending[job.priority] = max(0, self._pending[job.priority] - 1)
                 self._active = {"priority": job.priority, "operation": job.operation}
+                self._active_job = job
             started = time.perf_counter()
             queue_ms = round((started - job.queued_at) * 1000, 3)
             success = False
             try:
+                _PROVIDER_JOB_CONTEXT.job = job
                 job.result = job.call()
                 success = True
             except Exception as exc:
@@ -207,6 +293,7 @@ class _ProviderCoordinator:
                 elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
                 with self._lock:
                     self._active = None
+                    self._active_job = None
                     completed = {
                         "priority": job.priority,
                         "operation": job.operation,
@@ -217,13 +304,248 @@ class _ProviderCoordinator:
                     }
                     self._last = completed
                     self._last_by_operation[job.operation] = completed
+                try:
+                    del _PROVIDER_JOB_CONTEXT.job
+                except AttributeError:
+                    pass
                 job.finished.set()
                 self._queue.task_done()
 
 
+_PROVIDER_JOB_CONTEXT = threading.local()
 _COORDINATOR = _ProviderCoordinator()
 _SESSION = requests.Session()
 _SESSION.trust_env = False
+_PROBE_LOCK = threading.Lock()
+_EMBEDDING_PROBE_CACHE: dict[str, Any] = {}
+_INFERENCE_TELEMETRY_LOCK = threading.Lock()
+_INFERENCE_TELEMETRY: dict[str, dict[str, Any]] = {}
+_EMBEDDING_CACHE_LOCK = threading.Lock()
+_EMBEDDING_CACHE: OrderedDict[str, tuple[float, ...]] = OrderedDict()
+
+
+def _current_background_preempt_requested() -> bool:
+    job = getattr(_PROVIDER_JOB_CONTEXT, "job", None)
+    return bool(
+        isinstance(job, _ProviderJob)
+        and job.priority == "background"
+        and job.preempt_requested.is_set()
+    )
+
+
+def _bounded_nonnegative_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    integer = int(value)
+    return integer if 0 <= integer <= 9_007_199_254_740_991 else None
+
+
+def _json_output_shape(value: str) -> dict[str, int]:
+    """Describe JSON response shape numerically without retaining string data."""
+    in_string = False
+    escaped = False
+    string_length = 0
+    string_count = 0
+    total_string_chars = 0
+    max_string_chars = 0
+    depth = 0
+    max_depth = 0
+    for character in value:
+        if in_string:
+            if escaped:
+                escaped = False
+                string_length += 1
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+                string_count += 1
+                total_string_chars += string_length
+                max_string_chars = max(max_string_chars, string_length)
+                string_length = 0
+            else:
+                string_length += 1
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            max_depth = max(max_depth, depth)
+        elif character in "]}":
+            depth = max(0, depth - 1)
+    return {
+        "output_whitespace_chars": sum(character.isspace() for character in value),
+        "output_newline_chars": value.count("\n") + value.count("\r"),
+        "output_string_count": string_count,
+        "output_total_string_chars": total_string_chars,
+        "output_max_string_chars": max_string_chars,
+        "output_max_nesting": max_depth,
+        "output_fact_id_fields": value.count('"fact_id"'),
+        "output_source_id_fields": value.count('"source_id"'),
+        "output_relation_type_fields": value.count('"relation_type"'),
+        "output_action_id_fields": value.count('"action_id"'),
+        "output_content_fields": value.count('"content"'),
+        "output_compact_fact_slots": sum(
+            value.count(f'"f{index}":') for index in range(1, 13)
+        ),
+        "output_compact_relation_slots": sum(
+            value.count(f'"r{index}":') for index in range(1, 17)
+        ),
+        "output_compact_action_slots": sum(
+            value.count(f'"a{index}":') for index in range(1, 7)
+        ),
+    }
+
+
+def _record_inference_telemetry(
+    operation: str | None,
+    *,
+    provider: str,
+    body: dict[str, Any],
+    output_text: str,
+) -> None:
+    """Retain bounded performance counters without prompts or model output."""
+    name = str(operation or "llm.chat").strip()[:120] or "llm.chat"
+    snapshot: dict[str, Any] = {
+        "provider": provider,
+        "completed_at_epoch_ms": round(time.time() * 1000),
+        "output_bytes": len(output_text.encode("utf-8")),
+    }
+    if output_text:
+        snapshot.update(_json_output_shape(output_text))
+    if provider == "ollama":
+        for field in (
+            "total_duration",
+            "load_duration",
+            "prompt_eval_count",
+            "prompt_eval_duration",
+            "eval_count",
+            "eval_duration",
+        ):
+            value = _bounded_nonnegative_int(body.get(field))
+            if value is not None:
+                snapshot[field] = value
+        reason = body.get("done_reason")
+        if isinstance(reason, str) and reason and len(reason) <= 40:
+            snapshot["done_reason"] = reason
+    else:
+        usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = _bounded_nonnegative_int(usage.get(field))
+            if value is not None:
+                snapshot[field] = value
+    with _INFERENCE_TELEMETRY_LOCK:
+        previous = _INFERENCE_TELEMETRY.get(name) or {}
+        snapshot["call_count"] = int(previous.get("call_count") or 0) + 1
+        for field in (
+            "output_bytes",
+            "total_duration",
+            "load_duration",
+            "prompt_eval_count",
+            "prompt_eval_duration",
+            "eval_count",
+            "eval_duration",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "output_whitespace_chars",
+            "output_newline_chars",
+            "output_string_count",
+            "output_total_string_chars",
+            "output_max_nesting",
+            "output_fact_id_fields",
+            "output_source_id_fields",
+            "output_relation_type_fields",
+            "output_action_id_fields",
+            "output_content_fields",
+            "output_compact_fact_slots",
+            "output_compact_relation_slots",
+            "output_compact_action_slots",
+        ):
+            current = snapshot.get(field)
+            if isinstance(current, int):
+                snapshot[f"cumulative_{field}"] = (
+                    int(previous.get(f"cumulative_{field}") or 0) + current
+                )
+        _INFERENCE_TELEMETRY[name] = snapshot
+
+
+def _inference_telemetry_snapshot() -> dict[str, dict[str, Any]]:
+    with _INFERENCE_TELEMETRY_LOCK:
+        return {name: dict(value) for name, value in _INFERENCE_TELEMETRY.items()}
+
+
+def _reset_inference_telemetry_for_tests() -> None:
+    with _INFERENCE_TELEMETRY_LOCK:
+        _INFERENCE_TELEMETRY.clear()
+
+
+def _embedding_inference_state(base_url: str) -> dict[str, Any]:
+    """Probe a real, privacy-free embedding and cache the bounded result."""
+    try:
+        cache_seconds = max(
+            5.0,
+            min(300.0, float(os.getenv("LAOJI_LLM_READINESS_CACHE_SECONDS", "30"))),
+        )
+    except ValueError:
+        cache_seconds = 30.0
+    now = time.monotonic()
+    with _PROBE_LOCK:
+        cached_at = _EMBEDDING_PROBE_CACHE.get("cached_at")
+        if isinstance(cached_at, float) and now - cached_at < cache_seconds:
+            return dict(_EMBEDDING_PROBE_CACHE)
+        started = time.perf_counter()
+        ready = False
+        error_code: str | None = None
+        try:
+            response = _SESSION.post(
+                f"{base_url}/api/embed",
+                json={
+                    "model": EMBEDDING_MODEL,
+                    "input": ["LaoJi readiness probe"],
+                    "dimensions": 32,
+                    "truncate": True,
+                    "keep_alive": KEEP_ALIVE,
+                    # Keep the privacy-free readiness probe from evicting the
+                    # warm 9B generator on compact single-GPU deployments.
+                    "options": {"num_ctx": 2048, "num_gpu": 0},
+                },
+                headers={
+                    "X-Laoji-Priority": "interactive",
+                    "X-Laoji-Operation": "readiness.embedding",
+                },
+                timeout=max(
+                    1.0,
+                    min(15.0, float(os.getenv("LAOJI_LLM_READINESS_EMBED_TIMEOUT", "10"))),
+                ),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            embeddings = payload.get("embeddings") if isinstance(payload, dict) else None
+            if not isinstance(embeddings, list) or len(embeddings) != 1:
+                raise LlmProviderError("embedding_response_invalid")
+            _normalized_embedding(embeddings[0])
+            ready = True
+        except requests.Timeout:
+            error_code = "embedding_probe_timeout"
+        except requests.RequestException:
+            error_code = "embedding_probe_failed"
+        except (LlmProviderError, TypeError, ValueError):
+            error_code = "embedding_probe_invalid"
+        result = {
+            "cached_at": now,
+            "ready": ready,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "error_code": error_code,
+        }
+        _EMBEDDING_PROBE_CACHE.clear()
+        _EMBEDDING_PROBE_CACHE.update(result)
+        return dict(result)
+
+
+def _reset_provider_probe_cache_for_tests() -> None:
+    with _PROBE_LOCK:
+        _EMBEDDING_PROBE_CACHE.clear()
 
 
 def _call_ollama_transport(
@@ -243,34 +565,40 @@ def _call_ollama_transport(
         default_max_tokens = int(os.getenv("MEETING_SUMMARY_MAX_TOKENS", "2048"))
     except ValueError:
         default_max_tokens = 2048
-    try:
-        # v3 reserves 10,240 input tokens plus protocol/output headroom inside
-        # Ollama's 16,384-token context.  Keep the cap here so a deployment
-        # cannot silently fall back to the old 8k window for local generation.
-        default_num_ctx = int(os.getenv("MEETING_SUMMARY_NUM_CTX", "16384"))
-    except ValueError:
-        default_num_ctx = 16384
     request_options: dict[str, Any] = {
         "temperature": 0.1,
-        "num_ctx": min(16_384, max(4_096, default_num_ctx)),
+        "num_ctx": canonical_generation_num_ctx(),
         "num_predict": default_max_tokens if max_tokens is None else max_tokens,
     }
     if options:
         request_options.update(options)
+    # Business-specific context sizes would create multiple Ollama runners for
+    # the same model and defeat infinite keep-alive. Enforce this after caller
+    # options are merged. Embeddings use their own transport and runner.
+    request_options["num_ctx"] = canonical_generation_num_ctx()
+    active_priority = (priority or "interactive").strip().lower()
+    stream_for_preemption = active_priority == "background"
     payload: dict[str, Any] = {
         "model": str(config.model),
         "messages": [
             {"role": "system", "content": "/no_think\n" + str(system_prompt)},
             {"role": "user", "content": str(transcript)},
         ],
-        "stream": False,
+        "stream": stream_for_preemption,
         "think": False,
         "keep_alive": KEEP_ALIVE,
         "options": request_options,
     }
-    if response_format is not None:
+    # Ollama's chat thinking parser can defer grammar activation forever when
+    # Qwen's template already closes </think>. Generate has no chat parser in
+    # that path and enforces the same schema without enabling costly reasoning.
+    # Keep this transport decision here, not as per-feature JSON repair logic.
+    structured = response_format is not None
+    if structured:
+        payload.pop("messages")
+        payload["system"] = "/no_think\n" + str(system_prompt)
+        payload["prompt"] = str(transcript)
         payload["format"] = response_format
-    active_priority = (priority or "interactive").strip().lower()
     headers = {
         "X-Laoji-Priority": active_priority,
     }
@@ -279,22 +607,52 @@ def _call_ollama_transport(
     timeout_seconds = timeout if timeout > 0 else int(os.getenv("MEETING_SUMMARY_TIMEOUT", "600"))
     try:
         response = _SESSION.post(
-            f"{config.base_url}{config.chat_path or '/api/chat'}",
+            f"{config.base_url}/api/generate" if structured else f"{config.base_url}{config.chat_path or '/api/chat'}",
             json=payload,
             headers=headers,
             timeout=timeout_seconds,
+            stream=stream_for_preemption,
         )
         response.raise_for_status()
-        body = response.json()
+        if stream_for_preemption:
+            content_parts: list[str] = []
+            body: dict[str, Any] | None = None
+            for line in response.iter_lines():
+                if _current_background_preempt_requested():
+                    response.close()
+                    raise LlmProviderPreempted("llm_background_preempted")
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                if not isinstance(chunk, dict):
+                    raise LlmProviderError("ollama_response_invalid")
+                body = chunk
+                piece = chunk.get("response") if structured else chunk.get("message", {}).get("content")
+                if isinstance(piece, str):
+                    content_parts.append(piece)
+            if _current_background_preempt_requested():
+                response.close()
+                raise LlmProviderPreempted("llm_background_preempted")
+            if body is None or body.get("done") is not True:
+                raise LlmProviderError("ollama_response_invalid")
+            content = "".join(content_parts)
+        else:
+            body = response.json()
+            content = (body.get("response") if structured else body.get("message", {}).get("content")) if isinstance(body, dict) else None
     except requests.Timeout as exc:
         raise LlmProviderError("ollama_request_timeout") from exc
     except requests.RequestException as exc:
         raise LlmProviderError("ollama_request_failed") from exc
     except (TypeError, ValueError) as exc:
         raise LlmProviderError("ollama_response_invalid") from exc
-    content = body.get("message", {}).get("content") if isinstance(body, dict) else None
     if not isinstance(content, str):
         raise LlmProviderError("ollama_response_invalid")
+    _record_inference_telemetry(
+        telemetry_operation,
+        provider="ollama",
+        body=body,
+        output_text=content,
+    )
     return content
 
 
@@ -417,6 +775,12 @@ def _call_dashscope_transport(
     message = choices[0].get("message") if isinstance(choices[0], dict) else None
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, str):
+        _record_inference_telemetry(
+            telemetry_operation,
+            provider="dashscope",
+            body=body,
+            output_text=content,
+        )
         return content
     # Some OpenAI-compatible gateways return multimodal content blocks even
     # for a text-only request.  Flatten only text blocks; never stringify
@@ -428,7 +792,14 @@ def _call_dashscope_transport(
             if isinstance(item, dict) and isinstance(item.get("text"), str)
         ]
         if text_parts:
-            return "".join(text_parts)
+            joined = "".join(text_parts)
+            _record_inference_telemetry(
+                telemetry_operation,
+                provider="dashscope",
+                body=body,
+                output_text=joined,
+            )
+            return joined
     raise LlmProviderError("dashscope_response_invalid")
 
 
@@ -516,44 +887,69 @@ def embed_texts(
     *,
     priority: str = "interactive",
     operation: str = "meeting.embedding",
+    timeout_seconds: float | None = None,
+    num_ctx: int | None = None,
+    num_gpu: int | None = None,
 ) -> list[tuple[float, ...]]:
     if not texts:
         return []
-    timeout_seconds = max(
-        1.0,
-        min(60.0, float(os.getenv("MEETING_QUESTION_EMBEDDING_TIMEOUT", "15"))),
-    )
-    try:
-        num_ctx = int(os.getenv("MEETING_QUESTION_EMBEDDING_NUM_CTX", "8192"))
-    except ValueError:
-        num_ctx = 8192
+    if timeout_seconds is None:
+        timeout_seconds = max(
+            1.0,
+            min(60.0, float(os.getenv("MEETING_QUESTION_EMBEDDING_TIMEOUT", "15"))),
+        )
+    else:
+        timeout_seconds = max(1.0, min(60.0, float(timeout_seconds)))
+    if num_ctx is None:
+        try:
+            num_ctx = int(os.getenv("MEETING_QUESTION_EMBEDDING_NUM_CTX", "8192"))
+        except ValueError:
+            num_ctx = 8192
     num_ctx = min(8192, max(2048, num_ctx))
+    if num_gpu is not None:
+        num_gpu = max(0, min(999, int(num_gpu)))
 
     def invoke() -> list[tuple[float, ...]]:
-        response = _SESSION.post(
-            f"{canonical_ollama_base_url()}/api/embed",
-            json={
-                "model": EMBEDDING_MODEL,
-                "input": texts,
-                "dimensions": max(
-                    32,
-                    min(1024, int(os.getenv("MEETING_QUESTION_EMBEDDING_DIMENSIONS", "256"))),
-                ),
-                "truncate": True,
-                "keep_alive": KEEP_ALIVE,
-                "options": {"num_ctx": num_ctx},
-            },
-            headers={
-                "X-Laoji-Priority": priority,
-                "X-Laoji-Operation": operation,
-            },
-            timeout=timeout_seconds,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            response = _SESSION.post(
+                f"{canonical_ollama_base_url()}/api/embed",
+                json={
+                    "model": EMBEDDING_MODEL,
+                    "input": texts,
+                    "dimensions": max(
+                        32,
+                        min(1024, int(os.getenv("MEETING_QUESTION_EMBEDDING_DIMENSIONS", "256"))),
+                    ),
+                    "truncate": True,
+                    "keep_alive": KEEP_ALIVE,
+                    "options": {
+                        "num_ctx": num_ctx,
+                        **({"num_gpu": num_gpu} if num_gpu is not None else {}),
+                    },
+                },
+                headers={
+                    "X-Laoji-Priority": priority,
+                    "X-Laoji-Operation": operation,
+                },
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.Timeout as exc:
+            raise LlmProviderError("ollama_embedding_timeout") from exc
+        except requests.RequestException as exc:
+            raise LlmProviderError("ollama_embedding_failed") from exc
+        except (TypeError, ValueError) as exc:
+            raise LlmProviderError("embedding_response_invalid") from exc
         embeddings = payload.get("embeddings")
         if not isinstance(embeddings, list) or len(embeddings) != len(texts):
             raise LlmProviderError("embedding_response_invalid")
+        _record_inference_telemetry(
+            operation,
+            provider="ollama",
+            body=payload,
+            output_text="",
+        )
         return [_normalized_embedding(item) for item in embeddings]
 
     return _COORDINATOR.submit(
@@ -562,6 +958,113 @@ def embed_texts(
         call=invoke,
         wait_seconds=timeout_seconds + 30,
     )
+
+
+def _embedding_cache_key(text: str, *, num_ctx: int | None, num_gpu: int | None) -> str:
+    try:
+        dimensions = max(
+            32,
+            min(1024, int(os.getenv("MEETING_QUESTION_EMBEDDING_DIMENSIONS", "256"))),
+        )
+    except ValueError:
+        dimensions = 256
+    material = (
+        f"embedding-v1\0{EMBEDDING_MODEL}\0{dimensions}\0{num_ctx}\0{num_gpu}\0{text}"
+    ).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
+
+
+def _embedding_cache_capacity() -> int:
+    try:
+        configured = int(os.getenv("LAOJI_EMBEDDING_CACHE_ITEMS", "8192"))
+    except ValueError:
+        configured = 8192
+    return max(256, min(50_000, configured))
+
+
+def embed_texts_cached(
+    texts: list[str],
+    *,
+    priority: str = "interactive",
+    operation: str = "meeting.embedding",
+    timeout_seconds: float | None = None,
+    num_ctx: int | None = None,
+    num_gpu: int | None = None,
+    embedder: Callable[..., list[tuple[float, ...]]] | None = None,
+) -> list[tuple[float, ...]]:
+    """Share content-hash embeddings across Summary and Q2 source views.
+
+    The cache retains only model/options-scoped SHA-256 keys and normalized
+    vectors in process memory. Summary and Q2 pack the same immutable transcript
+    rows into the same 360-character/30-second units, so the interactive Q2 path
+    can reuse work already completed while preparing its Summary.
+    """
+    if not texts:
+        return []
+    active_embedder = embedder or embed_texts
+    keys = [
+        _embedding_cache_key(text, num_ctx=num_ctx, num_gpu=num_gpu)
+        for text in texts
+    ]
+    values: list[tuple[float, ...] | None] = [None] * len(texts)
+    missing_by_key: OrderedDict[str, tuple[str, list[int]]] = OrderedDict()
+    with _EMBEDDING_CACHE_LOCK:
+        for index, (key, text) in enumerate(zip(keys, texts)):
+            cached = _EMBEDDING_CACHE.get(key)
+            if cached is not None:
+                values[index] = cached
+                _EMBEDDING_CACHE.move_to_end(key)
+                continue
+            if key not in missing_by_key:
+                missing_by_key[key] = (text, [])
+            missing_by_key[key][1].append(index)
+    if missing_by_key:
+        missing_keys = list(missing_by_key)
+        embedded = active_embedder(
+            [missing_by_key[key][0] for key in missing_keys],
+            priority=priority,
+            operation=operation,
+            timeout_seconds=timeout_seconds,
+            num_ctx=num_ctx,
+            num_gpu=num_gpu,
+        )
+        if len(embedded) != len(missing_keys):
+            raise LlmProviderError("embedding_response_invalid")
+        with _EMBEDDING_CACHE_LOCK:
+            for key, vector in zip(missing_keys, embedded):
+                canonical = tuple(vector)
+                _EMBEDDING_CACHE[key] = canonical
+                _EMBEDDING_CACHE.move_to_end(key)
+                for index in missing_by_key[key][1]:
+                    values[index] = canonical
+            capacity = _embedding_cache_capacity()
+            while len(_EMBEDDING_CACHE) > capacity:
+                _EMBEDDING_CACHE.popitem(last=False)
+    if any(value is None for value in values):
+        raise LlmProviderError("embedding_response_invalid")
+    return [value for value in values if value is not None]
+
+
+def _reset_embedding_cache_for_tests() -> None:
+    with _EMBEDDING_CACHE_LOCK:
+        _EMBEDDING_CACHE.clear()
+
+
+def _embedding_cache_keys_for_tests() -> tuple[str, ...]:
+    with _EMBEDDING_CACHE_LOCK:
+        return tuple(_EMBEDDING_CACHE.keys())
+
+
+def provider_runtime_state() -> dict[str, Any]:
+    """Read live coordinator/telemetry state without configuration or I/O.
+
+    Availability probes may be cached, but queued/active work and the last
+    completed inference belong to the running coordinator, not that cache.
+    """
+    return {
+        "queue": _COORDINATOR.snapshot(),
+        "inference": {"last_by_operation": _inference_telemetry_snapshot()},
+    }
 
 
 def provider_state(*, probe: bool = False) -> dict[str, Any]:
@@ -583,7 +1086,10 @@ def provider_state(*, probe: bool = False) -> dict[str, Any]:
         "embedding_provider": "ollama",
         "embedding_base_url": canonical_ollama_base_url(),
         "embedding_model": EMBEDDING_MODEL,
-        "queue": _COORDINATOR.snapshot(),
+        "embedding_ready": None,
+        "embedding_probe_latency_ms": None,
+        "embedding_probe_error": None,
+        **provider_runtime_state(),
         "ready": None,
         "models": [],
         "probe_latency_ms": None,
@@ -604,7 +1110,16 @@ def provider_state(*, probe: bool = False) -> dict[str, Any]:
             if isinstance(item, dict) and item.get("name")
         )
         state["models"] = models
-        embedding_ready = EMBEDDING_MODEL in models
+        embedding_available = EMBEDDING_MODEL in models
+        embedding_probe = (
+            _embedding_inference_state(canonical_ollama_base_url())
+            if embedding_available
+            else {"ready": False, "latency_ms": 0.0, "error_code": "embedding_model_missing"}
+        )
+        embedding_ready = embedding_probe.get("ready") is True
+        state["embedding_ready"] = embedding_ready
+        state["embedding_probe_latency_ms"] = embedding_probe.get("latency_ms")
+        state["embedding_probe_error"] = embedding_probe.get("error_code")
 
         if provider == "dashscope":
             # The workspace-compatible endpoint may not expose /models.  A
@@ -636,6 +1151,7 @@ def provider_state(*, probe: bool = False) -> dict[str, Any]:
             state["ready"] = bool(state["generation_ready"] and embedding_ready)
     except Exception:
         state["generation_ready"] = False
+        state["embedding_ready"] = False
         state["ready"] = False
     state["probe_latency_ms"] = round((time.perf_counter() - started) * 1000, 3)
     return state

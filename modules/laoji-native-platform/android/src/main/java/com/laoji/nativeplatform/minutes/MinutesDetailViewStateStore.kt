@@ -8,6 +8,7 @@ import android.util.Base64
 internal data class MinutesDetailPageScrollPosition(
   val anchorIndex: Int = 0,
   val offsetPx: Int = 0,
+  val formatRevision: Int = 1,
 )
 
 internal data class MinutesDetailPersistedViewState(
@@ -71,6 +72,7 @@ internal class MinutesDetailViewStateStore(context: Context) {
     MinutesDetailPageScrollPosition(
       anchorIndex = preferences.getInt("$prefix.$tab.index", 0).coerceAtLeast(0),
       offsetPx = preferences.getInt("$prefix.$tab.offset", 0),
+      formatRevision = preferences.getInt("$prefix.$tab.format", 1),
     )
 
   private fun android.content.SharedPreferences.Editor.putPage(
@@ -80,6 +82,7 @@ internal class MinutesDetailViewStateStore(context: Context) {
   ) = apply {
     putInt("$prefix.$tab.index", state.anchorIndex.coerceAtLeast(0))
     putInt("$prefix.$tab.offset", state.offsetPx)
+    putInt("$prefix.$tab.format", state.formatRevision)
   }
 
   private fun prefix(meetingId: String): String {

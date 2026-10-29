@@ -1,5 +1,4 @@
 import type { InitialState } from '@react-navigation/native';
-import type { AuthMode } from './auth';
 import { EVENT_CATEGORIES } from '../utils/eventColors';
 import type { RootStackParamList } from '../types';
 
@@ -9,30 +8,24 @@ export const NAVIGATION_STATE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const NAVIGATION_STATE_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
 
 export const ROOT_NAVIGATION_ROUTE_NAMES = [
-  'Login',
   'MainTabs',
   'EventDetail',
   'MeetingLive',
   'Transcription',
+  'MeetingAttachments',
   'MeetingOrganization',
-  'SharedAction',
-  'SharedMeetingContent',
   'SpeakerManager',
   'SpeakerEnrollment',
-  'Profile',
-  'ProfileField',
-  'Account',
-  'ChangePassword',
   'NotificationSettings',
-  'AccountDeletion',
   'Privacy',
+  'HardwareDevices',
   'Legal',
   'AddEvent',
 ] as const satisfies readonly (keyof RootStackParamList)[];
 
 export const MAIN_TAB_ROUTE_NAMES = ['Schedule', 'Meetings'] as const;
 
-export type NavigationAuthScope = 'signed_out' | 'guest' | `user:${string}`;
+export type NavigationAuthScope = 'guest';
 export type NavigationRestoreFailure =
   | 'missing'
   | 'corrupt'
@@ -62,10 +55,12 @@ type MainTabRouteName = typeof MAIN_TAB_ROUTE_NAMES[number];
 
 const ROOT_ROUTE_SET = new Set<string>(ROOT_NAVIGATION_ROUTE_NAMES);
 const TAB_ROUTE_SET = new Set<string>(MAIN_TAB_ROUTE_NAMES);
-const PROFILE_FIELDS = new Set(['nickname', 'email', 'phone']);
-const ACCOUNT_SECTIONS = new Set(['deletion']);
 const TRANSCRIPTION_FOCUS = new Set(['notes', 'transcript', 'summary', 'title']);
 const LEGAL_KINDS = new Set(['terms', 'privacy', 'help', 'guide', 'version', 'contact']);
+// Version information is an update tool, not a work surface. Persisting it
+// makes a package replacement reopen the app inside the page that launched
+// the installer, with a stale nested stack instead of the user's main view.
+const NON_RESTORABLE_LEGAL_KINDS = new Set(['version']);
 const REPEAT_VALUES = new Set(['once', 'daily', 'weekly', 'monthly', 'yearly']);
 const RECURRENCE_SCOPE_VALUES = new Set(['occurrence', 'following', 'series']);
 const EVENT_CATEGORY_SET = new Set<string>(EVENT_CATEGORIES);
@@ -267,14 +262,11 @@ function sanitizeAddEventParams(value: unknown): RootStackParamList['AddEvent'] 
 function sanitizeRoute(route: unknown): InitialState['routes'][number] | null {
   if (!isPlainRecord(route) || typeof route.name !== 'string' || !ROOT_ROUTE_SET.has(route.name)) return null;
   switch (route.name as keyof RootStackParamList) {
-    case 'Login':
     case 'MeetingOrganization':
     case 'SpeakerManager':
-    case 'Profile':
-    case 'ChangePassword':
     case 'NotificationSettings':
-    case 'AccountDeletion':
     case 'Privacy':
+    case 'HardwareDevices':
       return route.params === undefined ? { name: route.name } : null;
     case 'MainTabs':
       return sanitizeMainTabsRoute(route);
@@ -308,20 +300,6 @@ function sanitizeRoute(route: unknown): InitialState['routes'][number] | null {
             },
           }
         : null;
-    case 'SharedAction':
-      return isPlainRecord(route.params)
-        && hasOnlyKeys(route.params, ['token'])
-        && typeof route.params.token === 'string'
-        && /^[A-Za-z0-9_-]{32,256}$/.test(route.params.token)
-        ? { name: 'SharedAction', params: { token: route.params.token } }
-        : null;
-    case 'SharedMeetingContent':
-      return isPlainRecord(route.params)
-        && hasOnlyKeys(route.params, ['token'])
-        && typeof route.params.token === 'string'
-        && /^[A-Za-z0-9_-]{32,256}$/.test(route.params.token)
-        ? { name: 'SharedMeetingContent', params: { token: route.params.token } }
-        : null;
     case 'SpeakerEnrollment':
       if (route.params === undefined) return { name: 'SpeakerEnrollment' };
       return isPlainRecord(route.params)
@@ -332,33 +310,16 @@ function sanitizeRoute(route: unknown): InitialState['routes'][number] | null {
             ...(route.params.speakerId !== undefined ? { params: { speakerId: route.params.speakerId } } : {}),
           }
         : null;
-    case 'ProfileField':
-      return isPlainRecord(route.params)
-        && hasOnlyKeys(route.params, ['field'])
-        && typeof route.params.field === 'string'
-        && PROFILE_FIELDS.has(route.params.field)
-        ? { name: 'ProfileField', params: { field: route.params.field as 'nickname' | 'email' | 'phone' } }
-        : null;
-    case 'Account':
-      if (route.params === undefined) return { name: 'Account' };
-      return isPlainRecord(route.params)
-        && hasOnlyKeys(route.params, ['section'])
-        && optional(route.params.section, candidate => typeof candidate === 'string' && ACCOUNT_SECTIONS.has(candidate))
-        ? {
-            name: 'Account',
-            ...(route.params.section !== undefined ? { params: { section: 'deletion' as const } } : {}),
-          }
-        : null;
     case 'Legal':
-      return isPlainRecord(route.params)
-        && hasOnlyKeys(route.params, ['kind'])
-        && typeof route.params.kind === 'string'
-        && LEGAL_KINDS.has(route.params.kind)
-        ? {
-            name: 'Legal',
-            params: { kind: route.params.kind as RootStackParamList['Legal']['kind'] },
-          }
-        : null;
+      if (!isPlainRecord(route.params)
+        || !hasOnlyKeys(route.params, ['kind'])
+        || typeof route.params.kind !== 'string'
+        || !LEGAL_KINDS.has(route.params.kind)
+        || NON_RESTORABLE_LEGAL_KINDS.has(route.params.kind)) return null;
+      return {
+        name: 'Legal',
+        params: { kind: route.params.kind as RootStackParamList['Legal']['kind'] },
+      };
     case 'AddEvent': {
       const params = sanitizeAddEventParams(route.params);
       return params ? { name: 'AddEvent', params } : null;
@@ -368,30 +329,13 @@ function sanitizeRoute(route: unknown): InitialState['routes'][number] | null {
   }
 }
 
-function routeAllowedForScope(name: string, scope: NavigationAuthScope): boolean {
-  if (scope === 'signed_out') return name === 'Login' || name === 'Legal';
-  return name !== 'Login';
-}
-
-export function navigationScopeForAuth(
-  mode: AuthMode,
-  userId?: string | number | null,
-): NavigationAuthScope {
-  if (mode === 'guest') return 'guest';
-  if (mode === 'authenticated' && userId !== undefined && userId !== null && String(userId).length > 0) {
-    return `user:${String(userId)}`;
-  }
-  return 'signed_out';
-}
-
-export function defaultNavigationState(scope: NavigationAuthScope): InitialState {
-  if (scope === 'signed_out') return { index: 0, routes: [{ name: 'Login' }] };
+export function defaultNavigationState(_scope: NavigationAuthScope): InitialState {
   const mainTabs = sanitizeMainTabsRoute({ name: 'MainTabs' });
   if (!mainTabs) throw new Error('MainTabs default state is invalid');
   return { index: 0, routes: [mainTabs] };
 }
 
-export function sanitizeNavigationState(value: unknown, scope: NavigationAuthScope): InitialState | null {
+export function sanitizeNavigationState(value: unknown, _scope: NavigationAuthScope): InitialState | null {
   if (!isPlainRecord(value)
     || !Array.isArray(value.routes)
     || value.routes.length === 0
@@ -403,11 +347,11 @@ export function sanitizeNavigationState(value: unknown, scope: NavigationAuthSco
   const sanitizedRoutes: InitialState['routes'] = [];
   for (const route of value.routes) {
     const sanitized = sanitizeRoute(route);
-    if (!sanitized || !routeAllowedForScope(sanitized.name, scope)) return null;
+    if (!sanitized) return null;
     sanitizedRoutes.push(sanitized);
   }
 
-  const expectedRoot = scope === 'signed_out' ? 'Login' : 'MainTabs';
+  const expectedRoot = 'MainTabs';
   if (sanitizedRoutes[0]?.name !== expectedRoot) return null;
   if (sanitizedRoutes.slice(1).some(route => route.name === expectedRoot)) return null;
 

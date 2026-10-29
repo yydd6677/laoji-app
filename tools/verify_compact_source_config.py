@@ -18,7 +18,6 @@ EXPECTED_BASE = "https://laoji.cloud"
 EXPECTED_WSS = "wss://laoji.cloud"
 LEGACY_MARKERS = (
     "18035",
-    "183.36.243.124",
     "21436",
     "8002",
     "11434",
@@ -26,6 +25,10 @@ LEGACY_MARKERS = (
     "EXPO_PUBLIC_MEETING_API_BASE",
     "EXPO_PUBLIC_REALTIME_ASR_HOST",
     "EXPO_PUBLIC_REALTIME_ASR_PORT",
+    "/api/auth",
+    "/api/laoji",
+    "/api/guest",
+    "EXPO_PUBLIC_ACCOUNT_DELETION_URL",
 )
 
 
@@ -107,6 +110,8 @@ def verify(root: Path) -> list[str]:
         for marker in LEGACY_MARKERS:
             if marker in text:
                 failures.append(f"{path.relative_to(root)} 包含已退役入口标记: {marker}")
+        if re.search(r"https?://(?!127(?:\.\d{1,3}){3}(?=[:/]))(?:\d{1,3}\.){3}\d{1,3}(?=[:/])", text):
+            failures.append(f"{path.relative_to(root)} 包含硬编码公网 IP 服务地址")
 
     # Config source must not contain a second hard-coded production base.
     base_literals = re.findall(r"https?://[^'\"`\s)]+", config_text)

@@ -25,7 +25,7 @@ internal class NativeToastHostView(
   context: Context,
   @Suppress("UNUSED_PARAMETER") appContext: AppContext,
 ) : FrameLayout(context) {
-  private val palette = NativeUiTokens.palette(context)
+  private var palette = NativeUiTokens.palette(context)
   private val toastRoot = FrameLayout(context)
   private var snapshot: Map<String, Any?> = emptyMap()
   private var navigationInsetPx = 0
@@ -65,6 +65,10 @@ internal class NativeToastHostView(
       },
     )
     requestInsetsWhenAttached()
+    NativeUiTokens.bindTheme(this) {
+      palette = it
+      applyAppearance()
+    }
   }
 
   fun setDismissListener(listener: ((Map<String, Any?>) -> Unit)?) {
@@ -147,7 +151,6 @@ internal class NativeToastHostView(
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
       minimumHeight = NativeUiTokens.dp(context, NativeUiTokens.TOAST_MIN_HEIGHT_DP).toInt()
-      background = NativeUiTokens.roundedBackground(context, palette.backgroundTips, 20f)
       elevation = NativeUiTokens.dp(context, 4f)
       setPadding(
         NativeUiTokens.dp(context, 20f).toInt(),
@@ -162,7 +165,6 @@ internal class NativeToastHostView(
     val messageView = TextView(context).apply {
       text = message
       textSize = 14f
-      setTextColor(palette.onTips)
       maxLines = 12
       ellipsize = TextUtils.TruncateAt.END
       gravity = Gravity.START or Gravity.CENTER_VERTICAL
@@ -176,11 +178,19 @@ internal class NativeToastHostView(
     panel = card
     toastRoot.addView(card, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
     positionPanel()
+    applyAppearance()
     card.post {
       if (panel !== card) return@post
-      val radius = if (messageView.lineCount > 1) 8f else 20f
-      card.background = NativeUiTokens.roundedBackground(context, palette.backgroundTips, radius)
+      applyAppearance()
     }
+  }
+
+  private fun applyAppearance() {
+    val message = messageText ?: return
+    message.setTextColor(palette.onTips)
+    message.typeface = LaojiThemeTypography.typeface(context)
+    val radius = if (message.lineCount > 1) 8f else 20f
+    panel?.background = NativeUiTokens.roundedBackground(context, palette.backgroundTips, radius)
   }
 
   private fun positionPanel() {

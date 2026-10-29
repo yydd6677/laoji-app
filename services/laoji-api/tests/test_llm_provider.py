@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import namedtuple
 from pathlib import Path
+import json
 import threading
 import time
 
@@ -41,37 +42,190 @@ def test_chat_forces_single_21434_provider_and_generation_model(monkeypatch):
     assert captured["config"].api_key == ""
 
 
-def test_direct_ollama_transport_uses_chat_contract(monkeypatch):
+def test_embedding_cache_reuses_summary_vectors_for_interactive_q2(monkeypatch):
+    calls = []
+
+    def fake_embed(texts, **kwargs):
+        calls.append((list(texts), dict(kwargs)))
+        return [tuple([float(index + 1), 1.0]) for index, _text in enumerate(texts)]
+
+    monkeypatch.setattr(llm_provider, "embed_texts", fake_embed)
+    llm_provider._reset_embedding_cache_for_tests()
+
+    summary = llm_provider.embed_texts_cached(
+        ["相同会议片段", "另一个会议片段"],
+        priority="background",
+        operation="summary.v3.evidence.embedding",
+        num_ctx=2048,
+        num_gpu=0,
+    )
+    question = llm_provider.embed_texts_cached(
+        ["相同会议片段", "另一个会议片段"],
+        priority="interactive",
+        operation="question.q2.evidence.sources",
+        num_ctx=2048,
+        num_gpu=0,
+    )
+
+    assert question == summary
+    assert len(calls) == 1
+    assert calls[0][1]["priority"] == "background"
+
+
+def test_embedding_cache_separates_runner_options(monkeypatch):
+    calls = []
+
+    def fake_embed(texts, **kwargs):
+        calls.append(dict(kwargs))
+        return [(1.0, 0.0) for _text in texts]
+
+    monkeypatch.setattr(llm_provider, "embed_texts", fake_embed)
+    llm_provider._reset_embedding_cache_for_tests()
+
+    llm_provider.embed_texts_cached(["会议片段"], num_ctx=2048, num_gpu=0)
+    llm_provider.embed_texts_cached(["会议片段"], num_ctx=8192, num_gpu=0)
+
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("structured", [False, True])
+@pytest.mark.parametrize("priority", ["interactive", "background"])
+def test_direct_ollama_transport_uses_provider_contract(monkeypatch, structured, priority):
     captured = {}
 
     class Response:
+        closed = False
+
         def raise_for_status(self):
             return None
 
         def json(self):
-            return {"message": {"content": "模型结果"}}
+            return {
+                **({"response": "模型结果"} if structured else {"message": {"content": "模型结果"}}),
+                "done": True,
+                "done_reason": "stop",
+                "total_duration": 8_000_000_000,
+                "load_duration": 100_000_000,
+                "prompt_eval_count": 1_024,
+                "prompt_eval_duration": 2_000_000_000,
+                "eval_count": 256,
+                "eval_duration": 5_000_000_000,
+            }
+
+        def iter_lines(self):
+            yield json.dumps(self.json()).encode("utf-8")
+
+        def close(self):
+            self.closed = True
 
     def post(url, **kwargs):
         captured.update(url=url, **kwargs)
         return Response()
 
     monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    llm_provider._reset_inference_telemetry_for_tests()
     result = llm_provider._call_ollama_transport(
         Config("http://127.0.0.1:21434", "qwen3.5:9b", "ollama", "", "/api/chat"),
         "系统约束",
         "用户内容",
         max_tokens=321,
-        response_format="json",
-        priority="background",
+        response_format="json" if structured else None,
+        priority=priority,
         telemetry_operation="test.direct.chat",
     )
 
     assert result == "模型结果"
-    assert captured["url"] == "http://127.0.0.1:21434/api/chat"
-    assert captured["json"]["messages"][0]["content"].startswith("/no_think\n")
+    assert captured["url"] == "http://127.0.0.1:21434/api/" + ("generate" if structured else "chat")
+    if structured:
+        assert captured["json"]["system"] == "/no_think\n系统约束"
+        assert captured["json"]["prompt"] == "用户内容"
+        assert "messages" not in captured["json"]
+        assert captured["json"]["format"] == "json"
+    else:
+        assert captured["json"]["messages"][0]["content"] == "/no_think\n系统约束"
+    assert captured["json"]["think"] is False
+    assert captured["json"]["stream"] is (priority == "background")
     assert captured["json"]["options"]["num_predict"] == 321
-    assert captured["json"]["format"] == "json"
-    assert captured["headers"]["X-Laoji-Priority"] == "background"
+    assert captured["headers"]["X-Laoji-Priority"] == priority
+    telemetry = llm_provider.provider_state(probe=False)["inference"]["last_by_operation"]
+    direct = telemetry["test.direct.chat"]
+    assert direct["provider"] == "ollama"
+    assert direct["output_bytes"] == len("模型结果".encode("utf-8"))
+    assert direct["done_reason"] == "stop"
+    assert direct["total_duration"] == direct["cumulative_total_duration"] == 8_000_000_000
+    assert direct["load_duration"] == direct["cumulative_load_duration"] == 100_000_000
+    assert direct["prompt_eval_count"] == direct["cumulative_prompt_eval_count"] == 1_024
+    assert direct["eval_count"] == direct["cumulative_eval_count"] == 256
+    assert direct["call_count"] == 1
+    assert direct["output_string_count"] == 0
+    assert direct["output_max_string_chars"] == 0
+    assert "模型结果" not in repr(direct)
+
+
+def test_generation_context_is_canonical_across_business_callers(monkeypatch):
+    captured = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"message": {"content": "{}"}, "done": True}
+
+    def post(_url, **kwargs):
+        captured.append(kwargs["json"]["options"]["num_ctx"])
+        return Response()
+
+    monkeypatch.delenv("LAOJI_GENERATION_NUM_CTX", raising=False)
+    monkeypatch.delenv("MEETING_SUMMARY_NUM_CTX", raising=False)
+    monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    config = Config("http://127.0.0.1:21434", "qwen3.5:9b", "ollama", "", "/api/chat")
+    for requested in (4096, 8192, 12288, 16384):
+        assert llm_provider._call_ollama_transport(
+            config,
+            "system",
+            "input",
+            options={"num_ctx": requested},
+            priority="interactive",
+        ) == "{}"
+
+    assert captured == [16384, 16384, 16384, 16384]
+
+
+def test_generation_context_uses_one_bounded_deployment_value(monkeypatch):
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "8192")
+    assert llm_provider.canonical_generation_num_ctx() == 8192
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "999999")
+    assert llm_provider.canonical_generation_num_ctx() == 16384
+    monkeypatch.setenv("LAOJI_GENERATION_NUM_CTX", "invalid")
+    assert llm_provider.canonical_generation_num_ctx() == 16384
+
+
+def test_json_output_shape_is_numeric_and_does_not_retain_values():
+    value = '{"facts":[{"fact_id":"f1","content":"内部会议正文","sources":[{"source_id":"transcript:t0"}]}]}'
+    shape = llm_provider._json_output_shape(value)
+
+    assert shape["output_fact_id_fields"] == 1
+    assert shape["output_source_id_fields"] == 1
+    assert shape["output_content_fields"] == 1
+    assert shape["output_string_count"] == 8
+    assert shape["output_max_nesting"] == 5
+    assert shape["output_compact_fact_slots"] == 0
+    assert "内部会议正文" not in repr(shape)
+    llm_provider._reset_inference_telemetry_for_tests()
+
+
+def test_json_output_shape_counts_only_compact_slot_keys():
+    value = (
+        '{"v":3,"facts":{"f1":{"content":"事实"},"f2":{"content":"另一事实"}},'
+        '"relations":{"r1":{"from_fact":"f1","to_fact":"f2"}},'
+        '"actions":{"a1":{"fact":"f1"}}}'
+    )
+    shape = llm_provider._json_output_shape(value)
+
+    assert shape["output_compact_fact_slots"] == 2
+    assert shape["output_compact_relation_slots"] == 1
+    assert shape["output_compact_action_slots"] == 1
 
 
 def test_invalid_ollama_fallback_port_is_rejected(monkeypatch):
@@ -81,7 +235,7 @@ def test_invalid_ollama_fallback_port_is_rejected(monkeypatch):
 
 
 def test_pending_interactive_llm_job_precedes_pending_background_job():
-    coordinator = llm_provider._ProviderCoordinator()
+    coordinator = llm_provider._ProviderCoordinator(background_handoff_ms=0)
     first_started = threading.Event()
     release_first = threading.Event()
     order: list[str] = []
@@ -126,6 +280,124 @@ def test_pending_interactive_llm_job_precedes_pending_background_job():
     }
 
 
+def test_interactive_job_can_take_bounded_handoff_before_next_background_job():
+    coordinator = llm_provider._ProviderCoordinator(background_handoff_ms=150)
+    first_started = threading.Event()
+    release_first = threading.Event()
+    order: list[str] = []
+
+    def submit(name: str, priority: str) -> None:
+        def invoke() -> str:
+            order.append(name)
+            if name == "first":
+                first_started.set()
+                assert release_first.wait(5)
+            return name
+
+        assert coordinator.submit(
+            priority=priority,
+            operation=name,
+            call=invoke,
+            wait_seconds=5,
+        ) == name
+
+    first = threading.Thread(target=submit, args=("first", "background"))
+    later = threading.Thread(target=submit, args=("later", "background"))
+    first.start()
+    assert first_started.wait(5)
+    later.start()
+    release_first.set()
+    # Arrive after the next background job has already been admitted but
+    # within the explicit interactive handoff window.
+    time.sleep(0.04)
+    live = threading.Thread(target=submit, args=("live", "interactive"))
+    live.start()
+    for thread in (first, later, live):
+        thread.join(5)
+        assert not thread.is_alive()
+
+    assert order == ["first", "live", "later"]
+
+
+def test_active_background_job_receives_preemption_when_interactive_arrives():
+    coordinator = llm_provider._ProviderCoordinator(background_handoff_ms=0)
+    background_started = threading.Event()
+    yielded = threading.Event()
+    order: list[str] = []
+
+    def background_call() -> str:
+        order.append("background-start")
+        background_started.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if llm_provider._current_background_preempt_requested():
+                yielded.set()
+                order.append("background-yield")
+                return "yielded"
+            time.sleep(0.01)
+        raise AssertionError("background job did not receive preemption")
+
+    background_result: list[str] = []
+    live_result: list[str] = []
+    background = threading.Thread(target=lambda: background_result.append(coordinator.submit(
+        priority="background",
+        operation="background",
+        call=background_call,
+        wait_seconds=5,
+    )))
+    background.start()
+    assert background_started.wait(5)
+    live = threading.Thread(target=lambda: live_result.append(coordinator.submit(
+        priority="interactive",
+        operation="live",
+        call=lambda: order.append("live") or "live",
+        wait_seconds=5,
+    )))
+    live.start()
+    assert yielded.wait(5)
+    for thread in (background, live):
+        thread.join(5)
+        assert not thread.is_alive()
+    assert background_result == ["yielded"]
+    assert live_result == ["live"]
+    assert order == ["background-start", "background-yield", "live"]
+
+
+@pytest.mark.parametrize("structured", [False, True])
+def test_background_ollama_stream_closes_when_preempted(monkeypatch, structured):
+    class Response:
+        def __init__(self):
+            self.closed = False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield b'{"response":"partial","done":false}' if structured else b'{"message":{"content":"partial"},"done":false}'
+            yield b'{"response":"late","done":true}' if structured else b'{"message":{"content":"late"},"done":true}'
+
+        def close(self):
+            self.closed = True
+
+    response = Response()
+    monkeypatch.setattr(llm_provider._SESSION, "post", lambda *_args, **_kwargs: response)
+    checks = iter((False, True))
+    monkeypatch.setattr(
+        llm_provider,
+        "_current_background_preempt_requested",
+        lambda: next(checks, True),
+    )
+    with pytest.raises(llm_provider.LlmProviderPreempted, match="llm_background_preempted"):
+        llm_provider._call_ollama_transport(
+            Config("http://127.0.0.1:21434", "qwen3.5:9b", "ollama", "", "/api/chat"),
+            "system",
+            "input",
+            priority="background",
+            response_format="json" if structured else None,
+        )
+    assert response.closed is True
+
+
 def test_embedding_uses_same_21434_and_keeps_model_loaded(monkeypatch):
     captured = {}
 
@@ -134,20 +406,149 @@ def test_embedding_uses_same_21434_and_keeps_model_loaded(monkeypatch):
             return None
 
         def json(self):
-            return {"embeddings": [[3.0, 4.0]]}
+            return {
+                "embeddings": [[3.0, 4.0]],
+                "total_duration": 2_000_000_000,
+                "load_duration": 1_500_000_000,
+                "prompt_eval_count": 8,
+                "prompt_eval_duration": 400_000_000,
+            }
 
     def post(url, **kwargs):
         captured.update(url=url, **kwargs)
         return Response()
 
     monkeypatch.setattr(llm_provider._SESSION, "post", post)
-    result = llm_provider.embed_texts(["会议问题"])
+    llm_provider._reset_inference_telemetry_for_tests()
+    result = llm_provider.embed_texts(["会议问题"], num_gpu=0)
 
     assert result == [(0.6, 0.8)]
     assert captured["url"] == "http://127.0.0.1:21434/api/embed"
     assert captured["json"]["model"] == "qwen3-embedding:0.6b"
     assert captured["json"]["keep_alive"] == -1
-    assert captured["json"]["options"] == {"num_ctx": 8192}
+    assert captured["json"]["options"] == {"num_ctx": 8192, "num_gpu": 0}
+    telemetry = llm_provider.provider_state(probe=False)["inference"]["last_by_operation"]
+    assert telemetry["meeting.embedding"]["call_count"] == 1
+    assert telemetry["meeting.embedding"]["total_duration"] == 2_000_000_000
+    assert telemetry["meeting.embedding"]["prompt_eval_count"] == 8
+    assert "会议问题" not in repr(telemetry["meeting.embedding"])
+    llm_provider._reset_inference_telemetry_for_tests()
+
+
+def test_embedding_timeout_is_normalized_to_provider_error(monkeypatch):
+    def timeout(*_args, **_kwargs):
+        raise llm_provider.requests.ReadTimeout("embedding timed out")
+
+    monkeypatch.setattr(llm_provider._SESSION, "post", timeout)
+    with pytest.raises(llm_provider.LlmProviderError, match="ollama_embedding_timeout"):
+        llm_provider.embed_texts(["长会议内容"])
+
+
+def test_embedding_accepts_call_specific_context_without_changing_default(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[1.0, 0.0]]}
+
+    def post(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return Response()
+
+    monkeypatch.setattr(llm_provider._SESSION, "post", post)
+
+    result = llm_provider.embed_texts(["会议片段"], num_ctx=2048, num_gpu=0)
+
+    assert result == [(1.0, 0.0)]
+    assert captured["json"]["options"] == {"num_ctx": 2048, "num_gpu": 0}
+
+
+def test_live_runtime_snapshot_never_reads_configuration_or_calls_a_provider(monkeypatch):
+    from types import SimpleNamespace
+    expected_queue = {"depth": 1, "active": {"operation": "question.q2.reader.v2"}}
+    expected_inference = {"question.q2.reader.v2": {"call_count": 1}}
+    monkeypatch.setattr(llm_provider, "_COORDINATOR", SimpleNamespace(snapshot=lambda: expected_queue))
+    monkeypatch.setattr(llm_provider, "_inference_telemetry_snapshot", lambda: expected_inference)
+    monkeypatch.setattr(llm_provider, "configured_provider", lambda: pytest.fail("configuration read"))
+    monkeypatch.setattr(llm_provider._SESSION, "get", lambda *a, **kw: pytest.fail("network GET"))
+    monkeypatch.setattr(llm_provider._SESSION, "post", lambda *a, **kw: pytest.fail("network POST"))
+    assert llm_provider.provider_runtime_state() == {
+        "queue": expected_queue, "inference": {"last_by_operation": expected_inference}}
+
+
+def test_provider_readiness_requires_real_embedding_inference(monkeypatch):
+    calls = {"get": 0, "post": 0}
+
+    class TagsResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "models": [
+                    {"name": llm_provider.GENERATION_MODEL},
+                    {"name": llm_provider.EMBEDDING_MODEL},
+                ],
+            }
+
+    class EmbeddingResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embeddings": [[3.0, 4.0]]}
+
+    def get(*_args, **_kwargs):
+        calls["get"] += 1
+        return TagsResponse()
+
+    def post(*_args, **_kwargs):
+        calls["post"] += 1
+        return EmbeddingResponse()
+
+    monkeypatch.setenv("LAOJI_LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(llm_provider._SESSION, "get", get)
+    monkeypatch.setattr(llm_provider._SESSION, "post", post)
+    llm_provider._reset_provider_probe_cache_for_tests()
+    first = llm_provider.provider_state(probe=True)
+    second = llm_provider.provider_state(probe=True)
+    assert first["ready"] is True
+    assert first["embedding_ready"] is True
+    assert first["embedding_probe_error"] is None
+    assert second["embedding_ready"] is True
+    assert calls == {"get": 2, "post": 1}
+    llm_provider._reset_provider_probe_cache_for_tests()
+
+
+def test_provider_readiness_fails_when_embedding_inference_times_out(monkeypatch):
+    class TagsResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "models": [
+                    {"name": llm_provider.GENERATION_MODEL},
+                    {"name": llm_provider.EMBEDDING_MODEL},
+                ],
+            }
+
+    monkeypatch.setenv("LAOJI_LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(llm_provider._SESSION, "get", lambda *_args, **_kwargs: TagsResponse())
+    def timeout(*_args, **_kwargs):
+        raise llm_provider.requests.ReadTimeout("embedding readiness timeout")
+
+    monkeypatch.setattr(llm_provider._SESSION, "post", timeout)
+    llm_provider._reset_provider_probe_cache_for_tests()
+    state = llm_provider.provider_state(probe=True)
+    assert state["ready"] is False
+    assert state["generation_ready"] is True
+    assert state["embedding_ready"] is False
+    assert state["embedding_probe_error"] == "embedding_probe_timeout"
+    llm_provider._reset_provider_probe_cache_for_tests()
 
 
 def test_business_services_cannot_bypass_the_provider_or_old_ports():

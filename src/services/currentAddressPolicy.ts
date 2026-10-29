@@ -1,5 +1,5 @@
-export const DEFAULT_LAST_KNOWN_MAX_AGE_MS = 5 * 60_000;
-export const DEFAULT_REQUIRED_ACCURACY_METERS = 500;
+export const DEFAULT_LAST_KNOWN_MAX_AGE_MS = 60_000;
+export const DEFAULT_REQUIRED_ACCURACY_METERS = 80;
 
 export type LocationFixSource = 'cache' | 'live';
 export type AddressGranularity =
@@ -26,8 +26,39 @@ export type LocationFix = {
 export type LocationProviderAttempt = {
   provider: string;
   result: Promise<LocationFix | null>;
+  /** A live provider may refine a coarse fix before its final result. */
+  subscribe?: (onFix: (fix: LocationFix) => void) => void;
   cancel?: () => void;
 };
+
+/** The race owns the lifetime, including cancellation before watch setup ends. */
+export function watchLocationProvider(
+  provider: string,
+  watch: (onFix: (fix: LocationFix) => void) => Promise<{ remove(): void }>,
+): LocationProviderAttempt {
+  let cancelled = false;
+  let subscription: { remove(): void } | null = null;
+  let settle: (value: null) => void = () => undefined;
+  let fail: (reason: unknown) => void = () => undefined;
+  const result = new Promise<null>((resolve, reject) => { settle = resolve; fail = reject; });
+  return {
+    provider,
+    result,
+    subscribe(onFix) {
+      void watch(fix => { if (!cancelled) onFix(fix); }).then(value => {
+        if (cancelled) value.remove();
+        else subscription = value;
+      }).catch(fail);
+    },
+    cancel() {
+      if (cancelled) return;
+      cancelled = true;
+      subscription?.remove();
+      subscription = null;
+      settle(null);
+    },
+  };
+}
 
 export type LocationRaceOptions = {
   timeoutMs: number;
@@ -201,23 +232,31 @@ export function raceLocationProviders(
     };
 
     const timeoutTimer = setTimeout(finishWithoutFix, timeoutMs);
+    const acceptFix = (fix: LocationFix | null) => {
+      if (finished || !fix || !isEligibleRaceFix(fix, maxCacheAgeMs, requiredAccuracyMeters)) return;
+      if (isPreferredFix(fix, requiredAccuracyMeters)) {
+        finishWithFix(fix);
+        return;
+      }
+      fallback = preferFallback(fallback, fix);
+      scheduleDegradedFallback();
+    };
     attempts.forEach(attempt => {
+      // Register rejection handling before starting a watch that can fail or
+      // synchronously emit. Completed/cancelled races ignore late callbacks.
       attempt.result.then(fix => {
         if (finished) return;
-        if (fix && isEligibleRaceFix(fix, maxCacheAgeMs, requiredAccuracyMeters)) {
-          if (isPreferredFix(fix, requiredAccuracyMeters)) {
-            finishWithFix(fix);
-            return;
-          }
-          fallback = preferFallback(fallback, fix);
-          scheduleDegradedFallback();
-        }
+        acceptFix(fix);
         completeAttempt();
       }).catch(reason => {
         if (finished) return;
         lastError = reason;
         completeAttempt();
       });
+      if (!finished) {
+        try { attempt.subscribe?.(acceptFix); }
+        catch (reason) { lastError = reason; attempt.cancel?.(); }
+      }
     });
   });
 }

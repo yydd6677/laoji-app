@@ -26,13 +26,6 @@ export class MeetingSummaryCarryForwardSelectionStaleError extends Error {
   }
 }
 
-export class MeetingSummaryCarryForwardSourceUnavailableError extends Error {
-  constructor() {
-    super('summary carry-forward remote source is unavailable');
-    this.name = 'MeetingSummaryCarryForwardSourceUnavailableError';
-  }
-}
-
 function selectedIds(values: readonly string[]): string[] {
   const normalized = values.map(value => value.trim());
   if (
@@ -51,14 +44,9 @@ function boundedText(value: string, maximum: number): string {
 }
 
 function sourceMeetingId(
-  scopeKey: ScopeKey,
+  _scopeKey: ScopeKey,
   item: MeetingSeriesMemoryDecision | MeetingSeriesMemoryAction,
 ): string {
-  if (scopeKey !== 'guest') {
-    const remoteId = item.sourceMeetingRemoteId?.trim();
-    if (!remoteId) throw new MeetingSummaryCarryForwardSourceUnavailableError();
-    return remoteId;
-  }
   return boundedText(item.legacyMeetingId, 160);
 }
 
@@ -94,7 +82,7 @@ function actionItem(
   return {
     kind: 'action',
     sourceMeetingId: sourceMeetingId(scopeKey, action),
-    sourceItemId: boundedText(action.sourceRemoteItemId ?? action.id, 512),
+    sourceItemId: boundedText(action.id, 512),
     sourceTitle: action.sourceMeetingTitle.trim().slice(0, 255),
     sourceOccurrenceDate: sourceDate(action.occurrenceDate),
     content: boundedText(action.content, 2_000),

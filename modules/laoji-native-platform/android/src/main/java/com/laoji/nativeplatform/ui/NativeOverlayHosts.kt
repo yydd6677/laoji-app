@@ -47,7 +47,6 @@ abstract class NativeOverlayHostView(
 ) : ExpoView(context, appContext) {
   override val shouldUseAndroidLayout: Boolean = true
 
-  protected val palette = NativeUiTokens.palette(context)
   protected val overlayRoot = FrameLayout(context)
   protected var navigationInsetPx = 0
   protected var showing = false
@@ -202,7 +201,7 @@ class LaojiNativeDialogHostView(
     val actions = parseActions(snapshot["actions"])
 
     val mask = View(context).apply {
-      setBackgroundColor(palette.mask)
+      NativeUiTokens.bindTheme(this) { setBackgroundColor(it.mask) }
       isClickable = true
       contentDescription = "关闭提示"
       setOnClickListener { requestDismiss() }
@@ -213,7 +212,7 @@ class LaojiNativeDialogHostView(
     val card = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
       gravity = Gravity.CENTER_HORIZONTAL
-      background = NativeUiTokens.roundedBackground(context, palette.surface, 6f)
+      NativeUiTokens.bindTheme(this) { background = NativeUiTokens.roundedBackground(context, it.surface, 6f) }
       elevation = NativeUiTokens.dp(context, 8f)
       setOnClickListener { /* Consume taps inside the dialog. */ }
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -233,8 +232,10 @@ class LaojiNativeDialogHostView(
     val titleView = TextView(context).apply {
       text = title
       textSize = 17f
-      setTextColor(palette.textPrimary)
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      NativeUiTokens.bindTheme(this) {
+        setTextColor(it.textPrimary)
+        typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
+      }
       gravity = Gravity.CENTER
       setPadding(
         NativeUiTokens.dp(context, 18f).toInt(),
@@ -263,10 +264,10 @@ class LaojiNativeDialogHostView(
         gravity = Gravity.CENTER_HORIZONTAL
       }
       if (message.isNotBlank()) {
-        contentColumn.addView(dialogText(message, 14f, palette.textSecondary))
+        contentColumn.addView(dialogText(message, 14f) { it.textSecondary })
       }
       if (hint.isNotBlank()) {
-        val hintView = dialogText(hint, 12f, palette.textTertiary)
+        val hintView = dialogText(hint, 12f) { it.textTertiary }
         hintView.setPadding(0, NativeUiTokens.dp(context, if (message.isNotBlank()) 8f else 0f).toInt(), 0, 0)
         contentColumn.addView(hintView)
       }
@@ -283,10 +284,13 @@ class LaojiNativeDialogHostView(
     addDialogActions(actionBar, actions, tone)
   }
 
-  private fun dialogText(value: String, sizeSp: Float, color: Int): TextView = TextView(context).apply {
+  private fun dialogText(value: String, sizeSp: Float, color: (NativeUiPalette) -> Int): TextView = TextView(context).apply {
     text = value
     textSize = sizeSp
-    setTextColor(color)
+    NativeUiTokens.bindTheme(this) {
+      setTextColor(color(it))
+      typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
+    }
     gravity = Gravity.CENTER
     setLineSpacing(0f, 1.25f)
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -300,7 +304,7 @@ class LaojiNativeDialogHostView(
     val displayed = if (actions.size <= 2) actions.asReversed() else actions
     displayed.forEachIndexed { index, action ->
       if (index > 0) {
-        val divider = View(context).apply { setBackgroundColor(palette.divider) }
+        val divider = View(context).apply { NativeUiTokens.bindTheme(this) { setBackgroundColor(it.divider) } }
         val dividerParams = if (actions.size <= 2) {
           LinearLayout.LayoutParams(NativeUiTokens.dp(context, NativeUiTokens.DIVIDER_DP).toInt().coerceAtLeast(1), NativeUiTokens.dp(context, NativeUiTokens.DIALOG_ACTION_HEIGHT_DP).toInt())
         } else {
@@ -313,16 +317,17 @@ class LaojiNativeDialogHostView(
   }
 
   private fun addAction(container: LinearLayout, action: NativeDialogAction, tone: String, inline: Boolean) {
-    val color = when (action.role) {
-      "destructive" -> palette.danger
-      "primary" -> palette.primary
-      else -> palette.textPrimary
-    }
     val actionView = TextView(context).apply {
       text = action.text
       textSize = 17f
-      setTextColor(color)
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+      NativeUiTokens.bindTheme(this) { palette ->
+        setTextColor(when (action.role) {
+          "destructive" -> palette.danger
+          "primary" -> palette.primary
+          else -> palette.textPrimary
+        })
+        typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
+      }
       gravity = Gravity.CENTER
       minHeight = NativeUiTokens.dp(context, NativeUiTokens.DIALOG_ACTION_HEIGHT_DP).toInt()
       isClickable = true
@@ -440,7 +445,7 @@ class LaojiNativeActionSheetHostView(
     }
 
     val mask = View(context).apply {
-      setBackgroundColor(palette.mask)
+      NativeUiTokens.bindTheme(this) { setBackgroundColor(it.mask) }
       isClickable = true
       contentDescription = "关闭菜单"
       setOnClickListener { closeSheet("backdrop") }
@@ -462,7 +467,7 @@ class LaojiNativeActionSheetHostView(
 
     val panel = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
-      background = NativeUiTokens.roundedBackground(context, palette.body, 8f)
+      NativeUiTokens.bindTheme(this) { background = NativeUiTokens.roundedBackground(context, it.body, 8f) }
       clipChildren = true
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
       contentDescription = title.ifBlank { "操作菜单" }
@@ -473,7 +478,10 @@ class LaojiNativeActionSheetHostView(
       panel.addView(TextView(context).apply {
         text = title
         textSize = 14f
-        setTextColor(palette.textTertiary)
+        NativeUiTokens.bindTheme(this) {
+          setTextColor(it.textTertiary)
+          typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
+        }
         gravity = Gravity.CENTER
         minHeight = NativeUiTokens.dp(context, 52f).toInt()
         setPadding(NativeUiTokens.dp(context, 12f).toInt(), 0, NativeUiTokens.dp(context, 12f).toInt(), 0)
@@ -485,7 +493,10 @@ class LaojiNativeActionSheetHostView(
       val itemView = TextView(context).apply {
         text = item.label
         textSize = 17f
-        setTextColor(if (item.disabled) palette.textDisabled else if (item.destructive) palette.danger else palette.textPrimary)
+        NativeUiTokens.bindTheme(this) { palette ->
+          setTextColor(if (item.disabled) palette.textDisabled else if (item.destructive) palette.danger else palette.textPrimary)
+          typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
+        }
         gravity = Gravity.CENTER
         minHeight = NativeUiTokens.dp(context, NativeUiTokens.SHEET_ITEM_HEIGHT_DP).toInt()
         isEnabled = !item.disabled
@@ -508,12 +519,15 @@ class LaojiNativeActionSheetHostView(
     val cancel = TextView(context).apply {
       text = "取消"
       textSize = 17f
-      setTextColor(palette.textPrimary)
       gravity = Gravity.CENTER
-      // The cancel action is a separate Feishu-style rounded surface. Without
+      // The cancel action is a separate rounded surface. Without
       // an explicit drawable TextView defaults to transparent and the overlay
       // mask shows through, which makes the button look missing.
-      background = NativeUiTokens.roundedBackground(context, palette.body, 8f)
+      NativeUiTokens.bindTheme(this) {
+        setTextColor(it.textPrimary)
+        typeface = LaojiThemeTypography.typeface(context, Typeface.NORMAL)
+        background = NativeUiTokens.roundedBackground(context, it.body, 8f)
+      }
       minHeight = NativeUiTokens.dp(context, NativeUiTokens.SHEET_CANCEL_HEIGHT_DP).toInt()
       isClickable = true
       isFocusable = true
@@ -527,7 +541,7 @@ class LaojiNativeActionSheetHostView(
   }
 
   private fun addDivider(parent: LinearLayout) {
-    parent.addView(View(context).apply { setBackgroundColor(palette.divider) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, NativeUiTokens.DIVIDER_DP).toInt().coerceAtLeast(1)))
+    parent.addView(View(context).apply { NativeUiTokens.bindTheme(this) { setBackgroundColor(it.divider) } }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, NativeUiTokens.dp(context, NativeUiTokens.DIVIDER_DP).toInt().coerceAtLeast(1)))
   }
 
   private fun closeSheet(reason: String) {

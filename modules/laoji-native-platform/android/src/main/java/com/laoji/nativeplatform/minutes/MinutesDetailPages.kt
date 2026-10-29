@@ -15,7 +15,9 @@ import android.text.InputType
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.TextWatcher
-import android.text.style.BackgroundColorSpan
+import android.text.TextPaint
+import android.text.style.CharacterStyle
+import android.text.style.UpdateAppearance
 import android.view.ActionMode
 import android.view.Gravity
 import android.view.Menu
@@ -33,12 +35,20 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.widget.NestedScrollView
+import androidx.core.view.doOnNextLayout
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.media.MinutesPlaybackState
 import kotlin.math.roundToInt
+
+/** Resolves only the paint role; the source text and selection remain untouched. */
+private class MinutesSearchHighlightSpan(private val selected: Boolean) : CharacterStyle(), UpdateAppearance {
+  override fun updateDrawState(paint: TextPaint) {
+    paint.bgColor = if (selected) MinutesPalette.primaryTransparentStrong else MinutesPalette.primaryTransparent
+  }
+}
 
 internal class MinutesNotesPage(
   context: Context,
@@ -56,8 +66,9 @@ internal class MinutesNotesPage(
     root.orientation = LinearLayout.VERTICAL
     editor.apply {
       setTextSize(16f)
-      setTextColor(MinutesPalette.text)
-      setHintTextColor(MinutesPalette.faint)
+      minutesTextColor { MinutesPalette.text }
+      minutesTypeface(Typeface.NORMAL)
+      minutesDrawing { setHintTextColor(MinutesPalette.faint) }
       hint = "记录想法"
       gravity = Gravity.TOP or Gravity.START
       background = null
@@ -134,9 +145,9 @@ internal abstract class MinutesDetailPage(
   private val stateOverlay = LinearLayout(context)
   private val emptyImage = ImageView(context)
   private val progress = ProgressBar(context)
-  private val stateMessage = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
-  private val retry = context.textView("重试", 16, MinutesPalette.primary, Typeface.BOLD)
-  private val summaryAction = context.textView("生成整理结果", 16, MinutesPalette.primary, Typeface.BOLD)
+  private val stateMessage = context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
+  private val retry = context.textView("重试", 16, { MinutesPalette.primary }, Typeface.BOLD)
+  private val summaryAction = context.textView("生成整理结果", 16, { MinutesPalette.primary }, Typeface.BOLD)
   private lateinit var content: View
 
   internal var renderedPageState: MinutesDetailPageState = MinutesDetailPageState()
@@ -154,11 +165,11 @@ internal abstract class MinutesDetailPage(
   internal abstract fun setScrollStateListener(listener: () -> Unit)
 
   init {
-    setBackgroundColor(MinutesPalette.surface)
+    minutesBackgroundColor { MinutesPalette.surface }
     stateOverlay.orientation = LinearLayout.VERTICAL
     stateOverlay.gravity = Gravity.CENTER
     stateOverlay.setPadding(context.dp(24), context.dp(24), context.dp(24), context.dp(24))
-    stateOverlay.setBackgroundColor(MinutesPalette.surface)
+    stateOverlay.minutesBackgroundColor { MinutesPalette.surface }
     emptyImage.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_minutes_empty)
     emptyImage.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     stateOverlay.addView(emptyImage, LinearLayout.LayoutParams(context.dp(100), context.dp(100)))
@@ -267,7 +278,7 @@ internal class MinutesTranscriptPage(
   private val searchField = LinearLayout(context)
   private val searchIcon = ImageView(context)
   private val searchInput = EditText(context)
-  private val matchCount = context.textView(textSizeSp = 14, color = MinutesPalette.faint)
+  private val matchCount = context.textView(textSizeSp = 14, color = { MinutesPalette.faint })
   private val clearSearch = context.iconButton(
     com.laoji.nativeplatform.R.drawable.laoji_ic_close,
     "清空文字搜索",
@@ -306,7 +317,7 @@ internal class MinutesTranscriptPage(
 
   init {
     root.orientation = LinearLayout.VERTICAL
-    root.setBackgroundColor(MinutesPalette.surface)
+    root.minutesBackgroundColor { MinutesPalette.surface }
 
     // [SOURCE] mm_layout_detail_search.xml uses a 48dp host, 36dp filler input,
     // 16sp query, and 6dp radius. [INFERENCE] navigation remains in the same
@@ -314,14 +325,14 @@ internal class MinutesTranscriptPage(
     searchBar.orientation = LinearLayout.HORIZONTAL
     searchBar.gravity = Gravity.CENTER_VERTICAL
     searchBar.setPadding(context.dp(20), context.dp(6), context.dp(8), context.dp(6))
-    searchBar.setBackgroundColor(MinutesPalette.surface)
+    searchBar.minutesBackgroundColor { MinutesPalette.surface }
     searchBar.visibility = View.GONE
 
     searchField.orientation = LinearLayout.HORIZONTAL
     searchField.gravity = Gravity.CENTER_VERTICAL
-    searchField.backgroundShape(MinutesPalette.filler, radiusDp = 6)
+    searchField.backgroundShape({ MinutesPalette.filler }, radiusDp = { 6 })
     searchIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline)
-    searchIcon.imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+    searchIcon.minutesIconColors { android.content.res.ColorStateList.valueOf(MinutesPalette.secondary) }
     searchIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     searchField.addView(
       searchIcon,
@@ -329,8 +340,9 @@ internal class MinutesTranscriptPage(
     )
     searchInput.apply {
       setTextSize(16f)
-      setTextColor(MinutesPalette.text)
-      setHintTextColor(MinutesPalette.faint)
+      minutesTextColor { MinutesPalette.text }
+      minutesTypeface(Typeface.NORMAL)
+      minutesDrawing { setHintTextColor(MinutesPalette.faint) }
       hint = "搜索文字记录"
       background = null
       setPadding(context.dp(8), 0, context.dp(4), 0)
@@ -445,7 +457,6 @@ internal class MinutesTranscriptPage(
       ?.sourceId
     searchController.updateLines(renderedLines)
     rows.setCanSeek(expectedPlaybackSourceId != null)
-    rows.setCanCreateClip(state.canCreateClip)
     renderSearch(scrollToSelected = false)
     renderPageChrome(
       pageState = state.pageState(tab),
@@ -537,12 +548,12 @@ internal class MinutesTranscriptPage(
         isClickable = isEnabled
         isFocusable = isEnabled
         alpha = if (isEnabled) 1f else 0.45f
-        background = context.roundedStateBackground(
+        minutesBackground { context.roundedStateBackground(
           defaultColor = MinutesPalette.primarySoft,
           pressedColor = MinutesPalette.primaryTransparent,
           disabledColor = MinutesPalette.page,
           radiusDp = 6,
-        )
+        ) }
         contentDescription = if (marker.deleting) {
           "正在删除标记 ${marker.timestampLabel}"
         } else {
@@ -561,14 +572,14 @@ internal class MinutesTranscriptPage(
       }
       val icon = ImageView(context).apply {
         setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ud_icon_flag_outlined)
-        imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.primary)
+        minutesIconColors { android.content.res.ColorStateList.valueOf(MinutesPalette.primary) }
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
       }
       item.addView(
         icon,
         LinearLayout.LayoutParams(context.dp(16), context.dp(16)).apply { leftMargin = context.dp(12) },
       )
-      val timestamp = context.textView(marker.timestampLabel, textSizeSp = 14, color = MinutesPalette.text).apply {
+      val timestamp = context.textView(marker.timestampLabel, textSizeSp = 14, color = { MinutesPalette.text }).apply {
         gravity = Gravity.CENTER_VERTICAL
         maxLines = 1
       }
@@ -583,11 +594,11 @@ internal class MinutesTranscriptPage(
         "更多标记操作 ${marker.timestampLabel}",
       ).apply {
         isEnabled = !marker.deleting
-        imageTintList = statefulIconTint(
+        minutesIconColors { statefulIconTint(
           defaultColor = MinutesPalette.secondary,
           pressedColor = MinutesPalette.text,
           disabledColor = MinutesPalette.disabled,
-        )
+        ) }
         setPadding(context.dp(14), context.dp(14), context.dp(14), context.dp(14))
         setOnClickListener {
           emitAction(mapOf("type" to "openMarkerActions", "markerId" to marker.id))
@@ -596,11 +607,11 @@ internal class MinutesTranscriptPage(
       item.addView(more, LinearLayout.LayoutParams(context.dp(44), context.dp(44)))
       val delete = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_close, "删除标记 ${marker.timestampLabel}").apply {
         isEnabled = !marker.deleting
-        imageTintList = statefulIconTint(
+        minutesIconColors { statefulIconTint(
           defaultColor = MinutesPalette.secondary,
           pressedColor = MinutesPalette.text,
           disabledColor = MinutesPalette.disabled,
-        )
+        ) }
         setPadding(context.dp(14), context.dp(14), context.dp(14), context.dp(14))
         setOnClickListener {
           emitAction(mapOf("type" to "deleteMarker", "markerId" to marker.id))
@@ -683,18 +694,48 @@ internal class MinutesSummaryPage(
   private val emitAction: (Map<String, Any?>) -> Unit,
 ) : MinutesDetailPage(context, MinutesDetailTab.SUMMARY, emitAction) {
   private val root = LinearLayout(context)
-  private val summaryActionBar = LinearLayout(context)
-  private val templateAction = context.textView("切换模板", 15, MinutesPalette.secondary)
-  private val regenerateAction = context.textView("重新整理", 15, MinutesPalette.primary)
-  internal val scroll = NestedScrollView(context)
-  private val rows = LinearLayout(context)
+  internal val scroll = RecyclerView(context)
+  private val listLayout = LinearLayoutManager(context)
   private var renderedSections: List<MinutesSummarySection> = emptyList()
   private var renderedActions: List<MinutesActionItem> = emptyList()
-  private var renderedCanGenerateSummary = false
-  private var renderedSummaryGenerating = false
-  private var renderedSummaryActionLabel = ""
+  private var actionSectionView: View? = null
   private val actionRows = mutableMapOf<String, View>()
   private var lastActionFocusKey = ""
+  private var pendingActionFocus: Pair<String, Long>? = null
+  private val expandedLeadIds = mutableSetOf<String>()
+  private var pendingScrollRestore: MinutesDetailPageScrollPosition? = null
+  private var scrollRestoreGeneration = 0L
+  private var scheduledRestoreGeneration = -1L
+  private var contentCommitPending = false
+
+  private sealed class BodyRow(val key: String) {
+    data class Section(val value: MinutesSummarySection) : BodyRow("section:${value.id}")
+    data class Actions(val values: List<MinutesActionItem>) : BodyRow("actions")
+  }
+  private class BodyHolder(val frame: FrameLayout) : RecyclerView.ViewHolder(frame)
+  private val bodyAdapter = object : ListAdapter<BodyRow, BodyHolder>(object : DiffUtil.ItemCallback<BodyRow>() {
+    override fun areItemsTheSame(old: BodyRow, new: BodyRow) = old.key == new.key
+    override fun areContentsTheSame(old: BodyRow, new: BodyRow) = old == new
+  }) {
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = BodyHolder(FrameLayout(context).apply {
+      layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    })
+    private fun clearActions(holder: BodyHolder) {
+      if (holder.frame.getChildAt(0) === actionSectionView) {
+        actionRows.clear(); actionSectionView = null
+      }
+    }
+    override fun onBindViewHolder(holder: BodyHolder, position: Int) {
+      clearActions(holder)
+      holder.frame.removeAllViews()
+      val view = when (val row = getItem(position)) {
+        is BodyRow.Section -> summarySection(row.value)
+        is BodyRow.Actions -> actionSection(row.values).also { actionSectionView = it }
+      }
+      holder.frame.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+    override fun onViewRecycled(holder: BodyHolder) { clearActions(holder) }
+  }
 
   override val scrollingChild: View
     get() = scroll
@@ -703,63 +744,23 @@ internal class MinutesSummaryPage(
 
   init {
     root.orientation = LinearLayout.VERTICAL
-    summaryActionBar.orientation = LinearLayout.HORIZONTAL
-    summaryActionBar.gravity = Gravity.CENTER_VERTICAL or Gravity.END
-    summaryActionBar.setPadding(context.dp(12), 0, context.dp(8), 0)
-    templateAction.apply {
-      gravity = Gravity.CENTER
-      isClickable = true
-      isFocusable = true
-      contentDescription = "切换整理模板"
-      setTextColor(statefulIconTint(MinutesPalette.secondary, MinutesPalette.primary, MinutesPalette.disabled))
-      background = context.roundedStateBackground(
-        defaultColor = MinutesPalette.surface,
-        pressedColor = MinutesPalette.primarySoft,
-        disabledColor = MinutesPalette.surface,
-        radiusDp = 6,
-      )
-      setOnClickListener { emitAction(mapOf("type" to "selectSummaryTemplate")) }
-    }
-    regenerateAction.apply {
-      gravity = Gravity.CENTER
-      isClickable = true
-      isFocusable = true
-      contentDescription = "重新整理会议记录"
-      setTextColor(
-        statefulIconTint(
-          MinutesPalette.primary,
-          MinutesPalette.primary,
-          MinutesPalette.disabled,
-        ),
-      )
-      background = context.roundedStateBackground(
-        defaultColor = MinutesPalette.surface,
-        pressedColor = MinutesPalette.primarySoft,
-        disabledColor = MinutesPalette.surface,
-        radiusDp = 6,
-      )
-      setOnClickListener { emitAction(mapOf("type" to "generateSummary")) }
-    }
-    summaryActionBar.addView(
-      templateAction,
-      LinearLayout.LayoutParams(context.dp(104), context.dp(44)).apply {
-        rightMargin = context.dp(4)
-      },
-    )
-    summaryActionBar.addView(
-      regenerateAction,
-      LinearLayout.LayoutParams(context.dp(104), context.dp(44)),
-    )
-    root.addView(
-      summaryActionBar,
-      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)),
-    )
-    scroll.isFillViewport = true
+    scroll.layoutManager = listLayout
+    scroll.adapter = bodyAdapter
+    scroll.itemAnimator = null
+    scroll.clipToPadding = false
     scroll.overScrollMode = View.OVER_SCROLL_NEVER
-    scroll.setOnScrollChangeListener { _, _, _, _, _ -> scrollStateListener() }
-    rows.orientation = LinearLayout.VERTICAL
-    rows.setPadding(context.dp(20), context.dp(10), context.dp(20), context.dp(48))
-    scroll.addView(rows, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    scroll.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+      override fun onScrolled(view: RecyclerView, dx: Int, dy: Int) {
+        scrollStateListener()
+      }
+    })
+    val summaryHorizontalPadding = 20
+    scroll.setPadding(
+      context.dp(summaryHorizontalPadding),
+      context.dp(10),
+      context.dp(summaryHorizontalPadding),
+      context.dp(48),
+    )
     root.addView(
       scroll,
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
@@ -767,11 +768,33 @@ internal class MinutesSummaryPage(
     installContent(root)
   }
 
-  override fun captureScrollPosition(): MinutesDetailPageScrollPosition =
-    MinutesDetailPageScrollPosition(offsetPx = scroll.scrollY)
+  override fun captureScrollPosition(): MinutesDetailPageScrollPosition {
+    pendingScrollRestore?.let { return it }
+    val index = listLayout.findFirstVisibleItemPosition().coerceAtLeast(0)
+    val offset = listLayout.findViewByPosition(index)?.top?.minus(scroll.paddingTop) ?: 0
+    return MinutesDetailPageScrollPosition(index, offset, formatRevision = 2)
+  }
 
   override fun restoreScrollPosition(position: MinutesDetailPageScrollPosition) {
-    scroll.post { scroll.scrollTo(0, position.offsetPx.coerceAtLeast(0)) }
+    pendingScrollRestore = position
+    scrollRestoreGeneration++
+    applyPendingScrollRestore()
+  }
+
+  private fun applyPendingScrollRestore() {
+    val position = pendingScrollRestore ?: return
+    if (bodyAdapter.itemCount == 0 || scheduledRestoreGeneration == scrollRestoreGeneration) return
+    val generation = scrollRestoreGeneration
+    scheduledRestoreGeneration = generation
+    scroll.doOnNextLayout {
+      if (generation != scrollRestoreGeneration) return@doOnNextLayout
+      if (position.formatRevision < 2) scroll.scrollBy(0, position.offsetPx.coerceAtLeast(0))
+      pendingScrollRestore = null
+    }
+    listLayout.scrollToPositionWithOffset(
+      if (position.formatRevision < 2) 0 else position.anchorIndex.coerceAtMost(bodyAdapter.itemCount - 1),
+      if (position.formatRevision < 2) 0 else position.offsetPx,
+    )
   }
 
   override fun setScrollStateListener(listener: () -> Unit) {
@@ -780,34 +803,11 @@ internal class MinutesSummaryPage(
 
   fun render(state: MinutesDetailState) {
     val hasContent = state.summary.isNotEmpty() || state.actions.isNotEmpty()
-    // Existing content keeps one stable regenerate lane. Before the first
-    // result exists, the action belongs to the centered empty state instead of
-    // reserving a blank row above the page.
-    summaryActionBar.visibility = if (
-      hasContent && (state.canGenerateSummary || state.canSelectSummaryTemplate)
-    ) View.VISIBLE else View.GONE
-    templateAction.visibility = if (hasContent && state.canSelectSummaryTemplate) View.VISIBLE else View.GONE
-    templateAction.isEnabled = !state.summaryGenerating
-    templateAction.text = state.summaryTemplateLabel.ifBlank { "切换模板" }
-    templateAction.contentDescription = "切换整理模板，当前${templateAction.text}"
-    regenerateAction.visibility = if (hasContent && state.canGenerateSummary) View.VISIBLE else View.GONE
-    regenerateAction.isEnabled = !state.summaryGenerating
-    val idleActionLabel = state.summaryActionLabel.ifBlank { "重新整理" }
-    // Keep the action lane stable while the fixed status presenter explains
-    // the running operation. Alternating to a second "正在生成" label here
-    // caused the page to flash and duplicated the same state.
-    regenerateAction.text = idleActionLabel
-    regenerateAction.contentDescription = if (idleActionLabel.startsWith("重新")) {
-      "重新整理会议记录"
-    } else {
-      "生成整理结果"
-    }
+    // First generation belongs to the empty state; regenerating an existing
+    // document belongs to its existing More menu, not a permanent reading row.
     replaceContent(
       state.summary,
       state.actions,
-      state.canGenerateSummary,
-      state.summaryGenerating,
-      state.summaryActionLabel,
     )
     focusAction(state.focusActionId, state.focusActionRequestId)
     renderPageChrome(
@@ -823,38 +823,26 @@ internal class MinutesSummaryPage(
   private fun replaceContent(
     sections: List<MinutesSummarySection>,
     actions: List<MinutesActionItem>,
-    canGenerateSummary: Boolean,
-    summaryGenerating: Boolean,
-    summaryActionLabel: String,
   ) {
-    if (
-      renderedSections == sections
-      && renderedActions == actions
-      && renderedCanGenerateSummary == canGenerateSummary
-      && renderedSummaryGenerating == summaryGenerating
-      && renderedSummaryActionLabel == summaryActionLabel
-    ) return
-    val retainedScrollY = scroll.scrollY
+    // Running/error/action-lane state is rendered by its own controls. It must
+    // never rebuild the stable summary body. Reconstruct rows only when the
+    // authored sections or action candidates themselves changed.
+    if (renderedSections == sections && renderedActions == actions) return
     renderedSections = sections.toList()
     renderedActions = actions.toList()
-    renderedCanGenerateSummary = canGenerateSummary
-    renderedSummaryGenerating = summaryGenerating
-    renderedSummaryActionLabel = summaryActionLabel
-    actionRows.clear()
-    rows.removeAllViews()
-    sections.forEach { section ->
-      rows.addView(
-        summarySection(section),
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-      )
+    expandedLeadIds.retainAll(sections.map { it.id }.toSet())
+    val next = sections.map<MinutesSummarySection, BodyRow> { BodyRow.Section(it) } +
+      if (actions.isEmpty()) emptyList() else listOf(BodyRow.Actions(actions.toList()))
+    contentCommitPending = true
+    bodyAdapter.submitList(next) {
+      contentCommitPending = false
+      // RecyclerView preserves visible children through its diff. Issuing a
+      // second scrollToPosition here leaves a pending layout command that can
+      // override a later drag even after this callback has returned. Only an
+      // explicit persisted restore or user-requested action reveal owns scroll.
+      if (pendingScrollRestore != null) applyPendingScrollRestore()
+      pendingActionFocus?.let { (id, request) -> focusAction(id, request) }
     }
-    if (actions.isNotEmpty()) {
-      rows.addView(
-        actionSection(actions),
-        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
-      )
-    }
-    scroll.post { scroll.scrollTo(0, retainedScrollY.coerceAtMost(rows.height)) }
   }
 
   private fun actionSection(actions: List<MinutesActionItem>): View = LinearLayout(context).apply {
@@ -865,7 +853,7 @@ internal class MinutesSummaryPage(
       gravity = Gravity.CENTER_VERTICAL
     }
     header.addView(
-      context.textView("待办事项", 17, MinutesPalette.text, Typeface.BOLD).apply {
+      context.textView("后续行动", 17, { MinutesPalette.text }, Typeface.BOLD).apply {
         setLineSpacing(0f, 1.2f)
       },
       LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
@@ -885,7 +873,7 @@ internal class MinutesSummaryPage(
       )
       if (index < actions.lastIndex) {
         addView(
-          View(context).apply { setBackgroundColor(MinutesPalette.divider) },
+          View(context).apply { minutesBackgroundColor { MinutesPalette.divider } },
           LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply {
             leftMargin = context.dp(44)
           },
@@ -895,24 +883,32 @@ internal class MinutesSummaryPage(
   }
 
   internal fun focusAction(actionId: String, requestId: Long, force: Boolean = false) {
-    if (actionId.isBlank() || requestId <= 0L) return
+    if (actionId.isBlank() || requestId <= 0L) {
+      pendingActionFocus = null
+      return
+    }
+    pendingActionFocus = actionId to requestId
+    // A diff may still contain the old action/status and its commit restores
+    // the reading anchor. Reveal only after that same document has committed.
+    if (contentCommitPending) return
     val key = "$actionId:$requestId"
     if (!force && key == lastActionFocusKey) return
-    val target = actionRows[actionId] ?: return
-    lastActionFocusKey = key
-    scroll.post {
-      if (!target.isAttachedToWindow) return@post
-      val bounds = Rect()
-      target.getDrawingRect(bounds)
-      rows.offsetDescendantRectToMyCoords(target, bounds)
-      scroll.smoothScrollTo(0, (bounds.top - context.dp(12)).coerceAtLeast(0))
+    val index = bodyAdapter.currentList.indexOfFirst { row ->
+      row is BodyRow.Actions && row.values.any { it.id == actionId }
     }
+    if (index < 0) return
+    scroll.doOnNextLayout {
+      val target = actionRows[actionId] ?: return@doOnNextLayout
+      if (pendingActionFocus != (actionId to requestId)) return@doOnNextLayout
+      lastActionFocusKey = key
+      target.requestRectangleOnScreen(Rect(0, 0, target.width, target.height), false)
+    }
+    listLayout.scrollToPositionWithOffset(index, context.dp(12))
   }
 
   private fun actionRow(action: MinutesActionItem): View {
     val completed = action.status == "completed"
     val dismissed = action.status == "dismissed"
-    val syncConflict = action.syncConflict
     val row = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.TOP
@@ -920,12 +916,11 @@ internal class MinutesSummaryPage(
       setPadding(0, context.dp(6), 0, context.dp(6))
     }
     val toggleHost = FrameLayout(context).apply {
-      isEnabled = !action.updating && !dismissed && !syncConflict
-      isClickable = !action.updating && !dismissed && !syncConflict
-      isFocusable = !action.updating && !dismissed && !syncConflict
+      isEnabled = !action.updating && !dismissed
+      isClickable = !action.updating && !dismissed
+      isFocusable = !action.updating && !dismissed
       contentDescription = when {
         action.updating -> "正在更新待办事项"
-        syncConflict -> "待办事项存在同步冲突"
         dismissed -> "已忽略待办事项：${action.content}"
         completed -> "恢复待办事项：${action.content}"
         else -> "完成待办事项：${action.content}"
@@ -954,22 +949,22 @@ internal class MinutesSummaryPage(
             else -> ""
           },
           15,
-          when {
+          { when {
             completed -> Color.WHITE
             dismissed -> MinutesPalette.faint
             else -> MinutesPalette.text
-          },
+          } },
         ).apply {
           gravity = Gravity.CENTER
           backgroundShape(
-            color = if (completed) MinutesPalette.primary else MinutesPalette.surface,
-            radiusDp = 11,
-            strokeColor = when {
+            color = { if (completed) MinutesPalette.primary else MinutesPalette.surface },
+            radiusDp = { 11 },
+            strokeColor = { when {
               completed -> MinutesPalette.primary
               dismissed -> MinutesPalette.faint
               else -> MinutesPalette.disabled
-            },
-            strokeWidthDp = 1,
+            } },
+            strokeWidthDp = { 1 },
           )
         },
         FrameLayout.LayoutParams(context.dp(22), context.dp(22), Gravity.CENTER),
@@ -981,11 +976,7 @@ internal class MinutesSummaryPage(
       orientation = LinearLayout.VERTICAL
       isClickable = !action.updating
       isFocusable = !action.updating
-      contentDescription = if (syncConflict) {
-        "处理待办事项同步冲突：${action.content}"
-      } else {
-        "编辑待办事项：${action.content}"
-      }
+      contentDescription = "编辑待办事项：${action.content}"
       setPadding(0, context.dp(3), context.dp(4), context.dp(3))
       setOnClickListener {
         emitAction(
@@ -1000,7 +991,7 @@ internal class MinutesSummaryPage(
       context.textView(
         action.content,
         16,
-        if (dismissed) MinutesPalette.faint else MinutesPalette.text,
+        { if (dismissed) MinutesPalette.faint else MinutesPalette.text },
       ).apply {
         setLineSpacing(0f, 1.2f)
         if (completed) paintFlags = paintFlags or android.graphics.Paint.STRIKE_THRU_TEXT_FLAG
@@ -1014,14 +1005,13 @@ internal class MinutesSummaryPage(
         add(if (action.reminderLabel == "已提醒") "已提醒" else "提醒：${action.reminderLabel}")
       }
       if (dismissed) add("已忽略")
-      if (syncConflict) add("同步冲突")
-    }.joinToString("  ·  ")
+    }.joinToString("　")
     if (metadata.isNotBlank()) {
       body.addView(
         context.textView(
           metadata,
           13,
-          if (syncConflict) MinutesPalette.warning else MinutesPalette.secondary,
+          { MinutesPalette.secondary },
         ).apply {
           setPadding(0, context.dp(4), 0, 0)
         },
@@ -1045,10 +1035,10 @@ internal class MinutesSummaryPage(
         }
       }
       sourceTarget.addView(
-        context.textView("来源 ${formatClock(action.sourceStartMs)}", 13, MinutesPalette.primary).apply {
+        context.textView("来源 ${formatClock(action.sourceStartMs)}", 13, { MinutesPalette.primary }).apply {
           gravity = Gravity.CENTER
           setPadding(context.dp(10), 0, context.dp(10), 0)
-          backgroundShape(MinutesPalette.primarySoft, radiusDp = 6)
+          backgroundShape({ MinutesPalette.primarySoft }, radiusDp = { 6 })
         },
         FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(32), Gravity.CENTER_VERTICAL),
       )
@@ -1056,9 +1046,9 @@ internal class MinutesSummaryPage(
     }
     val followupLabel = if (action.followupEventSourceId.isBlank()) "创建后续日程" else "查看后续日程"
     val followupTarget = FrameLayout(context).apply {
-      isClickable = !action.updating && !dismissed && !syncConflict
-      isFocusable = !action.updating && !dismissed && !syncConflict
-      isEnabled = !action.updating && !dismissed && !syncConflict
+      isClickable = !action.updating && !dismissed
+      isFocusable = !action.updating && !dismissed
+      isEnabled = !action.updating && !dismissed
       contentDescription = followupLabel
       setOnClickListener {
         emitAction(
@@ -1073,14 +1063,14 @@ internal class MinutesSummaryPage(
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER
       setPadding(context.dp(12), 0, context.dp(12), 0)
-      backgroundShape(MinutesPalette.primarySoft, radiusDp = 6)
+      backgroundShape({ MinutesPalette.primarySoft }, radiusDp = { 6 })
     }
     followupContent.addView(
       ImageView(context).apply {
         setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_calendar_outline)
-        imageTintList = android.content.res.ColorStateList.valueOf(
-          if (dismissed || syncConflict) MinutesPalette.faint else MinutesPalette.primary,
-        )
+        minutesIconColors { android.content.res.ColorStateList.valueOf(
+          if (dismissed) MinutesPalette.faint else MinutesPalette.primary,
+        ) }
         contentDescription = null
       },
       LinearLayout.LayoutParams(context.dp(16), context.dp(16)),
@@ -1089,7 +1079,7 @@ internal class MinutesSummaryPage(
       context.textView(
         followupLabel,
         14,
-        if (dismissed || syncConflict) MinutesPalette.faint else MinutesPalette.primary,
+        { if (dismissed) MinutesPalette.faint else MinutesPalette.primary },
       ).apply {
         gravity = Gravity.CENTER_VERTICAL
       },
@@ -1113,7 +1103,7 @@ internal class MinutesSummaryPage(
           "共享待办事项",
         ).apply {
           isEnabled = !action.updating
-          imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+          minutesIconColors { android.content.res.ColorStateList.valueOf(MinutesPalette.secondary) }
           setOnClickListener {
             emitAction(
               mapOf(
@@ -1129,10 +1119,10 @@ internal class MinutesSummaryPage(
     row.addView(
       context.iconButton(
         com.laoji.nativeplatform.R.drawable.laoji_ic_edit_outline,
-        if (syncConflict) "处理待办事项同步冲突" else "编辑待办事项",
+        "编辑待办事项",
       ).apply {
         isEnabled = !action.updating
-        imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+        minutesIconColors { android.content.res.ColorStateList.valueOf(MinutesPalette.secondary) }
         setOnClickListener {
           emitAction(
             mapOf(
@@ -1157,14 +1147,15 @@ internal class MinutesSummaryPage(
 
   private fun richItemBody(
     item: MinutesSummaryRichItem,
-    textColor: Int = MinutesPalette.text,
+    textColor: () -> Int = { MinutesPalette.text },
     horizontalPaddingDp: Int = 0,
+    showMetadata: Boolean = false,
   ): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     setPadding(context.dp(horizontalPaddingDp), context.dp(7), context.dp(horizontalPaddingDp), context.dp(7))
     if (item.title.isNotBlank()) {
       addView(
-        context.textView(item.title, 13, MinutesPalette.secondary, Typeface.BOLD),
+        context.textView(item.title, 13, { MinutesPalette.secondary }, Typeface.BOLD),
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
           bottomMargin = context.dp(2)
         },
@@ -1177,13 +1168,12 @@ internal class MinutesSummaryPage(
       },
       LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
     )
-    val metadata = buildList {
-      if (item.meta.isNotBlank()) add(item.meta)
-      item.startMs?.let { add(formatClock(it)) }
-    }.distinct().joinToString(" · ")
-    if (metadata.isNotBlank()) {
+    // Source time belongs to the collapsed evidence owner. Repeating it after
+    // every rendered sentence made the summary read like a generated trace.
+    val metadata = item.meta.trim()
+    if (showMetadata && metadata.isNotBlank()) {
       addView(
-        context.textView(metadata, 12, MinutesPalette.faint).apply { setPadding(0, context.dp(3), 0, 0) },
+        context.textView(metadata, 12, { MinutesPalette.faint }).apply { setPadding(0, context.dp(3), 0, 0) },
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
       )
     }
@@ -1197,12 +1187,12 @@ internal class MinutesSummaryPage(
       isClickable = true
       isFocusable = true
       contentDescription = "跳转到文字记录 ${formatClock(startMs)}"
-      background = context.roundedStateBackground(
+      minutesBackground { context.roundedStateBackground(
         defaultColor = Color.TRANSPARENT,
         pressedColor = MinutesPalette.primarySoft,
         disabledColor = Color.TRANSPARENT,
         radiusDp = 6,
-      )
+      ) }
       setOnClickListener {
         emitAction(
           mapOf(
@@ -1216,15 +1206,18 @@ internal class MinutesSummaryPage(
     }
   }
 
-  private fun addRichBullet(container: LinearLayout, item: MinutesSummaryRichItem, marker: String = "•") {
+  private fun addRichEntry(container: LinearLayout, item: MinutesSummaryRichItem, marker: String = "") {
     val row = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.TOP
+      setPadding(0, context.dp(2), 0, context.dp(4))
     }
-    row.addView(
-      context.textView(marker, 15, MinutesPalette.primary).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL },
-      LinearLayout.LayoutParams(context.dp(24), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(7) },
-    )
+    if (marker.isNotBlank()) {
+      row.addView(
+        context.textView(marker, 15, { MinutesPalette.secondary }).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL },
+        LinearLayout.LayoutParams(context.dp(28), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = context.dp(7) },
+      )
+    }
     row.addView(
       richSourceTarget(item, richItemBody(item)),
       LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
@@ -1254,27 +1247,27 @@ internal class MinutesSummaryPage(
       "paragraph" -> {
         val text = block.items.joinToString("\n") { it.text }
         container.addView(
-          context.textView(text, 16, MinutesPalette.text).apply {
+          context.textView(text, 16, { MinutesPalette.text }).apply {
             setLineSpacing(0f, 1.25f)
             setTextIsSelectable(true)
           },
           LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
       }
-      "bullet_group" -> block.items.forEach { addRichBullet(container, it) }
+      "bullet_group" -> block.items.forEach { addRichEntry(container, it) }
       "quote" -> block.items.forEach { item ->
         val row = LinearLayout(context).apply {
           orientation = LinearLayout.HORIZONTAL
           setPadding(0, context.dp(4), 0, context.dp(4))
         }
         row.addView(
-          View(context).apply { setBackgroundColor(MinutesPalette.primary) },
+          View(context).apply { minutesBackgroundColor { MinutesPalette.primary } },
           LinearLayout.LayoutParams(context.dp(3), ViewGroup.LayoutParams.MATCH_PARENT).apply {
             rightMargin = context.dp(12)
           },
         )
         row.addView(
-          richSourceTarget(item, richItemBody(item, MinutesPalette.secondary)),
+          richSourceTarget(item, richItemBody(item, { MinutesPalette.secondary }, showMetadata = true)),
           LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
         container.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -1285,11 +1278,16 @@ internal class MinutesSummaryPage(
           orientation = LinearLayout.VERTICAL
           gravity = Gravity.CENTER_HORIZONTAL
           addView(
-            context.textView("•", 20, MinutesPalette.primary).apply { gravity = Gravity.CENTER },
-            LinearLayout.LayoutParams(context.dp(24), context.dp(28)),
+            View(context).apply {
+              backgroundShape({ MinutesPalette.primary }, radiusDp = { 2 })
+            },
+            LinearLayout.LayoutParams(context.dp(8), context.dp(8)).apply {
+              topMargin = context.dp(10)
+              bottomMargin = context.dp(10)
+            },
           )
           addView(
-            View(context).apply { setBackgroundColor(MinutesPalette.divider) },
+            View(context).apply { minutesBackgroundColor { MinutesPalette.divider } },
             LinearLayout.LayoutParams(1, 0, 1f),
           )
         }
@@ -1304,7 +1302,7 @@ internal class MinutesSummaryPage(
         val widthDp = context.resources.displayMetrics.widthPixels / context.resources.displayMetrics.density
         val ordered = if (widthDp >= 420f) orderedLinearFlow(block) else null
         if (ordered == null) {
-          block.items.forEachIndexed { index, item -> addRichBullet(container, item, "${index + 1}.") }
+          block.items.forEachIndexed { index, item -> addRichEntry(container, item, "%02d".format(index + 1)) }
         } else {
           val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1314,7 +1312,7 @@ internal class MinutesSummaryPage(
           ordered.forEachIndexed { index, item ->
             val node = richItemBody(item, horizontalPaddingDp = 10).apply {
               minimumWidth = context.dp(132)
-              backgroundShape(MinutesPalette.primarySoft, radiusDp = 6, strokeColor = MinutesPalette.divider, strokeWidthDp = 1)
+              backgroundShape({ MinutesPalette.primarySoft }, radiusDp = { 6 }, strokeColor = { MinutesPalette.divider }, strokeWidthDp = { 1 })
             }
             row.addView(
               richSourceTarget(item, node),
@@ -1322,7 +1320,7 @@ internal class MinutesSummaryPage(
             )
             if (index < ordered.lastIndex) {
               row.addView(
-                context.textView("→", 18, MinutesPalette.secondary).apply { gravity = Gravity.CENTER },
+                context.textView("→", 18, { MinutesPalette.secondary }).apply { gravity = Gravity.CENTER },
                 LinearLayout.LayoutParams(context.dp(32), context.dp(44)),
               )
             }
@@ -1342,7 +1340,7 @@ internal class MinutesSummaryPage(
         val host = LinearLayout(context).apply { orientation = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL }
         block.items.take(3).forEachIndexed { index, item ->
           val option = richItemBody(item, horizontalPaddingDp = 10).apply {
-            backgroundShape(MinutesPalette.filler, radiusDp = 6, strokeColor = MinutesPalette.divider, strokeWidthDp = 1)
+            backgroundShape({ MinutesPalette.filler }, radiusDp = { 6 }, strokeColor = { MinutesPalette.divider }, strokeWidthDp = { 1 })
           }
           host.addView(
             richSourceTarget(item, option),
@@ -1357,7 +1355,7 @@ internal class MinutesSummaryPage(
       }
       "risk_card" -> block.items.forEach { item ->
         val risk = richItemBody(item, horizontalPaddingDp = 12).apply {
-          backgroundShape(withAlpha(MinutesPalette.warning, 20), radiusDp = 6, strokeColor = withAlpha(MinutesPalette.warning, 90), strokeWidthDp = 1)
+          backgroundShape({ withAlpha(MinutesPalette.warning, 20) }, radiusDp = { 6 }, strokeColor = { withAlpha(MinutesPalette.warning, 90) }, strokeWidthDp = { 1 })
         }
         container.addView(
           richSourceTarget(item, risk),
@@ -1370,7 +1368,7 @@ internal class MinutesSummaryPage(
         val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         pair.forEachIndexed { index, item ->
           val stat = richItemBody(item, horizontalPaddingDp = 10).apply {
-            backgroundShape(MinutesPalette.filler, radiusDp = 6)
+            backgroundShape({ MinutesPalette.filler }, radiusDp = { 6 })
           }
           row.addView(
             richSourceTarget(item, stat),
@@ -1391,9 +1389,13 @@ internal class MinutesSummaryPage(
   }
 
   private fun summarySection(section: MinutesSummarySection): View {
+    val isLead = section.stableKey in setOf("overview", "general:overview") ||
+      (section.richBlock?.kind == "paragraph" && section.richBlock.iconKey == "overview")
     val container = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
-      setPadding(0, context.dp(10), 0, context.dp(10))
+      // A summary is one document. Theme expression must not turn every
+      // paragraph into another nested card or narrow its reading column.
+      setPadding(0, context.dp(if (isLead) 0 else 16), 0, context.dp(12))
     }
     val heading = section.title.ifBlank {
       section.text.takeIf { section.kind == "heading" }.orEmpty()
@@ -1405,11 +1407,13 @@ internal class MinutesSummaryPage(
         minimumHeight = context.dp(44)
       }
       if (heading.isNotBlank()) {
-        section.richBlock?.let { block ->
+        section.richBlock?.takeIf { block ->
+          block.kind in setOf("quote", "timeline", "flow", "comparison", "risk_card", "stat")
+        }?.let { block ->
           headingRow.addView(
             ImageView(context).apply {
               setImageResource(summaryIconResource(block.iconKey))
-              imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+              minutesIconColors { android.content.res.ColorStateList.valueOf(MinutesPalette.secondary) }
               contentDescription = null
             },
             LinearLayout.LayoutParams(context.dp(20), context.dp(20)).apply {
@@ -1418,7 +1422,9 @@ internal class MinutesSummaryPage(
           )
         }
         headingRow.addView(
-          context.textView(heading, 17, MinutesPalette.text, Typeface.BOLD).apply {
+          context.textView(heading, if (isLead) 13 else 17,
+            { if (isLead) MinutesPalette.secondary else MinutesPalette.text },
+            if (isLead) Typeface.NORMAL else Typeface.BOLD).apply {
             setLineSpacing(0f, 1.2f)
             setTextIsSelectable(true)
           },
@@ -1429,10 +1435,10 @@ internal class MinutesSummaryPage(
       }
       if (section.userEdited) {
         headingRow.addView(
-          context.textView("已编辑", 12, MinutesPalette.secondary).apply {
+          context.textView("已编辑", 12, { MinutesPalette.secondary }).apply {
             gravity = Gravity.CENTER
             setPadding(context.dp(8), 0, context.dp(8), 0)
-            backgroundShape(MinutesPalette.filler, radiusDp = 4)
+            backgroundShape({ MinutesPalette.filler }, radiusDp = { 4 })
           },
           LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(28)).apply {
             rightMargin = context.dp(4)
@@ -1445,7 +1451,7 @@ internal class MinutesSummaryPage(
             com.laoji.nativeplatform.R.drawable.laoji_ic_edit_outline,
             if (section.userEdited) "编辑整理内容，当前含人工修改" else "编辑整理内容",
           ).apply {
-            imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.secondary)
+            minutesIconColors { android.content.res.ColorStateList.valueOf(MinutesPalette.secondary) }
             setOnClickListener {
               emitAction(
                 mapOf(
@@ -1465,7 +1471,15 @@ internal class MinutesSummaryPage(
         },
       )
     }
-    if (section.richBlock != null) {
+    if (isLead) {
+      val lead = section.richBlock?.items?.joinToString("\n") { it.text } ?: section.text
+      if (lead.isNotBlank()) container.addView(
+        MinutesSummaryLeadView(context, lead, section.id in expandedLeadIds) { expanded ->
+          if (expanded) expandedLeadIds.add(section.id) else expandedLeadIds.remove(section.id)
+        },
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
+      )
+    } else if (section.richBlock != null) {
       renderSummaryRichBlock(container, section.richBlock)
     } else if (section.text.isNotBlank() && section.kind != "heading") {
       val listKind = section.kind in setOf(
@@ -1474,21 +1488,20 @@ internal class MinutesSummaryPage(
       )
       if (listKind) {
         section.text.split(Regex("\\r?\\n")).map(String::trim).filter(String::isNotBlank).forEachIndexed { index, line ->
+          val ordered = section.kind == "numbered" || section.kind == "ordered"
           val row = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.TOP
-            setPadding(0, context.dp(3), 0, context.dp(3))
+            setPadding(0, context.dp(3), 0, context.dp(if (ordered) 3 else 6))
+          }
+          if (ordered) {
+            row.addView(
+              context.textView("%02d".format(index + 1), 15, { MinutesPalette.secondary }),
+              LinearLayout.LayoutParams(context.dp(30), ViewGroup.LayoutParams.WRAP_CONTENT),
+            )
           }
           row.addView(
-            context.textView(
-              if (section.kind == "numbered" || section.kind == "ordered") "${index + 1}." else "•",
-              15,
-              MinutesPalette.text,
-            ),
-            LinearLayout.LayoutParams(context.dp(26), ViewGroup.LayoutParams.WRAP_CONTENT),
-          )
-          row.addView(
-            context.textView(line, 16, MinutesPalette.text).apply {
+            context.textView(line, 16, { MinutesPalette.text }).apply {
               setLineSpacing(0f, 1.25f)
               setTextIsSelectable(true)
             },
@@ -1498,7 +1511,7 @@ internal class MinutesSummaryPage(
         }
       } else {
         container.addView(
-          context.textView(section.text, 16, MinutesPalette.text).apply {
+          context.textView(section.text, 16, { MinutesPalette.text }).apply {
             setLineSpacing(0f, 1.25f)
             setTextIsSelectable(true)
           },
@@ -1512,57 +1525,47 @@ internal class MinutesSummaryPage(
           context.textView(
             section.richBlock.originalSourceLabel.ifBlank { "原始依据" },
             12,
-            MinutesPalette.faint,
+            { MinutesPalette.faint },
           ).apply { setPadding(0, context.dp(6), 0, 0) },
           LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
         )
       }
-      val citationRow = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(0, context.dp(4), 0, 0)
-      }
-      section.citations.forEach { citation ->
-        val target = FrameLayout(context).apply {
-          isClickable = true
-          isFocusable = true
-          contentDescription = "跳转到文字记录 ${citation.label.ifBlank { formatClock(citation.startMs) }}"
-          setOnClickListener {
-            emitAction(
-              mapOf(
-                "type" to "seekSummaryCitation",
-                "segmentId" to citation.segmentId,
-                "positionMs" to citation.startMs,
-              ),
-            )
-          }
+      val evidenceTarget = FrameLayout(context).apply {
+        isClickable = true
+        isFocusable = true
+        contentDescription = "查看${section.citations.size}处整理依据"
+        setOnClickListener {
+          emitAction(
+            mapOf(
+              "type" to "openSummaryEvidence",
+              "sectionId" to section.id,
+            ),
+          )
         }
-        target.addView(
-          context.textView(
-            citation.label.ifBlank { formatClock(citation.startMs) },
-            14,
-            MinutesPalette.primary,
-          ).apply {
-            gravity = Gravity.CENTER
-            setPadding(context.dp(10), 0, context.dp(10), 0)
-            backgroundShape(MinutesPalette.primarySoft, radiusDp = 6)
-          },
-          FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(32), Gravity.CENTER),
-        )
-        citationRow.addView(
-          target,
-          LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
-            rightMargin = context.dp(4)
-          },
-        )
       }
-      val scroller = HorizontalScrollView(context).apply {
-        isHorizontalScrollBarEnabled = false
-        overScrollMode = View.OVER_SCROLL_NEVER
-        addView(citationRow, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+      val evidenceLabel = context.textView("原始依据（${section.citations.size}段）", 14, { MinutesPalette.primary }).apply {
+          gravity = Gravity.CENTER
+          setPadding(context.dp(10), 0, context.dp(10), 0)
+          backgroundShape({ MinutesPalette.primarySoft }, radiusDp = { 6 })
       }
-      container.addView(scroller, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(48)))
+      val evidenceLabelHeight = maxOf(context.dp(32), MinutesDetailLayoutContract.minimumTextLineHeightPx(evidenceLabel.textSize))
+      evidenceTarget.addView(
+        evidenceLabel,
+        FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, evidenceLabelHeight, Gravity.CENTER_VERTICAL),
+      )
+      container.addView(
+        evidenceTarget,
+        LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, maxOf(context.dp(44), evidenceLabelHeight + context.dp(8))).apply {
+          topMargin = context.dp(4)
+        },
+      )
     }
+    container.addView(
+      View(context).apply { minutesBackgroundColor { if (MinutesPalette.paper) MinutesPalette.divider else Color.TRANSPARENT } },
+      LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply {
+        topMargin = context.dp(10)
+      },
+    )
     return container
   }
 }
@@ -1721,11 +1724,11 @@ internal class MinutesInfoPage(
             setOnClickListener { onInfoAction(mapOf("type" to item.action)) }
           }
         }
-        row.addView(context.textView(item.label, 14, MinutesPalette.secondary))
+        row.addView(context.textView(item.label, 14, { MinutesPalette.secondary }))
         row.addView(context.textView(
           item.value,
           16,
-          if (item.accent) MinutesPalette.primary else MinutesPalette.text,
+          { if (item.accent) MinutesPalette.primary else MinutesPalette.text },
         ).apply {
           setLineSpacing(0f, 1.2f)
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
@@ -1756,7 +1759,6 @@ private class MinutesTranscriptPageAdapter(
 ) : ListAdapter<MinutesTranscriptRenderRow, MinutesTranscriptPageAdapter.Holder>(DIFF) {
   private var activeLineIndex: Int? = null
   private var canSeek = false
-  private var canCreateClip = false
 
   init {
     setHasStableIds(true)
@@ -1787,17 +1789,11 @@ private class MinutesTranscriptPageAdapter(
     if (itemCount > 0) notifyItemRangeChanged(0, itemCount, PAYLOAD_SEEK)
   }
 
-  fun setCanCreateClip(next: Boolean) {
-    if (canCreateClip == next) return
-    canCreateClip = next
-    if (itemCount > 0) notifyItemRangeChanged(0, itemCount, PAYLOAD_CLIP)
-  }
-
   override fun getItemId(position: Int): Long = getItem(position).line.id.hashCode().toLong()
   override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(parent)
 
   override fun onBindViewHolder(holder: Holder, position: Int) {
-    holder.bind(getItem(position), position == activeLineIndex, canSeek, canCreateClip, onAction)
+    holder.bind(getItem(position), position == activeLineIndex, canSeek, onAction)
   }
 
   override fun onBindViewHolder(holder: Holder, position: Int, payloads: MutableList<Any>) {
@@ -1810,7 +1806,6 @@ private class MinutesTranscriptPageAdapter(
       getItem(position),
       position == activeLineIndex,
       canSeek,
-      canCreateClip,
       onAction,
       payload,
     )
@@ -1829,14 +1824,12 @@ private class MinutesTranscriptPageAdapter(
       isFocusable = true
     }
     private val avatar = FrameLayout(parent.context)
-    private val speaker = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+    private val speaker = parent.context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
     private val separator = View(parent.context)
-    private val time = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+    private val time = parent.context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
     private val body = parent.context.textView(textSizeSp = 16)
     private var boundLine: MinutesTranscriptLine? = null
     private var boundActive = false
-    private var boundCanCreateClip = false
-    private var boundAction: (Map<String, Any?>) -> Unit = {}
 
     init {
       root.layoutParams = RecyclerView.LayoutParams(
@@ -1859,7 +1852,7 @@ private class MinutesTranscriptPageAdapter(
         leftMargin = parent.context.dp(8)
       })
       metaRow.addView(speakerTarget, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, parent.context.dp(44)))
-      separator.backgroundShape(MinutesPalette.disabled, radiusDp = 2)
+      separator.backgroundShape({ MinutesPalette.disabled }, radiusDp = { 2 })
       metaRow.addView(separator, LinearLayout.LayoutParams(parent.context.dp(3), parent.context.dp(3)).apply {
         leftMargin = parent.context.dp(12)
         rightMargin = parent.context.dp(12)
@@ -1877,36 +1870,10 @@ private class MinutesTranscriptPageAdapter(
           menu.removeItem(android.R.id.shareText)
           menu.add(Menu.NONE, MENU_SHARE_SELECTION, 0, "分享")
             .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
-          val line = boundLine
-          if (
-            boundCanCreateClip
-            && line?.isFinal == true
-            && line.revisionKind != MinutesTranscriptRevisionKind.REALTIME_DRAFT
-          ) {
-            // This is the primary LaoJi action for a selected transcript
-            // range.  Keep it in the visible selection toolbar; putting it
-            // only in Android's overflow was the reason users could long
-            // press text yet see no LaoJi action.
-            menu.add(Menu.NONE, MENU_CREATE_CLIP, 1, "生成音频片段")
-              .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-          }
           return true
         }
 
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
-          // A holder can receive a clip-capability update while the selection
-          // toolbar is open.  Rebuild only our item instead of leaving the
-          // toolbar with a stale hidden/visible action.
-          menu.removeItem(MENU_CREATE_CLIP)
-          val line = boundLine
-          if (
-            boundCanCreateClip
-            && line?.isFinal == true
-            && line.revisionKind != MinutesTranscriptRevisionKind.REALTIME_DRAFT
-          ) {
-            menu.add(Menu.NONE, MENU_CREATE_CLIP, 1, "生成音频片段")
-              .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-          }
           menu.findItem(MENU_SHARE_SELECTION)?.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
           return true
         }
@@ -1915,10 +1882,6 @@ private class MinutesTranscriptPageAdapter(
           return when (item.itemId) {
             MENU_SHARE_SELECTION -> {
               shareSelection(mode)
-              true
-            }
-            MENU_CREATE_CLIP -> {
-              createClipSelection(mode)
               true
             }
             else -> false
@@ -1936,11 +1899,8 @@ private class MinutesTranscriptPageAdapter(
       row: MinutesTranscriptRenderRow,
       active: Boolean,
       canSeek: Boolean,
-      canCreateClip: Boolean,
       onAction: (Map<String, Any?>) -> Unit,
     ) {
-      boundCanCreateClip = canCreateClip
-      boundAction = onAction
       bindMetadata(row.line)
       bindBody(row)
       bindActive(active)
@@ -1951,15 +1911,12 @@ private class MinutesTranscriptPageAdapter(
       row: MinutesTranscriptRenderRow,
       active: Boolean,
       canSeek: Boolean,
-      canCreateClip: Boolean,
       onAction: (Map<String, Any?>) -> Unit,
       payload: Int,
     ) {
       if (payload == 0 || payload and PAYLOAD_METADATA != 0) bindMetadata(row.line)
       if (payload == 0 || payload and PAYLOAD_BODY != 0) bindBody(row)
       if (payload == 0 || payload and PAYLOAD_ACTIVE != 0) bindActive(active)
-      if (payload == 0 || payload and PAYLOAD_CLIP != 0) boundCanCreateClip = canCreateClip
-      boundAction = onAction
       if (
         payload == 0
         || payload and (PAYLOAD_SEEK or PAYLOAD_METADATA or PAYLOAD_BODY) != 0
@@ -1968,9 +1925,10 @@ private class MinutesTranscriptPageAdapter(
 
     private fun bindMetadata(line: MinutesTranscriptLine) {
       boundLine = line
-      val tone = minutesSpeakerTone(line.speakerId.ifBlank { line.speakerLabel })
-      avatar.backgroundShape(tone.first, radiusDp = 12)
-      (avatar.getChildAt(0) as ImageView).imageTintList = android.content.res.ColorStateList.valueOf(tone.second)
+      avatar.backgroundShape({ minutesSpeakerTone(line.speakerId.ifBlank { line.speakerLabel }).first }, radiusDp = { 12 })
+      (avatar.getChildAt(0) as ImageView).minutesIconColors {
+        android.content.res.ColorStateList.valueOf(minutesSpeakerTone(line.speakerId.ifBlank { line.speakerLabel }).second)
+      }
       speaker.text = line.speakerLabel
       speakerTarget.contentDescription = "修改讲话人，${line.speakerLabel}"
       time.text = line.timestampLabel
@@ -1982,7 +1940,7 @@ private class MinutesTranscriptPageAdapter(
       val styled = SpannableString(row.line.text)
       row.searchRanges.filter { it.validFor(row.line.text) }.forEach { range ->
         styled.setSpan(
-          BackgroundColorSpan(MinutesPalette.primaryTransparent),
+          MinutesSearchHighlightSpan(selected = false),
           range.start,
           range.end,
           Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
@@ -1990,7 +1948,7 @@ private class MinutesTranscriptPageAdapter(
       }
       row.selectedRange?.takeIf { it.validFor(row.line.text) }?.let { range ->
         styled.setSpan(
-          BackgroundColorSpan(MinutesPalette.primaryTransparentStrong),
+          MinutesSearchHighlightSpan(selected = true),
           range.start,
           range.end,
           Spannable.SPAN_EXCLUSIVE_EXCLUSIVE,
@@ -2005,7 +1963,7 @@ private class MinutesTranscriptPageAdapter(
 
     private fun bindActive(active: Boolean) {
       boundActive = active
-      root.backgroundShape(if (active) MinutesPalette.primarySoft else MinutesPalette.surface)
+      root.backgroundShape({ if (active) MinutesPalette.primarySoft else MinutesPalette.surface })
       bindAccessibility()
     }
 
@@ -2078,24 +2036,6 @@ private class MinutesTranscriptPageAdapter(
       }
     }
 
-    private fun createClipSelection(mode: ActionMode) {
-      val line = boundLine ?: return
-      val start = minOf(body.selectionStart, body.selectionEnd).coerceAtLeast(0)
-      val end = maxOf(body.selectionStart, body.selectionEnd).coerceAtMost(body.text.length)
-      if (end <= start) return
-      val selected = body.text.subSequence(start, end).toString().trim()
-      if (selected.isBlank()) return
-      boundAction(
-        mapOf(
-          "type" to "createClipFromTranscript",
-          "lineId" to line.id,
-          "positionMs" to line.startMs,
-          "endMs" to line.endMs,
-          "selectedText" to selected,
-        ),
-      )
-      mode.finish()
-    }
   }
 
   companion object {
@@ -2103,9 +2043,7 @@ private class MinutesTranscriptPageAdapter(
     private const val PAYLOAD_BODY = 1 shl 1
     private const val PAYLOAD_ACTIVE = 1 shl 2
     private const val PAYLOAD_SEEK = 1 shl 3
-    private const val PAYLOAD_CLIP = 1 shl 4
     private const val MENU_SHARE_SELECTION = 0x4C4A5301
-    private const val MENU_CREATE_CLIP = 0x4C4A5302
 
     private val DIFF = object : DiffUtil.ItemCallback<MinutesTranscriptRenderRow>() {
       override fun areItemsTheSame(
@@ -2188,7 +2126,7 @@ private class MinutesSpeakersPageAdapter(
     private val root = itemView as FrameLayout
     private val avatar = FrameLayout(parent.context)
     private val name = parent.context.textView(textSizeSp = 14)
-    private val percent = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+    private val percent = parent.context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
     private val timeline = MinutesSpeakerTimelineView(parent.context)
 
     init {
@@ -2222,13 +2160,13 @@ private class MinutesSpeakersPageAdapter(
 
     fun bind(row: MinutesSpeakerTimelineRow, onAction: (Map<String, Any?>) -> Unit) {
       val speaker = row.speaker
-      val tone = minutesSpeakerTone(speaker.id)
-      val timelineColor = minutesSpeakerTimelineColor(row.colorIndex)
-      avatar.backgroundShape(tone.first, radiusDp = 22)
-      (avatar.getChildAt(0) as ImageView).imageTintList = android.content.res.ColorStateList.valueOf(tone.second)
+      avatar.backgroundShape({ minutesSpeakerTone(speaker.id).first }, radiusDp = { 22 })
+      (avatar.getChildAt(0) as ImageView).minutesIconColors {
+        android.content.res.ColorStateList.valueOf(minutesSpeakerTone(speaker.id).second)
+      }
       name.text = speaker.label
       percent.text = "${row.percent}%"
-      timeline.bind(row, timelineColor) { positionMs ->
+      timeline.bind(row, { minutesSpeakerTimelineColor(row.colorIndex) }) { positionMs ->
         onAction(mapOf("type" to "seekTranscript", "positionMs" to positionMs))
       }
       root.isClickable = speaker.canManage
@@ -2243,12 +2181,12 @@ private class MinutesSpeakersPageAdapter(
 
 private class MinutesSpeakerTimelineView(context: Context) : FrameLayout(context) {
   private var row: MinutesSpeakerTimelineRow? = null
-  private var segmentColor: Int = MinutesPalette.primary
+  private var segmentColor: () -> Int = { MinutesPalette.primary }
   private var onSeek: (Long) -> Unit = {}
 
   fun bind(
     row: MinutesSpeakerTimelineRow,
-    segmentColor: Int,
+    segmentColor: () -> Int,
     onSeek: (Long) -> Unit,
   ) {
     this.row = row
@@ -2271,7 +2209,7 @@ private class MinutesSpeakerTimelineView(context: Context) : FrameLayout(context
     val trackTop = (height - trackHeight) / 2
     val trackWidth = (width - sideMargin * 2).coerceAtLeast(0)
     addView(
-      View(context).apply { backgroundShape(MinutesPalette.timelineTrack, radiusDp = 3) },
+      View(context).apply { backgroundShape({ MinutesPalette.timelineTrack }, radiusDp = { 3 }) },
       LayoutParams(trackWidth, trackHeight).apply {
         leftMargin = sideMargin
         topMargin = trackTop
@@ -2288,7 +2226,7 @@ private class MinutesSpeakerTimelineView(context: Context) : FrameLayout(context
       if (segmentWidth <= 0) return@forEach
       addView(
         View(context).apply {
-          backgroundShape(segmentColor, radiusDp = 3)
+          backgroundShape(segmentColor, radiusDp = { 3 })
           isClickable = true
           isFocusable = true
           contentDescription = "跳转到${segment.timestampLabel}"

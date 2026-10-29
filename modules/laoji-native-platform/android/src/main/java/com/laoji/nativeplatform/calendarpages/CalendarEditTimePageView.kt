@@ -17,12 +17,10 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import java.time.LocalDate
 import java.time.YearMonth
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("CAL-PICKER-WHEEL-TAP-001", "CAL-TIMEFORMAT-001", "UI-TITLE-COMMON-001")
 internal class CalendarEditTimePageView(
   context: Context,
   initialState: CalendarEditTimeState,
@@ -46,9 +44,9 @@ internal class CalendarEditTimePageView(
   }
   private val endTimeSwitchRow = toggleRow("结束时间", endTimeSwitch)
   private val startDateText = endpointText(15f, Typeface.BOLD)
-  private val startTimeText = endpointText(14f, Typeface.NORMAL, CalendarPagePalette.secondary)
+  private val startTimeText = endpointText(14f, Typeface.NORMAL, { CalendarPagePalette.secondary })
   private val endDateText = endpointText(15f, Typeface.BOLD)
-  private val endTimeText = endpointText(14f, Typeface.NORMAL, CalendarPagePalette.secondary)
+  private val endTimeText = endpointText(14f, Typeface.NORMAL, { CalendarPagePalette.secondary })
   private val startRegion = endpointRegion(
     label = "开始",
     dateText = startDateText,
@@ -79,7 +77,7 @@ internal class CalendarEditTimePageView(
 
   init {
     orientation = VERTICAL
-    setBackgroundColor(CalendarPagePalette.body)
+    pageBackgroundColor { CalendarPagePalette.body }
     isClickable = true
     isFocusable = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -87,7 +85,7 @@ internal class CalendarEditTimePageView(
     titleBar.setCenterTitle("时间")
     titleBar.setDividerVisible(false)
     titleBar.setLeftTextAction("取消", debounce = false) { onCancel() }
-    titleBar.addRightTextAction("完成", CalendarPagePalette.primary, debounce = true) {
+    titleBar.addRightTextAction("完成", { CalendarPagePalette.primary }, debounce = true) {
       onComplete(state.completedDraft())
     }
     addView(titleBar, LayoutParams(
@@ -146,7 +144,7 @@ internal class CalendarEditTimePageView(
     gravity = Gravity.CENTER_VERTICAL
     minimumHeight = context.pageDp(88)
     addView(startRegion, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
-    addView(View(context).apply { setBackgroundColor(CalendarPagePalette.divider) }, LayoutParams(
+    addView(View(context).apply { pageBackgroundColor { CalendarPagePalette.divider } }, LayoutParams(
       context.pageDp(0.5f).coerceAtLeast(1),
       context.pageDp(56),
     ))
@@ -162,7 +160,7 @@ internal class CalendarEditTimePageView(
     orientation = VERTICAL
     gravity = Gravity.CENTER_VERTICAL
     setPadding(context.pageDp(16), context.pageDp(10), context.pageDp(12), context.pageDp(10))
-    addView(context.pageText(label, 13f, CalendarPagePalette.secondary), LayoutParams(
+    addView(context.pageText(label, 13f, { CalendarPagePalette.secondary }), LayoutParams(
       LayoutParams.WRAP_CONTENT,
       LayoutParams.WRAP_CONTENT,
     ))
@@ -308,7 +306,7 @@ internal class CalendarEditTimePageView(
   ) {
     val selected = state.selectedEndpoint == endpoint
     region.isSelected = selected
-    region.setBackgroundColor(if (selected) CalendarPagePalette.primarySoft else Color.TRANSPARENT)
+    region.pageBackgroundColor { if (selected) CalendarPagePalette.primarySoft else Color.TRANSPARENT }
     val label = if (endpoint == CalendarEditEndpoint.START) "开始" else "结束"
     region.contentDescription = "$label 区域，${dateText.text}，${timeText.text}"
   }
@@ -331,7 +329,7 @@ internal class CalendarEditTimePageView(
   private fun endpointText(
     sizeSp: Float,
     weight: Int,
-    color: Int = CalendarPagePalette.text,
+    color: () -> Int = { CalendarPagePalette.text },
   ): TextView = context.pageText(sizeSp = sizeSp, color = color, weight = weight).apply {
     maxLines = 1
     setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)

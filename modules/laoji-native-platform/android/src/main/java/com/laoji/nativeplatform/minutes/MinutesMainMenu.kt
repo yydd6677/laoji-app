@@ -119,7 +119,7 @@ internal class MinutesMainMenu(
   private fun createMenu(context: Context, canOpenRecycleBin: Boolean): LinearLayout = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     minimumWidth = context.dp(140)
-    backgroundShape(MinutesPalette.surface, radiusDp = 8)
+    backgroundShape({ MinutesPalette.surface }, radiusDp = { 8 })
     clipToOutline = true
     elevation = context.dp(8).toFloat()
     val actions = mutableListOf(
@@ -150,10 +150,10 @@ internal class MinutesMainMenu(
         isClickable = true
         isFocusable = true
         contentDescription = action.label
-        background = mainMenuRowBackground()
+        minutesBackground { mainMenuRowBackground() }
         val icon = ImageView(context).apply {
           setImageResource(action.icon)
-          imageTintList = ColorStateList.valueOf(MinutesPalette.text)
+          minutesIconColors { ColorStateList.valueOf(MinutesPalette.text) }
           importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         addView(icon, LinearLayout.LayoutParams(context.dp(24), context.dp(24)))

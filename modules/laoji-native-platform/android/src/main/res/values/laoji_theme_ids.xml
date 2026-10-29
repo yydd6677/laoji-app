@@ -1,0 +1,5 @@
+<resources>
+    <item name="laoji_theme_bindings" type="id" />
+  <item name="laoji_minutes_appearance" type="id" />
+  <item name="laoji_calendar_page_appearance" type="id" />
+</resources>

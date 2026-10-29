@@ -1,8 +1,7 @@
-"""Privacy-safe integrity state for LaoJi's three SQLite databases."""
+"""Privacy-safe integrity state for LaoJi's server-owned SQLite databases."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import sqlite3
 import threading
@@ -24,13 +23,6 @@ def _main_path() -> Path:
     if not url.drivername.startswith("sqlite") or not url.database:
         raise RuntimeError("main_database_not_sqlite")
     return Path(url.database).expanduser().resolve()
-
-
-def _schedule_path() -> Path:
-    configured = os.getenv("LAOJI_DB_PATH", "").strip()
-    if configured:
-        return Path(configured).expanduser().resolve()
-    return Path(__file__).resolve().parents[2] / "data" / "schedule.db"
 
 
 def _inspect(path: Path) -> dict:
@@ -73,7 +65,6 @@ def database_health(*, refresh: bool = False) -> dict:
             return _CACHED
         databases = {
             "main": _inspect(_main_path()),
-            "schedule": _inspect(_schedule_path()),
             "speaker": _inspect(Path(get_speaker_db().db_path).resolve()),
         }
         ready = all(

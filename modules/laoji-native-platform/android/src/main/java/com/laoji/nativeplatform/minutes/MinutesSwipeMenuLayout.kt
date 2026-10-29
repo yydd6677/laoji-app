@@ -11,13 +11,11 @@ import android.view.ViewGroup
 import android.view.ViewConfiguration
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.OvershootInterpolator
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import java.lang.ref.WeakReference
 import kotlin.math.abs
 import kotlin.math.max
 
 /** Source-shaped counterpart of MinutesListItemView -> SwipeMenuLayout. */
-@FeishuEvidence("MIN-ROOT-001")
 internal class MinutesSwipeMenuLayout @JvmOverloads constructor(
   context: Context,
   attrs: AttributeSet? = null,

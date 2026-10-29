@@ -1,5 +1,10 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
-import type { MeetingEntryPoint, MeetingFactsResultV3, MeetingSummaryDocument } from '../domain/meeting';
+import type {
+  MeetingEntryPoint,
+  MeetingFactsResultV3,
+  MeetingSummaryActivationFenceV3,
+  MeetingSummaryDocument,
+} from '../domain/meeting';
 import type { EventCategory } from '../utils/eventColors';
 
 export interface CalEvent {
@@ -13,6 +18,12 @@ export interface CalEvent {
   seriesStartDate?: string;
   seriesEndDate?: string;
   revision?: number;
+  /** Stable local MentionGraph/draft revision metadata. */
+  eventRevision?: number;
+  draftSourceSha256?: string | null;
+  producerRevision?: string;
+  graphSchemaRevision?: string;
+  deletedAtMs?: number | null;
   recurrenceSegmentId?: number | string;
   recurrenceInterval?: number;
   /** ISO weekdays: 1 = Monday ... 7 = Sunday. */
@@ -61,8 +72,6 @@ export interface EventRef {
 
 export interface Meeting {
   id: string;
-  /** Stable server identity. Explicit null means this local meeting is not created remotely yet. */
-  remoteId?: string | null;
   title: string;
   date: string;
   time?: string;
@@ -72,9 +81,10 @@ export interface Meeting {
   participants?: string[];
   hasTranscript?: boolean;
   hasSummary?: boolean;
+  /** Compact summary excerpt projected for the meeting-list cover. */
+  summaryCoverText?: string;
   status?: string;
-  statusSyncPending?: boolean;
-  mode?: 'realtime' | 'offline' | 'whisper' | 'qwen';
+  mode?: 'realtime' | 'offline';
   description?: string | null;
   location?: string | null;
   createdAt?: string;
@@ -112,6 +122,8 @@ export interface TranscriptLine {
   created_at?: string | null;
   /** Compatibility metadata projected from the local transcript revision model. */
   isFinal?: boolean;
+  /** Monotonic vNext text state for one stable segment identity. */
+  textState?: 'partial' | 'stable' | 'final';
   revisionKind?: 'realtimeDraft' | 'final' | 'reprocessed';
   /** Canonical server script. Missing means a legacy/cache row. */
   script?: 'zh-Hans' | 'unknown';
@@ -131,9 +143,13 @@ export interface MeetingSummary {
   structured_document?: MeetingSummaryDocument;
   /** Raw v3 facts retained locally; templates are deterministic projections of this object. */
   facts_document_v3?: MeetingFactsResultV3;
+  /** Content-free source-stream identity checked again by the atomic SQLite activation. */
+  activation_fence_v3?: MeetingSummaryActivationFenceV3;
 }
 
 export interface EventDraftParams {
+  clientRequestId?: string;
+  inputJobId?: string;
   title: string;
   startDate: string;
   endDate?: string;
@@ -151,6 +167,10 @@ export interface EventDraftParams {
   detail?: string;
   status?: string;
   reminderMinutes?: number | null;
+  eventRevision?: number;
+  draftSourceSha256?: string | null;
+  producerRevision?: string;
+  graphSchemaRevision?: string;
 }
 
 export interface MeetingActionFollowupParams {
@@ -162,10 +182,7 @@ export interface MeetingActionFollowupParams {
   clientRequestId: string;
 }
 
-export type EditableProfileField = 'nickname' | 'email' | 'phone';
-
 export type RootStackParamList = {
-  Login: undefined;
   MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
   EventDetail: { eventRef: EventRef };
   MeetingLive: {
@@ -189,17 +206,11 @@ export type RootStackParamList = {
     positionMs?: number;
   };
   MeetingOrganization: undefined;
-  SharedAction: { token: string };
-  SharedMeetingContent: { token: string };
   SpeakerManager: undefined;
   SpeakerEnrollment: { speakerId?: string } | undefined;
-  Profile: undefined;
-  ProfileField: { field: EditableProfileField };
-  Account: { section?: 'deletion' } | undefined;
-  ChangePassword: undefined;
   NotificationSettings: undefined;
-  AccountDeletion: undefined;
   Privacy: undefined;
+  HardwareDevices: undefined;
   Legal: { kind: 'terms' | 'privacy' | 'help' | 'guide' | 'version' | 'contact' };
   AddEvent: {
     date?: string;

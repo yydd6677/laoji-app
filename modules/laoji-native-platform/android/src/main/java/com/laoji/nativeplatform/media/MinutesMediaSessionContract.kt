@@ -10,11 +10,13 @@ internal const val MINUTES_MEDIA_SESSION_ID = "laoji-minutes-playback"
 internal const val MINUTES_SET_SOURCE_ACTION = "com.laoji.minutes.SET_SOURCE"
 internal const val MINUTES_CLEAR_SOURCE_ACTION = "com.laoji.minutes.CLEAR_SOURCE"
 internal const val MINUTES_ACTIVATE_STORAGE_SCOPE_ACTION = "com.laoji.minutes.ACTIVATE_STORAGE_SCOPE"
+internal const val MINUTES_SEEK_TO_ACTION = "com.laoji.minutes.SEEK_TO"
 
 internal val MINUTES_SET_SOURCE_COMMAND = SessionCommand(MINUTES_SET_SOURCE_ACTION, Bundle.EMPTY)
 internal val MINUTES_CLEAR_SOURCE_COMMAND = SessionCommand(MINUTES_CLEAR_SOURCE_ACTION, Bundle.EMPTY)
 internal val MINUTES_ACTIVATE_STORAGE_SCOPE_COMMAND =
   SessionCommand(MINUTES_ACTIVATE_STORAGE_SCOPE_ACTION, Bundle.EMPTY)
+internal val MINUTES_SEEK_TO_COMMAND = SessionCommand(MINUTES_SEEK_TO_ACTION, Bundle.EMPTY)
 
 private const val KEY_SOURCE_ID = "sourceId"
 private const val KEY_URI = "uri"
@@ -24,6 +26,7 @@ private const val KEY_DURATION_MS_HINT = "durationMsHint"
 private const val KEY_RETAIN_FOR_BACKGROUND = "retainForBackground"
 private const val KEY_STORAGE_SCOPE = "storageScope"
 private const val KEY_EXPIRES_AT = "expiresAt"
+private const val KEY_POSITION_MS = "positionMs"
 private const val MAX_HEADER_COUNT = 32
 
 internal fun MinutesPlayerSource.toSessionArguments(): Bundle = Bundle().apply {
@@ -71,6 +74,21 @@ internal fun minutesStorageScopeArguments(storageScope: String): Bundle = Bundle
 
 internal fun Bundle.toMinutesStorageScope(): String? =
   normalizeMinutesActiveStorageScope(getString(KEY_STORAGE_SCOPE))
+
+internal data class MinutesSeekRequest(val sourceId: String, val storageScope: String, val positionMs: Long)
+
+internal fun minutesSeekArguments(sourceId: String, storageScope: String, positionMs: Long): Bundle = Bundle().apply {
+  putString(KEY_SOURCE_ID, sourceId)
+  putString(KEY_STORAGE_SCOPE, storageScope)
+  putLong(KEY_POSITION_MS, positionMs.coerceAtLeast(0L))
+}
+
+internal fun Bundle.toMinutesSeekRequest(): MinutesSeekRequest? {
+  val sourceId = getString(KEY_SOURCE_ID)?.takeIf(String::isNotBlank) ?: return null
+  val scope = toMinutesStorageScope()?.takeUnless { it == MINUTES_SIGNED_OUT_SCOPE } ?: return null
+  val position = get(KEY_POSITION_MS) as? Long ?: return null
+  return MinutesSeekRequest(sourceId, scope, position.takeIf { it >= 0L } ?: return null)
+}
 
 internal fun MinutesPlayerSource.toPlaybackMetadataExtras(): Bundle = Bundle().apply {
   putLong(KEY_DURATION_MS_HINT, durationMsHint.coerceAtLeast(0L))

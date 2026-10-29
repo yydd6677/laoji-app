@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation';
-import { AuthProvider } from './src/store/AuthStore';
+import { LocalProfileProvider } from './src/store/LocalProfileStore';
 import { EventsProvider } from './src/store/EventsStore';
 import { MeetingsProvider } from './src/store/MeetingsStore';
 import { AppDialogProvider } from './src/components/AppDialog';
@@ -30,7 +30,8 @@ import { UpcomingEventsProjectionCoordinator } from './src/components/UpcomingEv
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { DeviceServiceCoordinator } from './src/components/DeviceServiceCoordinator';
 import { DeviceMeetingCompletionProvider } from './src/components/DeviceMeetingCompletionProvider';
-import { MeetingSummaryV3UpgradeProvider } from './src/components/MeetingSummaryV3UpgradeProvider';
+import { HardwareRealtimeCoordinator } from './src/components/HardwareRealtimeCoordinator';
+import { ScheduleInputProvider } from './src/components/ScheduleInputProvider';
 import { startAutomaticAppUpdateChecks } from './src/services/appUpdate';
 
 function AppUpdateCoordinator() {
@@ -40,9 +41,8 @@ function AppUpdateCoordinator() {
 
 function RuntimeProviders({ onRestart }: {
   onRestart: () => void;
-  feishuEvidence?: string;
 }) {
-  const { colors } = useTheme();
+  const { colors, themeId } = useTheme();
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(colors.appBg).catch(() => undefined);
@@ -53,32 +53,34 @@ function RuntimeProviders({ onRestart }: {
   }, []);
 
   return (
-    <AuthProvider>
+    <LocalProfileProvider>
       <NavigationStateProvider>
       <DeviceServiceCoordinator />
         <AppUpdateCoordinator />
         <NativePlatformCoordinator />
-        <AppReadinessGate
-          feishuEvidence="feishu:UI-BOOT-READINESS-001:readiness-gate"
-          onRetry={onRestart}
-        >
+        <AppReadinessGate onRetry={onRestart}>
           <EventsProvider>
             <MeetingsProvider>
               <DeviceMeetingCompletionProvider />
-              <MeetingSummaryV3UpgradeProvider />
+              <HardwareRealtimeCoordinator />
               <UpcomingEventsProjectionCoordinator />
               <AppLockGate>
                 <AppDialogProvider>
                   <MeetingMediaImportProvider>
+                  <ScheduleInputProvider>
                     <NotificationPermissionPrimer />
                     <View style={{ flex: 1 }}>
                       <RestorableNavigationContainer>
-                        <StatusBar style="dark" backgroundColor={colors.appBg} />
+                        <StatusBar
+                          style={themeId === 'midnight' ? 'light' : 'dark'}
+                          backgroundColor={colors.appBg}
+                        />
                         <RootNavigator />
                         <NotificationNavigationHandler />
                       </RestorableNavigationContainer>
                       <EventUndoBanner />
                     </View>
+                  </ScheduleInputProvider>
                   </MeetingMediaImportProvider>
                 </AppDialogProvider>
               </AppLockGate>
@@ -86,13 +88,12 @@ function RuntimeProviders({ onRestart }: {
           </EventsProvider>
         </AppReadinessGate>
       </NavigationStateProvider>
-    </AuthProvider>
+    </LocalProfileProvider>
   );
 }
 
 function ValidatedRuntime({ onRestart }: {
   onRestart: () => void;
-  feishuEvidence?: string;
 }) {
   // UI-BOOT-READINESS-001 routes configuration failure into the recovery surface.
   try {
@@ -101,10 +102,7 @@ function ValidatedRuntime({ onRestart }: {
     throw new AppStartupError('configuration', 'LaoJi runtime configuration is invalid', error);
   }
   return (
-    <RuntimeProviders
-      feishuEvidence="feishu:UI-BOOT-READINESS-001:runtime-providers"
-      onRestart={onRestart}
-    />
+    <RuntimeProviders onRestart={onRestart} />
   );
 }
 
@@ -117,15 +115,11 @@ export default function App() {
   return (
     <ThemeProvider>
       <AppStartupBoundary
-        feishuEvidence="feishu:UI-BOOT-READINESS-001:startup-boundary"
         resetKey={runtimeGeneration}
         onRetry={restart}
       >
         <SafeAreaProvider key={`runtime:${runtimeGeneration}`}>
-          <ValidatedRuntime
-            feishuEvidence="feishu:UI-BOOT-READINESS-001:validated-runtime"
-            onRestart={restart}
-          />
+          <ValidatedRuntime onRestart={restart} />
         </SafeAreaProvider>
       </AppStartupBoundary>
     </ThemeProvider>

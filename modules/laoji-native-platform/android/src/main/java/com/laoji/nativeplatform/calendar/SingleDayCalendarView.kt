@@ -19,6 +19,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
+import com.laoji.nativeplatform.ui.NativeUiTokens
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -118,7 +120,6 @@ internal class AssociatedDayPagerTouchRouter(context: Context) {
 }
 
 class DayWeekHeaderView(context: Context) : FrameLayout(context) {
-  private val palette = CalendarUi.palette(context)
   private val anchorWeekStartEpochDay = CalendarDateMath.startOfWeekSunday(currentEpochDay())
   private val adapter = DayWeekHeaderAdapter()
   private val pager = ViewPager2(context)
@@ -149,7 +150,7 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
   }
 
   init {
-    setBackgroundColor(palette.surface)
+    NativeUiTokens.bindTheme(this) { setBackgroundColor(CalendarUi.palette(context).surface) }
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     clipChildren = true
     pager.apply {
@@ -310,7 +311,8 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
   }
 
   private class DayWeekHeaderCell(context: Context) : LinearLayout(context) {
-    private val palette = CalendarUi.palette(context)
+    private var palette = CalendarUi.palette(context)
+    private var applyDateTheme: (() -> Unit)? = null
     private val weekdayView = TextView(context).apply {
       gravity = Gravity.CENTER
       includeFontPadding = false
@@ -322,7 +324,7 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       gravity = Gravity.CENTER
       includeFontPadding = false
       textSize = CalendarProductVisualContract.dateNumberSizeSp(16f)
-      setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+      typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     var epochDay: Int = 0
@@ -343,6 +345,12 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
         dayView,
         LayoutParams(CalendarUi.dp(context, 32f).toInt(), CalendarUi.dp(context, 32f).toInt()),
       )
+      NativeUiTokens.bindTheme(this) {
+        palette = CalendarUi.palette(context)
+        weekdayView.typeface = LaojiThemeTypography.typeface(context)
+        dayView.typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
+        applyDateTheme?.invoke()
+      }
     }
 
     fun bind(
@@ -366,27 +374,30 @@ class DayWeekHeaderView(context: Context) : FrameLayout(context) {
       // [SOURCE] DayHeaderPage.m230609b: today uses primary blue, dates before
       // today use ud_N500, and future dates use text_title. A gray selection
       // marker on a non-today date does not override that temporal text color.
-      val temporalTextColor = when {
-        today -> palette.accent
-        epochDay < (todayEpochDay ?: Int.MIN_VALUE) -> palette.textPlaceholder
-        else -> palette.textPrimary
-      }
-      weekdayView.setTextColor(temporalTextColor)
-      dayView.setTextColor(when {
-        marker == MonthDateMarker.TODAY -> if (selected) palette.accentText else palette.accent
-        !inSelectedMonth -> palette.textDisabled
-        weekend -> palette.accent
-        else -> temporalTextColor
-      })
-      dayView.background = when (marker) {
-        MonthDateMarker.TODAY -> if (selected) {
-          CalendarUi.background(palette.accent, 16f, context)
-        } else {
-          ColorDrawable(Color.TRANSPARENT)
+      applyDateTheme = {
+        val temporalTextColor = when {
+          today -> palette.accent
+          epochDay < (todayEpochDay ?: Int.MIN_VALUE) -> palette.textPlaceholder
+          else -> palette.textPrimary
         }
-        MonthDateMarker.SELECTED -> CalendarUi.background(palette.selectionMarker, 16f, context)
-        MonthDateMarker.NONE -> ColorDrawable(Color.TRANSPARENT)
+        weekdayView.setTextColor(temporalTextColor)
+        dayView.setTextColor(when {
+          marker == MonthDateMarker.TODAY -> if (selected) palette.accentText else palette.accent
+          !inSelectedMonth -> palette.textDisabled
+          weekend -> palette.weekendDate
+          else -> temporalTextColor
+        })
+        dayView.background = when (marker) {
+          MonthDateMarker.TODAY -> if (selected) {
+            CalendarUi.background(palette.accent, 16f, context)
+          } else {
+            ColorDrawable(Color.TRANSPARENT)
+          }
+          MonthDateMarker.SELECTED -> CalendarUi.background(palette.selectionMarker, 16f, context)
+          MonthDateMarker.NONE -> ColorDrawable(Color.TRANSPARENT)
+        }
       }
+      applyDateTheme?.invoke()
       isSelected = selected
       contentDescription = buildString {
         append(String.format(Locale.getDefault(), "%d年%d月%d日，%s", date.year, date.month, date.day, weekdayLabel))

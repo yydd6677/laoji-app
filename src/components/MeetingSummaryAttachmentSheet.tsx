@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { MeetingSummaryAttachmentAuthorization } from '../domain/meeting';
-import type { MeetingAttachmentRecord } from '../data/repositories';
+import type { MeetingAttachmentRecord } from "../data/repositories/meetingNoteRepository";
 import { meetingSummaryImageAttachmentIsSelectable } from '../services/meetingSummaryAttachments';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 
 const MOTION_MS = 300;
 const MAX_SELECTION = 12;
@@ -28,17 +28,20 @@ function timeLabel(positionMs: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-function authorizationErrorMessage(error: unknown): string {
+function authorizationErrorMessage(error: unknown, purpose: 'summary' | 'question'): string {
   const message = error instanceof Error ? error.message.trim() : '';
   return message && /[\u3400-\u9fff]/.test(message)
     ? message
-    : '附件暂时无法用于整理。';
+    : purpose === 'question' ? '附件暂时无法用于问答。' : '附件暂时无法用于整理。';
 }
 
 export function MeetingSummaryAttachmentSheet({
   visible,
   attachments,
   imageSelectionEnabled,
+  purpose = 'summary',
+  includedSources = [],
+  initialSelectedIds = [],
   onClose,
   onSkip,
   onAuthorize,
@@ -47,12 +50,16 @@ export function MeetingSummaryAttachmentSheet({
   visible: boolean;
   attachments: readonly MeetingAttachmentRecord[];
   imageSelectionEnabled: boolean;
+  purpose?: 'summary' | 'question';
+  includedSources?: readonly string[];
+  initialSelectedIds?: readonly string[];
   onClose: () => void;
   onSkip: () => void;
   onAuthorize: (attachmentIds: readonly string[]) => Promise<MeetingSummaryAttachmentAuthorization>;
   onCompleted: (authorization: MeetingSummaryAttachmentAuthorization) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -64,6 +71,7 @@ export function MeetingSummaryAttachmentSheet({
   const authorizeRef = useRef(onAuthorize);
   const completedRef = useRef(onCompleted);
   const attachmentsRef = useRef(attachments);
+  const initialSelectedIdsRef = useRef(initialSelectedIds);
   const [mounted, setMounted] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -74,6 +82,7 @@ export function MeetingSummaryAttachmentSheet({
   authorizeRef.current = onAuthorize;
   completedRef.current = onCompleted;
   if (visible && !closingRef.current) attachmentsRef.current = attachments;
+  if (visible && !closingRef.current) initialSelectedIdsRef.current = initialSelectedIds;
 
   const finishClose = useCallback((notify: boolean, afterExit?: () => void) => {
     if (!mountedRef.current || closingRef.current) return;
@@ -101,7 +110,7 @@ export function MeetingSummaryAttachmentSheet({
   useEffect(() => {
     if (visible) {
       if (!visibleRef.current) {
-        setSelectedIds(new Set());
+        setSelectedIds(new Set(initialSelectedIdsRef.current));
         setError('');
         setSaving(false);
       }
@@ -140,9 +149,6 @@ export function MeetingSummaryAttachmentSheet({
   const canSubmit = !saving && !closing;
   const requestClose = () => {
     if (!saving) finishClose(true);
-  };
-  const requestSkip = () => {
-    if (!saving) finishClose(true, skipRef.current);
   };
   const toggle = (attachment: MeetingAttachmentRecord) => {
     if (!available(attachment) || saving || closing) return;
@@ -190,7 +196,7 @@ export function MeetingSummaryAttachmentSheet({
       finishClose(true, () => completed(authorization));
     } catch (reason) {
       setSaving(false);
-      setError(authorizationErrorMessage(reason));
+      setError(authorizationErrorMessage(reason, purpose));
     }
   };
 
@@ -230,11 +236,20 @@ export function MeetingSummaryAttachmentSheet({
             >
               <Text style={[styles.titleActionText, { color: saving ? colors.textDisabled : colors.textTitle }]}>取消</Text>
             </Pressable>
-            <Text style={[styles.title, { color: colors.textTitle }]}>选择附件</Text>
+            <Text
+              style={[styles.title, error && styles.errorTitle, { color: error ? colors.danger : colors.textTitle }]}
+              numberOfLines={2}
+              accessibilityRole={error ? 'alert' : 'header'}
+            >{error || (purpose === 'question' ? '问答来源' : '选择附件')}</Text>
             <View style={styles.titleAction} />
           </View>
 
           <ScrollView style={styles.list} showsVerticalScrollIndicator={false} bounces={false}>
+            {includedSources.map(label => <View key={label} style={[styles.row, { borderBottomColor: colors.divider }]}>
+              <Ionicons name="document-text-outline" size={20} color={colors.iconSecondary} />
+              <Text style={[styles.rowBody, styles.rowText, { color: colors.textTitle }]}>{label}</Text>
+              <Text style={[styles.rowMeta, { color: colors.textCaption }]}>已包含</Text>
+            </View>)}
             {presented.map(attachment => {
               const itemAvailable = available(attachment);
               const checked = itemAvailable && selectedIds.has(attachment.id);
@@ -292,9 +307,6 @@ export function MeetingSummaryAttachmentSheet({
             })}
           </ScrollView>
 
-          <View style={styles.errorSlot}>
-            <Text style={[styles.errorText, { color: colors.danger }]} numberOfLines={1}>{error || ' '}</Text>
-          </View>
           <View style={[styles.footer, { borderTopColor: colors.divider }]}>
             <Pressable
               style={({ pressed }) => [
@@ -306,12 +318,16 @@ export function MeetingSummaryAttachmentSheet({
               onPress={() => { void submit(); }}
               disabled={!canSubmit}
               accessibilityRole="button"
-              accessibilityLabel={selected.length > 0 ? `使用所选 ${selected.length} 个附件` : '继续整理'}
+              accessibilityLabel={selected.length > 0
+                ? `使用所选 ${selected.length} 个附件`
+                : purpose === 'question' ? '继续问答' : '继续整理'}
               accessibilityState={{ disabled: !canSubmit, busy: saving }}
             >
               {saving ? <ActivityIndicator size="small" color={colors.onPrimary} /> : (
                 <Text style={[styles.submitText, { color: colors.onPrimary }]}>
-                  {selected.length > 0 ? `使用（${selected.length}）` : '继续整理'}
+                  {selected.length > 0
+                    ? `使用（${selected.length}）`
+                    : purpose === 'question' ? '完成' : '继续整理'}
                 </Text>
               )}
             </Pressable>
@@ -322,24 +338,23 @@ export function MeetingSummaryAttachmentSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   sheet: { borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 72, height: 44, alignItems: 'center', justifyContent: 'center' },
-  titleActionText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  titleActionText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
   list: { flexGrow: 0, flexShrink: 1 },
   row: { minHeight: 68, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   iconSlot: { width: 36, height: 36, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   rowBody: { flex: 1, paddingVertical: 8, paddingHorizontal: 12 },
-  rowText: { fontSize: 15, lineHeight: 22, fontWeight: '400' },
-  rowMeta: { marginTop: 2, fontSize: 12, lineHeight: 18 },
+  rowText: { fontFamily, fontSize: 15, lineHeight: 22, fontWeight: '400' },
+  rowMeta: { marginTop: 2, fontFamily, fontSize: 12, lineHeight: 18 },
   checkbox: { width: 22, height: 22, borderWidth: 1.5, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
-  errorSlot: { height: 30, paddingHorizontal: 16, justifyContent: 'center' },
-  errorText: { fontSize: 12, lineHeight: 18 },
+  errorTitle: { fontFamily, fontSize: 13, lineHeight: 18 },
   footer: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16, paddingTop: 12 },
   submit: { height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  submitText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  submitText: { fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
 });

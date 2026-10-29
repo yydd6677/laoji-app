@@ -6,22 +6,16 @@ import type {
 } from '../../domain/meeting';
 import {
   assertScopeKey,
+  createSecureAssetGeneration,
   secureClientIdFactory,
   transitionProcessingStage,
   type ClientIdFactory,
 } from '../../domain/meeting';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-  RecordingAssetLocalState,
-  RecordingAssetRecord,
-} from '../../data/repositories';
-import type { MeetingRootSyncOperation } from './updateMeetingNote';
+import type { MeetingNoteAggregate, MeetingNoteRepository, RecordingAssetLocalState, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 
 type CaptureTransition = Extract<ProcessingStageTransition, { stage: 'capture' }>;
 type TranscriptTransition = Extract<ProcessingStageTransition, { stage: 'transcript' }>;
-type UploadTransition = Extract<ProcessingStageTransition, { stage: 'upload' }>;
-
 export interface GuestRecordingAssetPatch {
   nativeSessionId?: string | null;
   localUri?: string | null;
@@ -41,8 +35,6 @@ export interface UpdateMeetingCaptureInput {
   capture: CaptureTransition;
   transcript?: TranscriptTransition | null;
   recordingAsset?: GuestRecordingAssetPatch | null;
-  remoteStatus?: string | null;
-  syncOperation?: MeetingRootSyncOperation | null;
   canonicalWrite?: boolean;
 }
 
@@ -106,14 +98,6 @@ function captureProgress(status: CaptureStatus): number | null {
   return status === 'local_ready' ? 1 : null;
 }
 
-function guestUploadTransition(): UploadTransition {
-  return {
-    stage: 'upload',
-    status: 'not_required',
-    progress: null,
-  };
-}
-
 function lifecyclePatch(
   status: CaptureStatus,
   startedAtMs: number | null,
@@ -167,17 +151,6 @@ export class UpdateGuestMeetingCaptureUseCase {
     if (!meetingId) throw new Error('meeting ID is invalid');
     const scopeKey = input.scopeKey ?? 'guest';
     assertScopeKey(scopeKey);
-    const remoteStatus = input.remoteStatus?.trim() || null;
-    const operationId = input.syncOperation?.operationId.trim() || '';
-    const operationType = input.syncOperation?.operationType.trim() || '';
-    if (scopeKey !== 'guest') {
-      if (!remoteStatus || remoteStatus.length > 160 || /[\u0000-\u001f\u007f]/.test(remoteStatus)) {
-        throw new Error('account meeting status is invalid');
-      }
-      if (!operationId || operationType !== 'meeting.update') {
-        throw new Error('account meeting capture update requires an atomic sync operation');
-      }
-    }
     let canonicalRevision: number | null = null;
     let applied = false;
 
@@ -202,25 +175,6 @@ export class UpdateGuestMeetingCaptureUseCase {
         updatedAtMs = Math.max(updatedAtMs, currentTranscript.updatedAtMs);
       }
 
-      if (scopeKey !== 'guest') {
-        const inserted = await transaction.insertOutbox({
-          operationId,
-          scopeKey,
-          aggregateType: 'meeting_note',
-          aggregateId: meetingId,
-          operationType: 'meeting.update',
-          baseRevision: meeting.remoteRevision,
-          payloadJson: JSON.stringify({
-            schema_version: 1,
-            meeting_id: meetingId,
-            base_revision: meeting.remoteRevision,
-            changes: { status: remoteStatus },
-          }),
-          createdAtMs: updatedAtMs,
-        });
-        if (!inserted) return;
-      }
-
       if (input.transcript && currentTranscript) {
         const activeRevision = input.transcript.status === 'ready'
           ? await transaction.getActiveTranscriptRevision(meetingId, scopeKey)
@@ -238,13 +192,7 @@ export class UpdateGuestMeetingCaptureUseCase {
         ...input.capture,
         progress: input.capture.progress ?? captureProgress(input.capture.status),
       }, updatedAtMs), scopeKey);
-      if (scopeKey === 'guest') {
-        await transaction.upsertStage(transitionProcessingStage(
-          upload,
-          guestUploadTransition(),
-          updatedAtMs,
-        ), scopeKey);
-      } else if (
+      if (
         input.recordingAsset?.localState === 'local_ready'
         && upload.status === 'not_required'
       ) {
@@ -282,6 +230,7 @@ export class UpdateGuestMeetingCaptureUseCase {
         const recordingAsset: RecordingAssetRecord = {
           id: existing?.id ?? this.idFactory.create(),
           meetingId,
+          assetGeneration: existing?.assetGeneration ?? createSecureAssetGeneration(),
           role: 'primary',
           origin: existing?.origin ?? 'captured',
           nativeSessionId,
@@ -298,10 +247,15 @@ export class UpdateGuestMeetingCaptureUseCase {
           checksumSha256: hasOwn(patch, 'checksumSha256')
             ? optionalText(patch.checksumSha256, 512, 'recording checksum')
             : existing?.checksumSha256 ?? null,
+          sourceSha256: hasOwn(patch, 'checksumSha256')
+            ? canonicalRecordingSourceSha256(patch.checksumSha256)
+            : existing?.sourceSha256 ?? canonicalRecordingSourceSha256(existing?.checksumSha256),
           waveformJson: hasOwn(patch, 'waveformJson')
             ? patch.waveformJson ?? null
             : existing?.waveformJson ?? null,
           localState: patch.localState,
+          uploadOperationId: existing?.uploadOperationId ?? null,
+          remoteObjectRevision: existing?.remoteObjectRevision ?? null,
           createdAtMs: existing?.createdAtMs ?? updatedAtMs,
           updatedAtMs,
           lastVerifiedAtMs,
@@ -324,7 +278,6 @@ export class UpdateGuestMeetingCaptureUseCase {
           meeting.endedAtMs,
           updatedAtMs,
         ),
-        syncState: scopeKey === 'guest' ? 'local' : 'pending',
         updatedAtMs,
       });
       applied = true;

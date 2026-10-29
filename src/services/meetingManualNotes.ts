@@ -1,6 +1,6 @@
 import { SaveManualNoteUseCase } from '../application/meeting';
-import type { ManualNoteRecord } from '../data/repositories';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import type { ManualNoteRecord } from "../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { ScopeKey } from '../domain/meeting';
 import { assertScopeKey } from '../domain/meeting';
 

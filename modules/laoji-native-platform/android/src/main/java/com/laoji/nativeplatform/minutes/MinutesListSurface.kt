@@ -49,24 +49,24 @@ internal class MinutesListSurface(
   private val stateOverlay = LinearLayout(context)
   private val progress = ProgressBar(context)
   private val emptyImage = ImageView(context)
-  private val stateMessage = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
-  private val retryButton = context.textView("重试", 16, MinutesPalette.primary, Typeface.BOLD)
+  private val stateMessage = context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
+  private val retryButton = context.textView("重试", 16, { MinutesPalette.primary }, Typeface.BOLD)
   private val cachedError = LinearLayout(context)
-  private val cachedMessage = context.textView(textSizeSp = 14, color = MinutesPalette.danger)
+  private val cachedMessage = context.textView(textSizeSp = 14, color = { MinutesPalette.danger })
   private val cachedRetry = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_refresh, "重新同步会议记录")
   // [SOURCE] Feishu Minutes uses upload + record in one 64dp bottom operation host.
   private val operationHost = LinearLayout(context)
   private val uploadButton = LinearLayout(context)
   private val uploadIcon = ImageView(context)
   private val uploadProgress = ProgressBar(context, null, android.R.attr.progressBarStyleSmall)
-  private val uploadLabel = context.textView("上传", 16, MinutesPalette.text)
+  private val uploadLabel = context.textView("上传", 16, { MinutesPalette.text })
   private val recordButton = LinearLayout(context)
   private val recordIcon = ImageView(context)
-  private val recordLabel = context.textView("录音", 16, MinutesPalette.surface)
+  private val recordLabel = context.textView("录音", 16, { MinutesPalette.surface })
   private var renderingSearch = false
   private var wasSearching = false
   private var renderedTitle = "会议记录"
-  // Feishu's home V2 opens in the two-column cover grid; the list is an
+  // Meeting home opens in the two-column cover grid; the list is an
   // explicit secondary mode exposed by the trailing switch icon.
   private var recycleBin = false
   private var canOpenRecycleBin = false
@@ -79,7 +79,7 @@ internal class MinutesListSurface(
 
   init {
     orientation = VERTICAL
-    setBackgroundColor(MinutesPalette.page)
+    minutesBackgroundColor { MinutesPalette.page }
     addView(titleBar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)))
     configureSearchBar()
     addView(searchBar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(44)))
@@ -104,7 +104,7 @@ internal class MinutesListSurface(
     })
     list.clipToPadding = false
     applyListPadding()
-    list.setBackgroundColor(MinutesPalette.page)
+    list.minutesBackgroundColor { MinutesPalette.page }
     list.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
     content.addView(list, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
@@ -140,7 +140,7 @@ internal class MinutesListSurface(
     cachedError.orientation = HORIZONTAL
     cachedError.gravity = Gravity.CENTER_VERTICAL
     cachedError.setPadding(context.dp(12), 0, context.dp(4), 0)
-    cachedError.backgroundShape(MinutesPalette.dangerSoft)
+    cachedError.backgroundShape({ MinutesPalette.dangerSoft })
     cachedError.addView(cachedMessage, LayoutParams(0, context.dp(44), 1f).apply {
       gravity = Gravity.CENTER_VERTICAL
     })
@@ -162,48 +162,52 @@ internal class MinutesListSurface(
     uploadButton.gravity = Gravity.CENTER
     uploadButton.minimumWidth = context.dp(88)
     uploadButton.setPadding(context.dp(10), 0, context.dp(10), 0)
-    uploadButton.background = context.roundedStateBackground(
+    uploadButton.minutesBackground { context.roundedStateBackground(
       defaultColor = MinutesPalette.surface,
       pressedColor = MinutesPalette.filler,
       disabledColor = MinutesPalette.surface,
       radiusDp = 24,
-    )
+    ) }
     uploadButton.elevation = context.dp(2).toFloat()
     uploadButton.isClickable = true
     uploadButton.isFocusable = true
     uploadButton.contentDescription = "导入会议录音"
     uploadButton.setOnClickListener { onAction(mapOf("type" to "importMedia")) }
     uploadIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_share_outline)
-    uploadIcon.imageTintList = statefulIconTint(
+    uploadIcon.minutesIconColors { statefulIconTint(
       MinutesPalette.text,
       MinutesPalette.text,
       MinutesPalette.disabled,
-    )
+    ) }
     uploadIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-    uploadProgress.indeterminateTintList = ColorStateList.valueOf(MinutesPalette.secondary)
+    uploadProgress.minutesDrawing {
+      uploadProgress.indeterminateTintList = ColorStateList.valueOf(MinutesPalette.secondary)
+    }
     uploadProgress.visibility = View.GONE
     uploadButton.addView(uploadIcon, LayoutParams(context.dp(16), context.dp(16)))
     uploadButton.addView(uploadProgress, LayoutParams(context.dp(16), context.dp(16)))
-    uploadLabel.setTextColor(statefulIconTint(
+    uploadLabel.minutesTextColors { statefulIconTint(
       MinutesPalette.text,
       MinutesPalette.text,
       MinutesPalette.disabled,
-    ))
-    uploadButton.addView(uploadLabel, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(24)).apply {
+    ) }
+    val operationLabelHeight = maxOf(context.dp(24), MinutesDetailLayoutContract.minimumTextLineHeightPx(uploadLabel.textSize))
+    val operationButtonHeight = maxOf(context.dp(44), operationLabelHeight + context.dp(12))
+    uploadButton.addView(uploadLabel, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, operationLabelHeight).apply {
       leftMargin = context.dp(4)
     })
-    operationHost.addView(uploadButton, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)))
+    operationHost.addView(uploadButton, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, operationButtonHeight))
 
     recordButton.orientation = HORIZONTAL
     recordButton.gravity = Gravity.CENTER
     recordButton.minimumWidth = context.dp(88)
     recordButton.setPadding(context.dp(12), 0, context.dp(12), 0)
     recordButton.backgroundHorizontalGradient(
-      startColor = MinutesPalette.recordGradientStart,
-      endColor = MinutesPalette.recordGradientEnd,
-      radiusDp = 24,
+      startColor = { MinutesPalette.recordGradientStart },
+      endColor = { MinutesPalette.recordGradientEnd },
+      radiusDp = { 24 },
     )
-    // Feishu UDShadow.S.Down is a 6dp blur with a 2dp downward offset and an
+    // [SOURCE] Feishu UDShadow.S.Down is a 6dp blur with a 2dp downward offset and an
     // 8% neutral shadow. Native elevation 2 is the closest platform rendering
     // without introducing a second custom shadow owner.
     recordButton.elevation = context.dp(2).toFloat()
@@ -212,21 +216,21 @@ internal class MinutesListSurface(
     recordButton.contentDescription = "开始录音"
     recordButton.setOnClickListener { onAction(mapOf("type" to "startRecording")) }
     recordIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_microphone_ai_outlined)
-    recordIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.surface)
+    recordIcon.minutesIconColors { ColorStateList.valueOf(MinutesPalette.surface) }
     recordIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     recordButton.addView(recordIcon, LayoutParams(context.dp(16), context.dp(16)))
-    recordButton.addView(recordLabel, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(24)).apply {
+    recordButton.addView(recordLabel, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, operationLabelHeight).apply {
       leftMargin = context.dp(4)
     })
     operationHost.addView(
       recordButton,
-      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(44)).apply {
+      LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, operationButtonHeight).apply {
         leftMargin = context.dp(8)
       },
     )
     content.addView(
       operationHost,
-      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(64), Gravity.BOTTOM).apply {
+      FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, maxOf(context.dp(64), operationButtonHeight + context.dp(20)), Gravity.BOTTOM).apply {
         bottomMargin = context.dp(16)
       },
     )
@@ -251,6 +255,8 @@ internal class MinutesListSurface(
       state.title,
       if (recycleBin) MinutesHomeViewMode.LIST else viewMode,
       recycleBin,
+      state.canEmptyRecycleBin,
+      state.recycleBinEmptying,
     ) { action ->
       if (action == "toggleViewMode") toggleViewMode()
       else if (action == "more") mainMenu.show(titleBar.moreAnchor(), canOpenRecycleBin)
@@ -341,7 +347,11 @@ internal class MinutesListSurface(
     uploadButton.isEnabled = !state.mediaImporting
     uploadIcon.visibility = if (state.mediaImporting) View.GONE else View.VISIBLE
     uploadProgress.visibility = if (state.mediaImporting) View.VISIBLE else View.GONE
-    uploadButton.contentDescription = if (state.mediaImporting) "正在导入会议录音" else "导入会议录音"
+    uploadButton.contentDescription = if (state.mediaImporting) {
+      state.mediaImportStatusLabel.ifBlank { "录音导入暂时繁忙" }
+    } else {
+      "导入会议录音"
+    }
   }
 
   private fun toggleViewMode() {
@@ -351,7 +361,13 @@ internal class MinutesListSurface(
     val firstVisible = firstVisiblePosition()
     viewMode = if (viewMode == MinutesHomeViewMode.LIST) MinutesHomeViewMode.GRID else MinutesHomeViewMode.LIST
     applyViewMode(viewMode, firstVisible)
-    titleBar.configure(renderedTitle, viewMode, recycleBin = false) { action ->
+    titleBar.configure(
+      renderedTitle,
+      viewMode,
+      recycleBin = false,
+      canEmptyRecycleBin = false,
+      recycleBinEmptying = false,
+    ) { action ->
       if (action == "toggleViewMode") toggleViewMode()
       else if (action == "more") mainMenu.show(titleBar.moreAnchor(), canOpenRecycleBin)
       else onAction(mapOf("type" to action))
@@ -384,7 +400,7 @@ internal class MinutesListSurface(
 
   private fun applyListPadding(topPadding: Int = 0) {
     val sidePadding = if (!recycleBin && viewMode == MinutesHomeViewMode.GRID) {
-      context.dp(if (MinutesPalette.vivid) 12 else 7)
+      context.dp(MinutesPalette.gridSidePaddingDp)
     } else 0
     list.setPadding(sidePadding, topPadding, sidePadding, context.dp(84))
   }
@@ -394,7 +410,7 @@ internal class MinutesListSurface(
     searchBar.orientation = HORIZONTAL
     searchBar.gravity = Gravity.CENTER_VERTICAL
     searchBar.setPadding(context.dp(4), 0, context.dp(4), 0)
-    searchBar.setBackgroundColor(MinutesPalette.surface)
+    searchBar.minutesBackgroundColor { MinutesPalette.surface }
     searchBar.visibility = View.GONE
     searchBack.setOnClickListener { onAction(mapOf("type" to "endSearch")) }
     searchBar.addView(searchBack, LayoutParams(context.dp(44), context.dp(44)))
@@ -402,8 +418,9 @@ internal class MinutesListSurface(
       hint = "搜索会议记录"
       textSize = 16f
       setSingleLine(true)
-      setTextColor(MinutesPalette.text)
-      setHintTextColor(MinutesPalette.faint)
+      minutesTextColor { MinutesPalette.text }
+      minutesTypeface(Typeface.NORMAL)
+      minutesDrawing { setHintTextColor(MinutesPalette.faint) }
       background = null
       contentDescription = "搜索会议记录"
       addTextChangedListener(object : TextWatcher {

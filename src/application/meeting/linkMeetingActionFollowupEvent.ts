@@ -1,11 +1,7 @@
-import type {
-  ActionItemRecord,
-  MeetingNoteRepository,
-} from '../../data/repositories';
+import type { ActionItemRecord, MeetingNoteRepository } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
-import { assertScopeKey, secureClientIdFactory, type ClientIdFactory } from '../../domain/meeting';
+import { assertScopeKey } from '../../domain/meeting';
 import { MeetingActionRevisionConflictError } from './updateMeetingAction';
-import { requestMeetingActionSync } from './actionSyncTrigger';
 
 export class MeetingActionFollowupConflictError extends Error {
   constructor(public readonly existingEventSourceId: string) {
@@ -19,7 +15,6 @@ export interface LinkMeetingActionFollowupEventInput {
   actionId: string;
   scopeKey: ScopeKey;
   eventSourceId: string;
-  operationId?: string;
 }
 
 export interface LinkMeetingActionFollowupEventResult {
@@ -39,7 +34,6 @@ export class LinkMeetingActionFollowupEventUseCase {
   constructor(
     private readonly repository: MeetingNoteRepository,
     private readonly now: () => number = Date.now,
-    private readonly idFactory: ClientIdFactory = secureClientIdFactory,
   ) {}
 
   async execute(
@@ -76,41 +70,6 @@ export class LinkMeetingActionFollowupEventUseCase {
         updatedAtMs,
       };
 
-      if (input.scopeKey !== 'guest') {
-        const inserted = await transaction.insertOutbox({
-          operationId: input.operationId?.trim() || this.idFactory.create(),
-          scopeKey: input.scopeKey,
-          aggregateType: 'action_item',
-          aggregateId: actionId,
-          operationType: 'action_item.upsert',
-          baseRevision: current.remoteRevision,
-          payloadJson: JSON.stringify({
-            schema_version: 2,
-            meeting_id: meetingId,
-            action_id: actionId,
-            remote_id: current.remoteId,
-            expected_remote_revision: current.remoteRevision,
-            client_created_at_ms: current.createdAtMs,
-            client_updated_at_ms: updatedAtMs,
-            user_edited_at_ms: updatedAtMs,
-            completed_at_ms: current.completedAtMs,
-            content: current.content,
-            status: current.status,
-            assignee: current.assigneeText,
-            due_at_ms: current.dueAtMs,
-            reminder_at_ms: current.reminderAtMs,
-            followup_event_source_id: eventSourceId,
-            source_kind: current.sourceKind,
-            source_summary_version_id: current.sourceSummaryVersionId,
-            source_segment_id: current.sourceSegmentId,
-            source_start_ms: current.sourceStartMs,
-            generation_fingerprint: current.generationFingerprint,
-          }),
-          createdAtMs: updatedAtMs,
-        });
-        if (!inserted) throw new MeetingActionRevisionConflictError();
-      }
-
       const linked = await transaction.linkMeetingActionFollowupEvent(
         actionId,
         meetingId,
@@ -124,15 +83,12 @@ export class LinkMeetingActionFollowupEventUseCase {
       );
       if (!linked) throw new MeetingActionRevisionConflictError();
       await transaction.updateMeeting(meetingId, input.scopeKey, {
-        syncState: input.scopeKey === 'guest' ? 'local' : 'pending',
         updatedAtMs,
       });
       result = { action: next, applied: true };
     });
 
     if (!result) throw new Error('meeting action follow-up transaction produced no result');
-    const committedResult = result as LinkMeetingActionFollowupEventResult;
-    if (committedResult.applied) requestMeetingActionSync(input.scopeKey);
-    return committedResult;
+    return result as LinkMeetingActionFollowupEventResult;
   }
 }

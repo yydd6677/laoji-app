@@ -16,14 +16,6 @@ export type SemanticNavigationIntent =
   | {
       kind: 'new-meeting';
       origin: 'quick_tile';
-    }
-  | {
-      kind: 'shared-action';
-      token: string;
-    }
-  | {
-      kind: 'shared-meeting';
-      token: string;
     };
 
 export type SemanticEventNavigationIntent = Extract<SemanticNavigationIntent, { kind: 'event' }>;
@@ -92,20 +84,6 @@ export function parseLaojiSemanticLink(rawUrl: string): SemanticNavigationIntent
       : null;
   }
 
-  if (url.hostname === 'collaboration' && url.pathname === '/action') {
-    const token = url.searchParams.get('token') ?? '';
-    return /^[A-Za-z0-9_-]{32,256}$/.test(token) && hasExactQuery(url, { token })
-      ? { kind: 'shared-action', token }
-      : null;
-  }
-
-  if (url.hostname === 'share' && url.pathname === '/meeting') {
-    const token = url.searchParams.get('token') ?? '';
-    return /^[A-Za-z0-9_-]{32,256}$/.test(token) && hasExactQuery(url, { token })
-      ? { kind: 'shared-meeting', token }
-      : null;
-  }
-
   if (url.hostname !== 'calendar' || url.pathname !== '/occurrence') return null;
   const sourceEventId = url.searchParams.get('sourceEventId') ?? '';
   const occurrenceDate = url.searchParams.get('occurrenceDate') ?? '';
@@ -121,18 +99,6 @@ export function parseLaojiSemanticLink(rawUrl: string): SemanticNavigationIntent
     action === 'meeting' ? 'start-or-resume-meeting' : 'open-event',
     'widget',
   );
-}
-
-export function semanticLinkForSharedAction(token: string): string | null {
-  const normalized = token.trim();
-  if (!/^[A-Za-z0-9_-]{32,256}$/.test(normalized)) return null;
-  return `${LAOJI_SEMANTIC_LINK_SCHEME}://collaboration/action?${new URLSearchParams({ token: normalized }).toString()}`;
-}
-
-export function semanticLinkForSharedMeeting(token: string): string | null {
-  const normalized = token.trim();
-  if (!/^[A-Za-z0-9_-]{32,256}$/.test(normalized)) return null;
-  return `${LAOJI_SEMANTIC_LINK_SCHEME}://share/meeting?${new URLSearchParams({ token: normalized }).toString()}`;
 }
 
 export function semanticLinkForOccurrence(

@@ -3,6 +3,7 @@
 Public contracts:
   * ``POST /asr`` keeps the legacy 16 kHz signed-int16 PCM contract.
   * ``POST /v1/asr/batch`` accepts one to eight base64 PCM items.
+  * ``POST /v2/asr/batch`` adds stable segment revisions and NO_SPEECH outcomes.
   * ``GET /health`` and ``GET /ready`` expose non-sensitive runtime state.
 
 All inference is serialized by one priority coordinator.  The queue priority is
@@ -69,10 +70,28 @@ MICROBATCH_MAX_AUDIO_MS = max(
     1_000,
     int(os.getenv("QWEN_ASR_MICROBATCH_MAX_AUDIO_MS", "14000")),
 )
+# VAD normally removes silence before this service is called, but imports and
+# short schedule recordings can still contain a complete low-energy window.
+# Keep the gate conservative so quiet speech is still sent to Qwen; callers
+# that need a different microphone floor can tune it without changing the
+# contract or the model path.
+SILENCE_RMS_THRESHOLD = max(
+    0.0,
+    min(0.05, float(os.getenv("QWEN_ASR_SILENCE_RMS_THRESHOLD", "0.0005"))),
+)
+SILENCE_PEAK_THRESHOLD = max(
+    0.0,
+    min(0.2, float(os.getenv("QWEN_ASR_SILENCE_PEAK_THRESHOLD", "0.002"))),
+)
 REQUEST_WAIT_SECONDS = max(
     10.0,
     float(os.getenv("QWEN_ASR_REQUEST_WAIT_SECONDS", "900")),
 )
+# A wedged native CUDA call cannot be cancelled by a Python Future. Let the
+# service manager restart this process; API checkpoints remain the job owner.
+INFERENCE_STALL_SECONDS = max(30.0, float(os.getenv(
+    "QWEN_ASR_INFERENCE_STALL_SECONDS", "300" if DEVICE.startswith("cuda") else "900",
+)))
 MODEL_REVISION = os.getenv("QWEN_ASR_MODEL_REVISION", "").strip()
 
 PRIORITY_ORDER = {"realtime": 0, "schedule": 1, "offline": 2}
@@ -110,6 +129,7 @@ class InferenceJob:
     finished: threading.Event = field(default_factory=threading.Event)
     response: dict | None = None
     error: Exception | None = None
+    cancelled: threading.Event = field(default_factory=threading.Event)
 
 
 def _utc_now() -> str:
@@ -156,6 +176,23 @@ def _decode_pcm(raw: bytes) -> np.ndarray:
     if len(raw) % 2:
         raise AsrServiceError("pcm_invalid", "PCM 音频必须使用 int16 采样", 400)
     return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+
+
+def _is_effectively_silent(pcm: np.ndarray) -> bool:
+    """Return true only for empty or uniformly low-energy PCM.
+
+    ASR models can hallucinate short interjections for digital silence. This
+    deterministic guard runs before batching and therefore applies equally to
+    legacy, v1 batch and v2 batch requests. Requiring both RMS and peak below
+    their floors avoids classifying a quiet but real speech transient as empty.
+    """
+    if pcm.size == 0:
+        return True
+    if not np.isfinite(pcm).all():
+        return False
+    rms = float(np.sqrt(np.mean(np.square(pcm, dtype=np.float64))))
+    peak = float(np.max(np.abs(pcm)))
+    return rms <= SILENCE_RMS_THRESHOLD and peak <= SILENCE_PEAK_THRESHOLD
 
 
 def _parse_batch_request(raw: bytes) -> tuple[str, list[InferenceItem]]:
@@ -214,44 +251,105 @@ def _parse_batch_request(raw: bytes) -> tuple[str, list[InferenceItem]]:
     return priority, items
 
 
+def _parse_v2_batch_request(raw: bytes) -> tuple[str, list[InferenceItem]]:
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AsrServiceError("json_invalid", "批量转写请求不是有效 JSON", 400) from exc
+    if not isinstance(payload, dict):
+        raise AsrServiceError("request_invalid", "批量转写请求格式无效", 400)
+    if payload.get("schema_version") != 2 or payload.get("contract_revision") != "asr.batch.v2":
+        raise AsrServiceError("contract_revision_invalid", "批量转写合同版本无效", 422)
+    if set(payload) != {"schema_version", "contract_revision", "priority", "items"}:
+        raise AsrServiceError("request_fields_invalid", "批量转写请求字段无效", 422)
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raise AsrServiceError("batch_size_invalid", "批量转写项目无效", 422)
+    allowed_item_fields = {
+        "id", "pcm_base64", "sample_rate", "language",
+        "source_start_ms", "source_end_ms",
+    }
+    for item in raw_items:
+        if (
+            not isinstance(item, dict)
+            or not {"id", "pcm_base64", "source_start_ms", "source_end_ms"}.issubset(item)
+            or not set(item).issubset(allowed_item_fields)
+        ):
+            raise AsrServiceError("item_fields_invalid", "批量转写项目字段无效", 422)
+    return _parse_batch_request(raw)
+
+
+def _v2_batch_response(batch: dict) -> dict:
+    items = []
+    for raw in batch["items"]:
+        text = str(raw.get("text") or "").strip()
+        items.append(
+            {
+                **raw,
+                "stable_segment_key": raw["id"],
+                "segment_revision": 1,
+                "text_state": "stable",
+                "outcome": "text" if text else "no_speech",
+                "text": text,
+            }
+        )
+    return {
+        **batch,
+        "schema_version": 2,
+        "contract_revision": "asr.batch.v2",
+        "items": items,
+    }
+
+
 class InferenceCoordinator:
     def __init__(
         self,
         model_getter: Callable[[], object | None],
         *,
         max_queued_requests: int = MAX_QUEUED_REQUESTS,
+        stall_seconds: float = INFERENCE_STALL_SECONDS,
+        on_stall: Callable[[int], None] = os._exit,
     ) -> None:
         self._model_getter = model_getter
         self._queue: queue.PriorityQueue[tuple[int, int, InferenceJob | None]] = (
-            queue.PriorityQueue(maxsize=max_queued_requests)
+            queue.PriorityQueue()
         )
+        # Bound admission, not the physical queue: re-inserting an unbatchable
+        # item into a full queue used to block the sole inference consumer.
+        self._capacity = max(1, max_queued_requests)
         self._sequence = itertools.count()
         self._metrics_lock = threading.Lock()
         self._pending = {name: 0 for name in PRIORITY_ORDER}
         self._active_priority: str | None = None
         self._last_inference: dict | None = None
         self._closed = False
+        self._active_since: float | None = None
+        self._stall_seconds = stall_seconds
+        self._on_stall = on_stall
+        self._stop = threading.Event()
         self._worker = threading.Thread(
             target=self._worker_loop,
             name="qwen3-asr-inference",
             daemon=True,
         )
         self._worker.start()
+        self._watchdog = threading.Thread(target=self._watch, name="qwen3-asr-watchdog", daemon=True)
+        self._watchdog.start()
 
     def submit(self, priority: str, items: list[InferenceItem]) -> dict:
         if priority not in PRIORITY_ORDER:
             raise AsrServiceError("priority_invalid", "转写优先级无效", 422)
-        if self._closed:
-            raise AsrServiceError("service_stopping", "转写服务正在停止", 503)
         job = InferenceJob(priority=priority, items=items)
         entry = (PRIORITY_ORDER[priority], next(self._sequence), job)
-        try:
-            self._queue.put_nowait(entry)
-        except queue.Full as exc:
-            raise AsrServiceError("queue_full", "转写任务较多，请稍后重试", 429) from exc
         with self._metrics_lock:
+            if self._closed or not self._worker.is_alive():
+                raise AsrServiceError("service_stopping", "转写服务正在恢复，请稍后重试", 503)
+            if sum(self._pending.values()) >= self._capacity:
+                raise AsrServiceError("queue_full", "转写任务较多，请稍后重试", 429)
             self._pending[priority] += 1
+            self._queue.put_nowait(entry)
         if not job.finished.wait(REQUEST_WAIT_SECONDS):
+            job.cancelled.set()
             raise AsrServiceError("inference_timeout", "转写等待超时，请稍后重试", 504)
         if job.error is not None:
             raise AsrServiceError("inference_failed", "语音转写失败，请稍后重试", 500)
@@ -265,12 +363,26 @@ class InferenceCoordinator:
                 "by_priority": dict(self._pending),
                 "active_priority": self._active_priority,
                 "last_inference": dict(self._last_inference) if self._last_inference else None,
+                "worker_alive": self._worker.is_alive() and not self._closed,
+                "active_ms": round((time.perf_counter() - self._active_since) * 1000)
+                    if self._active_since is not None else 0,
+                "stall_limit_ms": round(self._stall_seconds * 1000),
             }
 
     def close(self) -> None:
         self._closed = True
+        self._stop.set()
         self._queue.put((99, next(self._sequence), None))
         self._worker.join(timeout=2)
+
+    def _watch(self) -> None:
+        while not self._stop.wait(min(1.0, self._stall_seconds / 4)):
+            state = self.snapshot()
+            if not state["worker_alive"] or state["active_ms"] > state["stall_limit_ms"]:
+                self._closed = True
+                print("[Qwen3-ASR] worker_stalled restarting_for_checkpoint_recovery", flush=True)
+                self._on_stall(70)
+                return
 
     def _collect_microbatch(self, first: InferenceJob) -> list[InferenceJob]:
         """Collect same-priority jobs for one model call without reordering work."""
@@ -327,6 +439,7 @@ class InferenceCoordinator:
             with self._metrics_lock:
                 self._pending[first.priority] = max(0, self._pending[first.priority] - 1)
                 self._active_priority = first.priority
+                self._active_since = time.perf_counter()
             started_at = time.perf_counter()
             success = False
             infer_ms = 0
@@ -336,23 +449,27 @@ class InferenceCoordinator:
                 model = self._model_getter()
                 if model is None:
                     raise RuntimeError("model_not_ready")
-                flat_items = [item for job in jobs for item in job.items]
-                non_empty = [item for item in flat_items if item.pcm.size]
+                flat_items = [item for job in jobs if not job.cancelled.is_set() for item in job.items]
+                infer_items = [
+                    item
+                    for item in flat_items
+                    if item.pcm.size and not _is_effectively_silent(item.pcm)
+                ]
                 results_by_item = {}
-                if non_empty:
+                if infer_items:
                     infer_started = time.perf_counter()
                     with torch.inference_mode():
                         results = model.transcribe(
-                            audio=[(item.pcm, 16_000) for item in non_empty],
-                            language=[item.language for item in non_empty],
+                            audio=[(item.pcm, 16_000) for item in infer_items],
+                            language=[item.language for item in infer_items],
                         )
                     infer_ms = max(0, round((time.perf_counter() - infer_started) * 1000))
-                    if len(results) != len(non_empty):
+                    if len(results) != len(infer_items):
                         raise RuntimeError("batch_result_size_mismatch")
                     # ``/asr`` intentionally uses the same item id (``legacy``)
                     # for every request.  Key by object identity so merging
                     # independent jobs never lets one response steal another.
-                    results_by_item = dict(zip((id(item) for item in non_empty), results))
+                    results_by_item = dict(zip((id(item) for item in infer_items), results))
                 revision = _resolve_model_revision(MODEL_ID)
                 for job in jobs:
                     job_queue_ms = max(0, round((started_at - job.enqueued_at) * 1000))
@@ -406,6 +523,7 @@ class InferenceCoordinator:
             finally:
                 with self._metrics_lock:
                     self._active_priority = None
+                    self._active_since = None
                     self._last_inference = {
                         "at": _utc_now(),
                         "success": success,
@@ -437,6 +555,11 @@ def load_model() -> None:
         max_inference_batch_size=MAX_BATCH_SIZE,
         max_new_tokens=MAX_NEW_TOKENS,
     )
+    # Pay lazy CUDA/kernel setup once at startup, not on the user's first
+    # utterance. This is synthetic silence, discarded, and not user data.
+    if os.getenv("QWEN_ASR_WARMUP", "1").lower() not in {"0", "false", "off"}:
+        with torch.inference_mode():
+            MODEL.transcribe(audio=[(np.zeros(16_000, dtype=np.float32), 16_000)], language=["Chinese"])
     print(
         "[Qwen3-ASR] ready model=%s revision=%s load_ms=%d"
         % (
@@ -455,12 +578,22 @@ def _ready_payload() -> dict:
         "active_priority": None,
         "last_inference": None,
     }
-    ready = MODEL is not None and COORDINATOR is not None
+    revision = _resolve_model_revision(MODEL_ID)
+    # The API uses the revision as part of the transcript idempotency fence.
+    # A loaded model without a pinned revision must never advertise ready.
+    ready = (
+        MODEL is not None
+        and COORDINATOR is not None
+        and revision
+        and revision != "unresolved"
+        and queue_state.get("worker_alive", False)
+        and queue_state.get("active_ms", 0) <= queue_state.get("stall_limit_ms", 0)
+    )
     return {
         "status": "ready" if ready else "not_ready",
         "ready": ready,
         "model": MODEL_ID,
-        "model_revision": _resolve_model_revision(MODEL_ID),
+        "model_revision": revision,
         "device": DEVICE,
         "max_batch_size": MAX_BATCH_SIZE,
         "queue": queue_state,
@@ -502,17 +635,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in {"/asr", "/v1/asr/batch"}:
+        if parsed.path not in {"/asr", "/v1/asr/batch", "/v2/asr/batch"}:
             self.send_error(404)
             return
         if MODEL is None or COORDINATOR is None:
             self._error(AsrServiceError("model_not_ready", "转写模型尚未就绪", 503))
             return
         try:
-            if parsed.path == "/v1/asr/batch":
+            if parsed.path in {"/v1/asr/batch", "/v2/asr/batch"}:
                 length = self._content_length(MAX_BATCH_REQUEST_BYTES)
-                priority, items = _parse_batch_request(self.rfile.read(length))
-                self._json(COORDINATOR.submit(priority, items))
+                raw = self.rfile.read(length)
+                if parsed.path == "/v2/asr/batch":
+                    priority, items = _parse_v2_batch_request(raw)
+                    self._json(_v2_batch_response(COORDINATOR.submit(priority, items)))
+                else:
+                    priority, items = _parse_batch_request(raw)
+                    self._json(COORDINATOR.submit(priority, items))
                 return
 
             length = self._content_length(MAX_AUDIO_BYTES)
@@ -556,6 +694,11 @@ def main() -> None:
     global COORDINATOR
     port = int(os.getenv("QWEN_ASR_PORT", "8030"))
     load_model()
+    revision = _resolve_model_revision(MODEL_ID)
+    if not revision or revision == "unresolved":
+        raise RuntimeError(
+            "QWEN_ASR_MODEL_REVISION must be pinned; refusing to start an unversioned ASR service"
+        )
     COORDINATOR = InferenceCoordinator(lambda: MODEL)
     server = Server(("127.0.0.1", port), Handler)
     print(f"[Qwen3-ASR] listening on 127.0.0.1:{port}", flush=True)

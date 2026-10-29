@@ -2,7 +2,6 @@ import React from 'react';
 import type { MeetingSummaryCarryForwardAuthorization } from '../domain/meeting';
 import {
   MeetingSummaryCarryForwardSelectionStaleError,
-  MeetingSummaryCarryForwardSourceUnavailableError,
   type MeetingSummaryCarryForwardSelection,
 } from '../services/meetingSummaryCarryForward';
 import type { MeetingSeriesMemoryProjection } from '../services/meetingSeriesMemory';
@@ -11,9 +10,6 @@ import { MeetingSeriesSelectionSheet } from './MeetingSeriesSelectionSheet';
 function authorizationErrorMessage(error: unknown): string {
   if (error instanceof MeetingSummaryCarryForwardSelectionStaleError) {
     return '上次会议内容已变化，请取消后重试。';
-  }
-  if (error instanceof MeetingSummaryCarryForwardSourceUnavailableError) {
-    return '所选内容尚未同步到账号，暂时无法引用。';
   }
   return '暂时无法引用，请稍后重试。';
 }

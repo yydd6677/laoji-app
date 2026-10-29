@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowInsetsControllerCompat
+import com.laoji.nativeplatform.ui.LaojiSystemBars
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -37,7 +38,6 @@ internal class MinutesItemContextMenu(
   private var previousContentAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
   private var activity: Activity? = null
   private var previousLightStatusBars = true
-  private var previousLightNavigationBars = true
 
   fun dismiss() {
     backCallback?.remove()
@@ -52,8 +52,8 @@ internal class MinutesItemContextMenu(
     activity?.let { currentActivity ->
       WindowInsetsControllerCompat(currentActivity.window, currentActivity.window.decorView).apply {
         isAppearanceLightStatusBars = previousLightStatusBars
-        isAppearanceLightNavigationBars = previousLightNavigationBars
       }
+      LaojiSystemBars.setNavigationOverlayDark(currentActivity, false)
     }
     activity = null
   }
@@ -89,7 +89,7 @@ internal class MinutesItemContextMenu(
     val card = ImageView(nextActivity).apply {
       setImageBitmap(bitmap)
       scaleType = ImageView.ScaleType.FIT_XY
-      backgroundShape(MinutesPalette.surface, radiusDp = 12)
+      backgroundShape({ MinutesPalette.surface }, radiusDp = { 12 })
       clipToOutline = true
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
@@ -171,9 +171,8 @@ internal class MinutesItemContextMenu(
     appContent?.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     val systemBarController = WindowInsetsControllerCompat(nextActivity.window, nextActivity.window.decorView)
     previousLightStatusBars = systemBarController.isAppearanceLightStatusBars
-    previousLightNavigationBars = systemBarController.isAppearanceLightNavigationBars
     systemBarController.isAppearanceLightStatusBars = false
-    systemBarController.isAppearanceLightNavigationBars = false
+    LaojiSystemBars.setNavigationOverlayDark(nextActivity, true)
 
     activity = nextActivity
     overlay = scrim
@@ -198,7 +197,7 @@ internal class MinutesItemContextMenu(
     // 16sp regular text, 16dp horizontal padding and a 0.5dp divider.
     orientation = LinearLayout.VERTICAL
     minimumWidth = context.dp(128)
-    backgroundShape(MinutesPalette.surface, radiusDp = 12)
+    backgroundShape({ MinutesPalette.surface }, radiusDp = { 12 })
     clipToOutline = true
     elevation = context.dp(8).toFloat()
     actions.forEachIndexed { index, action ->
@@ -210,7 +209,7 @@ internal class MinutesItemContextMenu(
         isClickable = true
         isFocusable = true
         contentDescription = action.label
-        background = menuRowBackground(context)
+        minutesBackground { menuRowBackground() }
         setOnClickListener {
           dismiss()
           onAction(mapOf("type" to action.type, "meetingId" to meetingId))
@@ -219,7 +218,7 @@ internal class MinutesItemContextMenu(
       addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, context.dp(48)))
       if (index != actions.lastIndex) {
         addView(
-          View(context).apply { setBackgroundColor(MinutesPalette.divider) },
+          View(context).apply { minutesBackgroundColor { MinutesPalette.divider } },
           LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             max(1, (context.resources.displayMetrics.density * 0.5f).roundToInt()),
@@ -240,7 +239,7 @@ private fun View.captureBitmap(): Bitmap? = try {
   null
 }
 
-private fun menuRowBackground(context: Context): StateListDrawable = StateListDrawable().apply {
+private fun menuRowBackground(): StateListDrawable = StateListDrawable().apply {
   addState(
     intArrayOf(android.R.attr.state_pressed),
     GradientDrawable().apply { setColor(MinutesPalette.filler) },

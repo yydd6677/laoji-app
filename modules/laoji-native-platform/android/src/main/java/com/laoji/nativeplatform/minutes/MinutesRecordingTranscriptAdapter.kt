@@ -14,6 +14,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 
 internal class MinutesRecordingTranscriptAdapter :
   ListAdapter<MinutesTranscriptLine, MinutesRecordingTranscriptAdapter.Holder>(DIFF) {
@@ -31,9 +32,9 @@ internal class MinutesRecordingTranscriptAdapter :
     private val root = itemView as LinearLayout
     private val metaRow = LinearLayout(parent.context)
     private val avatar = FrameLayout(parent.context)
-    private val speaker = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+    private val speaker = parent.context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
     private val separator = View(parent.context)
-    private val timestamp = parent.context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+    private val timestamp = parent.context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
     private val body = parent.context.textView(textSizeSp = 16)
 
     init {
@@ -48,11 +49,11 @@ internal class MinutesRecordingTranscriptAdapter :
       metaRow.gravity = Gravity.CENTER_VERTICAL
       metaRow.minimumHeight = parent.context.dp(20)
 
-      avatar.backgroundShape(MinutesPalette.page, radiusDp = 10)
+      avatar.backgroundShape({ MinutesPalette.page }, radiusDp = { 10 })
       avatar.addView(
         ImageView(parent.context).apply {
           setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_person_filled)
-          imageTintList = android.content.res.ColorStateList.valueOf(MinutesPalette.faint)
+          minutesIconColors { android.content.res.ColorStateList.valueOf(MinutesPalette.faint) }
           importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         },
         FrameLayout.LayoutParams(parent.context.dp(12), parent.context.dp(12), Gravity.CENTER),
@@ -61,7 +62,7 @@ internal class MinutesRecordingTranscriptAdapter :
 
       speaker.maxLines = 1
       speaker.ellipsize = TextUtils.TruncateAt.END
-      speaker.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+      speaker.minutesTypeface(Typeface.NORMAL)
       metaRow.addView(
         speaker,
         LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, parent.context.dp(20)).apply {
@@ -69,7 +70,7 @@ internal class MinutesRecordingTranscriptAdapter :
         },
       )
 
-      separator.backgroundShape(MinutesPalette.disabled, radiusDp = 2)
+      separator.backgroundShape({ MinutesPalette.disabled }, radiusDp = { 2 })
       metaRow.addView(
         separator,
         LinearLayout.LayoutParams(parent.context.dp(3), parent.context.dp(3)).apply {

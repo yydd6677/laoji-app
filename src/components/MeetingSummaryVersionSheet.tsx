@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 
 export interface MeetingSummaryVersionChoice {
   id: string;
@@ -42,7 +42,8 @@ export function MeetingSummaryVersionSheet({
   onRetry: () => void;
   onSelect: (versionId: string) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -223,20 +224,20 @@ export function MeetingSummaryVersionSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   sheet: { borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 60, height: 44, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '500' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '500' },
   state: { minHeight: 150, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', gap: 16 },
-  stateText: { fontSize: 14, lineHeight: 22, textAlign: 'center' },
+  stateText: { fontFamily, fontSize: 14, lineHeight: 22, textAlign: 'center' },
   retry: { width: 76, height: 36, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  retryText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  retryText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
   row: { minHeight: 72, paddingLeft: 16, paddingRight: 12, flexDirection: 'row', alignItems: 'center' },
   rowBody: { flex: 1, paddingVertical: 11 },
-  rowTitle: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  rowMeta: { marginTop: 2, fontSize: 13, lineHeight: 20 },
+  rowTitle: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  rowMeta: { marginTop: 2, fontFamily, fontSize: 13, lineHeight: 20 },
   rowStatus: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

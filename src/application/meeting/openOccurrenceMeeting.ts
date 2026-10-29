@@ -22,7 +22,6 @@ export interface OccurrenceMeetingCreateOptions {
   clientRequestId: string;
   calendarContext: CalendarMeetingContext;
   entryPoint: OccurrenceMeetingEntryPoint;
-  supersededRemoteMeetingId: string | null;
 }
 
 export type CreateOccurrenceMeeting = (
@@ -112,9 +111,8 @@ async function executeOpenOccurrenceMeeting(
   }
 
   // A deleted meeting intentionally stays as a tombstone, but it must not
-  // reserve this occurrence forever. Carry both its local ID (for a stable,
-  // distinct retry identity) and remote ID (for the server's guarded atomic
-  // replacement contract) into the new local root.
+  // reserve this occurrence forever. Its local ID makes the replacement's
+  // retry identity stable and distinct.
   const supersededDeletedMeeting = await resolveDeletedOccurrenceMeetingIdentity(
     input.scopeKey,
     context.occurrence,
@@ -130,7 +128,6 @@ async function executeOpenOccurrenceMeeting(
     ),
     calendarContext: context,
     entryPoint: input.entryPoint,
-    supersededRemoteMeetingId: supersededDeletedMeeting?.remoteMeetingId ?? null,
   });
   const projection = await bindLegacyMeetingToOccurrence(input.scopeKey, created, context);
   return occurrenceMeetingOpenTarget(projection);

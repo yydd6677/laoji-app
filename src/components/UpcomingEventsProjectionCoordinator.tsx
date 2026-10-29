@@ -4,7 +4,6 @@ import {
   clearNativeUpcomingEventsProjection,
   writeNativeUpcomingEventsProjection,
 } from 'laoji-native-platform';
-import { useAuth } from '../store/AuthStore';
 import { useEvents } from '../store/EventsStore';
 import { useMeetings } from '../store/MeetingsStore';
 import type { PrivacyPrefs } from '../services/privacy';
@@ -17,25 +16,14 @@ import { buildUpcomingEventsProjection } from '../services/upcomingEventsProject
 import type { ScopeKey } from '../domain/meeting';
 import { diagnosticWarn } from '../services/diagnostics';
 
-function scopeForAuth(mode: string, userId?: number): ScopeKey | null {
-  if (mode === 'guest') return 'guest';
-  if (mode === 'authenticated' && userId) return `user:${userId}`;
-  return null;
-}
-
 export function UpcomingEventsProjectionCoordinator() {
-  const { mode, session } = useAuth();
   const { events, searchableEvents, hydratedScope } = useEvents();
   const { meetings } = useMeetings();
-  const scopeKey = scopeForAuth(mode, session?.user.id);
+  const scopeKey: ScopeKey = 'guest';
   const [privacy, setPrivacy] = useState<{ scope: ScopeKey; value: PrivacyPrefs } | null>(null);
   const [foregroundRevision, setForegroundRevision] = useState(0);
 
   useEffect(() => {
-    if (!scopeKey) {
-      setPrivacy(null);
-      return;
-    }
     let active = true;
     const unsubscribe = subscribePrivacyPrefs(scopeKey, value => {
       if (active) setPrivacy({ scope: scopeKey, value });
@@ -59,7 +47,7 @@ export function UpcomingEventsProjectionCoordinator() {
   }, []);
 
   useEffect(() => {
-    if (!scopeKey || hydratedScope !== scopeKey || privacy?.scope !== scopeKey) {
+    if (hydratedScope !== scopeKey || privacy?.scope !== scopeKey) {
       void clearNativeUpcomingEventsProjection().catch(() => undefined);
       return;
     }

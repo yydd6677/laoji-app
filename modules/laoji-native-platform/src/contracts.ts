@@ -1,12 +1,4 @@
-export const NATIVE_PLATFORM_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const NATIVE_CALENDAR_SNAPSHOT_SCHEMA_VERSION = 1 as const;
-
-export interface NativePlatformCapabilities {
-  calendarSurface: boolean;
-  minutesSurface: boolean;
-  nativeAudioRuntime: boolean;
-  mediaPlayer: boolean;
-}
 
 export type NativeAudioPurpose = 'schedule' | 'meeting';
 
@@ -22,6 +14,7 @@ export type NativeAudioSessionState =
   | 'failed';
 
 export interface NativeCalendarEventSnapshot {
+  completed?: boolean;
   sourceEventId: string;
   occurrenceDate: string;
   title: string;
@@ -39,7 +32,7 @@ export interface NativeCalendarEventSnapshot {
   allDay: boolean;
   editable: boolean;
   revision: number;
-  /** Optional Feishu-compatible timed-event rectangle in percentages. */
+  /** Optional timed-event rectangle in percentages. */
   instanceLayout?: NativeCalendarInstanceLayout | null;
 }
 
@@ -67,6 +60,16 @@ export interface NativeCalendarRangeSnapshot {
   todayEpochDay: number;
   settings: NativeCalendarSettings;
   events: NativeCalendarEventSnapshot[];
+  projection?: NativeProjectionEnvelope | null;
+}
+
+export interface NativeProjectionEnvelope {
+  deviceEpoch: string;
+  entityId: string;
+  entityRevision: number;
+  viewRevision: number;
+  surfaceInstanceId: string;
+  payloadSha256: string;
 }
 
 export type NativeCalendarMutationKind = 'move' | 'resize-start' | 'resize-end';
@@ -81,6 +84,7 @@ export interface NativeCalendarMutationRequest {
   startMinutes: number | null;
   endMinutes: number | null;
   baseRevision: number;
+  projection?: NativeProjectionEnvelope | null;
 }
 
 export interface NativeCalendarMutationResolution {

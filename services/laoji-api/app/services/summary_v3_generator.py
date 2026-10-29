@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from difflib import SequenceMatcher
+from decimal import Decimal
 import hashlib
 import json
 import os
@@ -15,6 +17,10 @@ from pydantic import ValidationError
 
 from app.schemas.meeting_facts_v3 import (
     ActionCandidateV3,
+    CompactMeetingFactsModelResponseV3,
+    CompactModelActionV3,
+    CompactModelFactV3,
+    CompactModelRelationV3,
     FactRelationV3,
     MeetingFactV3,
     MeetingFactsDocumentV3,
@@ -23,7 +29,6 @@ from app.schemas.meeting_facts_v3 import (
     OverviewV3,
     PROMPT_REVISION,
     SourceReferenceV3,
-    model_response_json_schema,
 )
 from app.services.llm_provider import (
     GENERATION_MODEL,
@@ -36,6 +41,9 @@ from app.services.summary_v3_evidence import EvidencePackage, EvidenceSource
 
 
 _PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "meeting_facts_v3_system.txt"
+_GENERATION_FACT_LIMIT = 12
+_GENERATION_RELATION_LIMIT = 16
+_GENERATION_ACTION_LIMIT = 6
 _NUMBER_OR_DATE = re.compile(
     r"(?:\d+(?:\.\d+)?(?:%|％|年|月|日|号|点|时|分|秒|万|亿|元|人|次|个)?)"
 )
@@ -46,6 +54,18 @@ _TEMPORAL_CLAIM = re.compile(
     r"(?:今天|明天|后天|本周|下周|本月|下月)(?:[一二三四五六日天])?(?:上午|下午|晚上|凌晨)?|"
     r"(?:周|星期)[一二三四五六日天](?:上午|下午|晚上)?|"
     r"(?:上午|下午|晚上|凌晨)|(?:月|年)底|季度",
+)
+_EXPLICIT_DUE_BOUND = re.compile(
+    r"(?:"
+    r"(?:\d{4}\s*年\s*)?\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)|"
+    r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|"
+    r"(?:今天|明天|后天|本周|下周|本月|下月)|"
+    r"(?:本周|下周|周|星期)[一二三四五六日天]|"
+    r"(?:上午|下午|晚上|凌晨|中午)\s*\d{1,2}\s*(?:点|时)(?:半|\s*\d{1,2}\s*分)?"
+    r")"
+    r"(?:\s*(?:上午|下午|晚上|凌晨|中午|下班))?"
+    r"(?:\s*\d{1,2}\s*(?:点|时)(?:半|\s*\d{1,2}\s*分)?)?"
+    r"\s*(?:前|之前|以内|内)",
 )
 _OWNER_CLAIM = (
     re.compile(
@@ -95,6 +115,13 @@ _ADOPTION_SIGNAL = re.compile(
     r"同意(?:采用|执行|落地)?|采纳|批准|通过|敲定|落地(?:执行)?|"
     r"按.{0,24}执行|以.{0,24}为准|确定由|已安排|已经安排)",
 )
+_BROAD_ACTION_SIGNAL = re.compile(
+    r"(?:加强|强化|提升|完善|推动|促进|持续推进|共同研发|鼓励和支持|加大(?:对|在)?|"
+    r"建立[^。！？；]{0,24}(?:体系|网络|机制|平台)|形成[^。！？；]{0,24}(?:体系|网络|机制))"
+)
+_FINITE_ACTION_SIGNAL = re.compile(
+    r"(?:提交|发送|整理|修复|完成|确认|准备|安排|召开|测试|评估|发布|交付|申请|预约|提供|编写|补齐|跟进|处理)"
+)
 
 
 class SummaryV3GenerationError(RuntimeError):
@@ -124,6 +151,96 @@ def _system_prompt() -> str:
     return prompt
 
 
+def _generation_response_schema() -> dict[str, Any]:
+    """Return a provider-only fixed-slot schema.
+
+    Some local structured-output grammars validate item shape but ignore
+    ``maxItems``.  A long meeting then emits an unbounded facts array until
+    ``num_predict`` is exhausted.  Finite object properties plus
+    ``additionalProperties=false`` make the cardinality a grammar property,
+    not a request that the model may disregard.  The server expands this DTO
+    into the unchanged public Facts V3 Pydantic contract.
+    """
+    source_id = {
+        "type": "string",
+        # Grammar conversion in deployed Ollama does not support (?:...)
+        # groups. A capturing group has identical accepted string values here;
+        # do not remove the ID constraint or fall back to unconstrained JSON.
+        "pattern": r"^(transcript|manual_note|attachment):[A-Za-z0-9._:-]{1,180}$",
+    }
+    fact = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": [
+                    "topic", "context", "conclusion", "action", "risk",
+                    "question", "quote", "timeline",
+                ],
+            },
+            "state": {
+                "type": "string",
+                "enum": ["confirmed", "proposed", "uncertain", "negated", "completed"],
+            },
+            "content": {"type": "string", "minLength": 1, "maxLength": 500},
+            "source_1": deepcopy(source_id),
+            "source_2": deepcopy(source_id),
+            "source_3": deepcopy(source_id),
+        },
+        "required": ["type", "state", "content", "source_1"],
+    }
+    relation = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": ["supports", "contradicts", "precedes", "depends_on", "alternative"],
+            },
+            "from_fact": {"type": "string", "enum": [f"f{index}" for index in range(1, 13)]},
+            "to_fact": {"type": "string", "enum": [f"f{index}" for index in range(1, 13)]},
+        },
+        "required": ["type", "from_fact", "to_fact"],
+    }
+    action = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "fact": {"type": "string", "enum": [f"f{index}" for index in range(1, 13)]},
+            "owner": {"type": ["string", "null"], "maxLength": 80},
+            "due": {"type": ["string", "null"], "maxLength": 120},
+            "fit": {"type": "string", "enum": ["high", "medium", "low"]},
+        },
+        "required": ["fact"],
+    }
+
+    def slots(prefix: str, count: int, item: dict[str, Any], *, require_first: bool) -> dict[str, Any]:
+        result = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                f"{prefix}{index}": deepcopy(item)
+                for index in range(1, count + 1)
+            },
+        }
+        if require_first:
+            result["required"] = [f"{prefix}1"]
+        return result
+
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "v": {"type": "integer", "const": 3},
+            "facts": slots("f", _GENERATION_FACT_LIMIT, fact, require_first=True),
+            "relations": slots("r", _GENERATION_RELATION_LIMIT, relation, require_first=False),
+            "actions": slots("a", _GENERATION_ACTION_LIMIT, action, require_first=False),
+        },
+        "required": ["v", "facts", "relations", "actions"],
+    }
+
+
 def _extract_object(raw: str) -> Any:
     value = raw.strip()
     if not value:
@@ -131,22 +248,543 @@ def _extract_object(raw: str) -> Any:
     return json.loads(value)
 
 
-def _sanitize_model_value(value: Any) -> Any:
-    """Apply harmless cardinality normalization before strict validation."""
+def _recover_compact_root_prefix(raw: str) -> str:
+    """Rebuild complete nested fact slots before a provider limit stop.
+
+    Ollama may honor the value type but continue with ``f13`` after the last
+    allowed fact. The request stops immediately before that key, leaving the
+    ``facts`` and root objects open. ``JSONDecoder.raw_decode`` walks only
+    complete fact objects and then reconstructs empty optional relation/action
+    containers. It never edits source text or a completed fact field.
+    """
+    value = raw.strip()
+    if not value.startswith("{"):
+        return raw
+    decoder = json.JSONDecoder()
+    index = 1
+    root_values: dict[str, Any] = {}
+    for expected_key in ("v", "facts"):
+        while index < len(value) and value[index].isspace():
+            index += 1
+        try:
+            key, key_end = decoder.raw_decode(value, index)
+        except json.JSONDecodeError:
+            return raw
+        if key != expected_key:
+            return raw
+        index = key_end
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ":":
+            return raw
+        index += 1
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if expected_key == "v":
+            try:
+                item, index = decoder.raw_decode(value, index)
+            except json.JSONDecodeError:
+                return raw
+            root_values["v"] = item
+        elif index >= len(value) or value[index] != "{":
+            return raw
+        else:
+            index += 1
+            break
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ",":
+            return raw
+        index += 1
+
+    facts: dict[str, Any] = {}
+    allowed = {f"f{item}" for item in range(1, _GENERATION_FACT_LIMIT + 1)}
+    while index < len(value):
+        while index < len(value) and value[index].isspace():
+            index += 1
+        try:
+            key, key_end = decoder.raw_decode(value, index)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(key, str) or key not in allowed or key in facts:
+            break
+        index = key_end
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ":":
+            break
+        index += 1
+        while index < len(value) and value[index].isspace():
+            index += 1
+        try:
+            item, index = decoder.raw_decode(value, index)
+        except json.JSONDecodeError:
+            break
+        if not isinstance(item, dict):
+            break
+        facts[key] = item
+        while index < len(value) and value[index].isspace():
+            index += 1
+        if index >= len(value) or value[index] != ",":
+            break
+        index += 1
+    if root_values.get("v") != 3 or "f1" not in facts:
+        return raw
+    return json.dumps(
+        {"v": 3, "facts": facts, "relations": {}, "actions": {}},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _repair_truncated_root_arrays(raw: str) -> str:
+    """Close a provider response cut inside a root array.
+
+    Ollama can stop exactly at ``num_predict`` after emitting several valid
+    relation objects.  A normal JSON parser cannot inspect the complete
+    prefix, but dropping only the unfinished last object and closing the
+    remaining optional root arrays is loss-bounded and still followed by the
+    complete Pydantic/source validator.  Strings and nested objects are
+    scanned structurally; no text replacement is performed.
+    """
+    value = raw.strip()
+    if not value or not value.startswith("{"):
+        return raw
+    try:
+        json.loads(value)
+        return raw
+    except (TypeError, ValueError):
+        pass
+
+    root_arrays = ("facts", "relations", "action_candidates")
+    root_array_limits = {
+        "facts": _GENERATION_FACT_LIMIT,
+        "relations": _GENERATION_RELATION_LIMIT,
+        "action_candidates": _GENERATION_ACTION_LIMIT,
+    }
+    stack: list[tuple[str, str | None]] = []
+    item_ends: dict[str, list[int]] = {name: [] for name in root_arrays}
+    current_array: str | None = None
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+        if character == '"':
+            in_string = True
+            index += 1
+            continue
+        if character == "{":
+            parent_array = stack[-1][1] if stack and stack[-1][0] == "array" else None
+            stack.append(("object", parent_array))
+        elif character == "[":
+            array_name: str | None = None
+            if len(stack) == 1 and stack[0][0] == "object":
+                match = re.search(r'"([^"\\]+)"\s*:\s*$', value[:index])
+                candidate = match.group(1) if match else None
+                if candidate in root_arrays:
+                    array_name = candidate
+            stack.append(("array", array_name))
+            if array_name:
+                current_array = array_name
+        elif character == "}":
+            if not stack or stack[-1][0] != "object":
+                return raw
+            _kind, parent_array = stack.pop()
+            if parent_array:
+                item_ends[parent_array].append(index + 1)
+        elif character == "]":
+            if not stack or stack[-1][0] != "array":
+                return raw
+            _kind, array_name = stack.pop()
+            if array_name:
+                current_array = None
+        index += 1
+
+    if current_array is None:
+        current_array = next(
+            (entry[1] for entry in reversed(stack) if entry[0] == "array" and entry[1]),
+            None,
+        )
+    if current_array is None or not item_ends[current_array]:
+        return raw
+    valid_item_ends = item_ends[current_array][:root_array_limits[current_array]]
+    cut = valid_item_ends[-1]
+    repaired = value[:cut] + "]"
+    current_index = root_arrays.index(current_array)
+    for field in root_arrays[current_index + 1:]:
+        repaired += f',"{field}":[]'
+    repaired += "}"
+    try:
+        json.loads(repaired)
+    except (TypeError, ValueError):
+        return raw
+    return repaired
+
+
+def _repair_root_array_closures(raw: str) -> str:
+    """Repair only a missing root array delimiter in an otherwise JSON reply.
+
+    Qwen occasionally emits a complete ``facts`` item followed immediately by
+    the next root key, omitting the closing ``]``.  The function is deliberately
+    narrow: it only inserts the delimiter immediately before the known root
+    keys and never edits quoted text, field values, or arbitrary syntax.  The
+    normal JSON and Pydantic validators still decide whether the result is
+    acceptable.
+    """
+    value = raw.strip()
+    if not value.startswith("{"):
+        return raw
+    for key in ("relations", "action_candidates"):
+        marker = f',"{key}":'
+        position = value.find(marker)
+        if position < 0:
+            continue
+        prefix = value[:position].rstrip()
+        if prefix and not prefix.endswith("]"):
+            value = prefix + "]" + value[position:]
+    return value
+
+
+def _project_model_overview(facts: list[Any]) -> dict[str, Any] | None:
+    pieces: list[str] = []
+    fact_ids: list[str] = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        content = str(fact.get("content") or "").strip().rstrip("。！？；; ")
+        fact_id = fact.get("fact_id")
+        if not content or not isinstance(fact_id, str):
+            continue
+        if not pieces and len(content) > 159:
+            pieces.append(content[:158].rstrip("，,；; ") + "…")
+            fact_ids.append(fact_id)
+            break
+        projected = "；".join([*pieces, content])
+        if len(projected) > 159:
+            break
+        pieces.append(content)
+        fact_ids.append(fact_id)
+        if len(fact_ids) == 6:
+            break
+    if not pieces:
+        return None
+    return {
+        "text": "；".join(pieces).rstrip("。") + "。",
+        "fact_ids": fact_ids,
+    }
+
+
+def _sanitize_model_value(
+    value: Any,
+    package: EvidencePackage | None = None,
+) -> Any:
+    """Apply loss-bounded protocol normalization before strict validation.
+
+    An overlong citation is already unusable under the public contract and
+    must not consume the one model repair attempt. Drop only that fact and
+    deterministically remove references to it. This implements the v3 rule
+    that an invalid individual citation removes the affected fact while the
+    rest of a structurally readable response remains usable.
+    """
     if not isinstance(value, dict):
         return value
     facts = value.get("facts")
     if isinstance(facts, list):
-        for fact in facts:
-            if isinstance(fact, dict) and isinstance(fact.get("sources"), list):
+        sanitized_facts: list[Any] = []
+        source_map = package.source_map() if package is not None else None
+        for fact in facts[:_GENERATION_FACT_LIMIT]:
+            if not isinstance(fact, dict):
+                sanitized_facts.append(fact)
+                continue
+            # Qwen occasionally repeats a root field immediately after the
+            # last source of a fact.  These misplaced containers carry no
+            # fact data and are removed before the strict schema validator;
+            # root-level fields remain authoritative.
+            for misplaced in ("facts", "relations", "action_candidates"):
+                fact.pop(misplaced, None)
+            if isinstance(fact.get("sources"), list):
                 # A fact may cite at most three sources.  Keep model order so
                 # the first evidence it selected remains stable; source and
                 # quote integrity is still checked after this normalization.
                 fact["sources"] = fact["sources"][:3]
+                if source_map is not None:
+                    invalid_source = False
+                    for source_reference in fact["sources"]:
+                        if not isinstance(source_reference, dict):
+                            invalid_source = True
+                            break
+                        source = source_map.get(str(source_reference.get("source_id") or ""))
+                        if (
+                            source is None
+                            or source_reference.get("source_type") != source.source_type
+                            or len(source.text) > 600
+                        ):
+                            invalid_source = True
+                            break
+                        source_reference["quote"] = source.text
+                        source_reference.pop("content_hash", None)
+                    if invalid_source:
+                        continue
+                if any(
+                    isinstance(source, dict)
+                    and isinstance(source.get("quote"), str)
+                    and len(source["quote"].strip()) > 600
+                    for source in fact["sources"]
+                ):
+                    continue
+            sanitized_facts.append(fact)
+        value["facts"] = sanitized_facts
+
+        retained_fact_ids = {
+            fact.get("fact_id")
+            for fact in sanitized_facts
+            if isinstance(fact, dict) and isinstance(fact.get("fact_id"), str)
+        }
+        projected_overview = _project_model_overview(sanitized_facts)
+        if projected_overview is not None:
+            value["overview"] = projected_overview
+        relations = value.get("relations")
+        if isinstance(relations, list):
+            value["relations"] = [
+                relation
+                for relation in relations[:_GENERATION_RELATION_LIMIT]
+                if not isinstance(relation, dict)
+                or (
+                    relation.get("from_fact_id") in retained_fact_ids
+                    and relation.get("to_fact_id") in retained_fact_ids
+                )
+            ]
+        action_candidates = value.get("action_candidates")
+        if isinstance(action_candidates, list):
+            value["action_candidates"] = [
+                candidate
+                for candidate in action_candidates[:_GENERATION_ACTION_LIMIT]
+                if not isinstance(candidate, dict)
+                or candidate.get("fact_id") in retained_fact_ids
+            ]
     return value
 
 
-def _validate_model_response(raw: str) -> MeetingFactsModelResponseV3:
+def _slot_number(value: str) -> int:
+    try:
+        return int(value[1:])
+    except (TypeError, ValueError):
+        return 1_000_000
+
+
+def _sanitize_compact_value(value: Any) -> Any:
+    """Drop malformed optional slots without repairing the whole document.
+
+    The public protocol already drops an individual fact whose citation is
+    invalid. Applying the same loss-bounded rule to a provider-only optional
+    slot prevents one bad enum in ``f7`` or one incomplete relation from
+    spending a second full generation. ``f1`` is never dropped: if the first
+    required fact is malformed, normal overall repair remains mandatory.
+    """
+    if not isinstance(value, dict) or not isinstance(value.get("facts"), dict):
+        return value
+    sanitized = dict(value)
+    facts: dict[str, Any] = {}
+    misplaced_action_projections: dict[str, dict[str, Any]] = {}
+    for slot, item in value["facts"].items():
+        candidate = item
+        if isinstance(item, dict) and item.get("type") == "action":
+            # Some providers repeat the action projection fields beside the
+            # source-backed fact even though the compact contract keeps them
+            # under the root ``actions`` object.  Those three fields cannot
+            # change fact identity or evidence, so discard only this known
+            # redundant copy.  Every other unexpected field remains a strict
+            # validation error and still drops the optional fact.
+            candidate = {
+                key: nested_value
+                for key, nested_value in item.items()
+                if key not in {"owner", "due", "fit"}
+            }
+            misplaced_action_projections[slot] = {
+                key: item[key]
+                for key in ("owner", "due", "fit")
+                if key in item
+            }
+        try:
+            parsed = CompactModelFactV3.model_validate(candidate)
+        except (TypeError, ValueError, ValidationError):
+            if slot == "f1":
+                facts[slot] = item
+            continue
+        facts[slot] = parsed.model_dump(mode="json")
+    sanitized["facts"] = facts
+
+    relations: dict[str, Any] = {}
+    relation_items = (
+        (value.get("relations") or {}).items()
+        if isinstance(value.get("relations"), dict)
+        else ()
+    )
+    for slot, item in relation_items:
+        try:
+            parsed = CompactModelRelationV3.model_validate(item)
+        except (TypeError, ValueError, ValidationError):
+            continue
+        relations[slot] = parsed.model_dump(mode="json")
+    sanitized["relations"] = relations
+
+    actions: dict[str, Any] = {}
+    action_items = (
+        (value.get("actions") or {}).items()
+        if isinstance(value.get("actions"), dict)
+        else ()
+    )
+    for slot, item in action_items:
+        try:
+            parsed = CompactModelActionV3.model_validate(item)
+        except (TypeError, ValueError, ValidationError):
+            continue
+        actions[slot] = parsed.model_dump(mode="json")
+    for fact_slot, projection in misplaced_action_projections.items():
+        if fact_slot not in facts or not projection:
+            continue
+        existing_slot = next(
+            (
+                slot
+                for slot, action in actions.items()
+                if action.get("fact") == fact_slot
+            ),
+            None,
+        )
+        if existing_slot is not None:
+            candidate_action = dict(actions[existing_slot])
+            for key, nested_value in projection.items():
+                if candidate_action.get(key) is None:
+                    candidate_action[key] = nested_value
+            try:
+                parsed = CompactModelActionV3.model_validate(candidate_action)
+            except (TypeError, ValueError, ValidationError):
+                continue
+            actions[existing_slot] = parsed.model_dump(mode="json")
+            continue
+        available_slot = next(
+            (f"a{index}" for index in range(1, 7) if f"a{index}" not in actions),
+            None,
+        )
+        if available_slot is None:
+            continue
+        try:
+            parsed = CompactModelActionV3.model_validate(
+                {"fact": fact_slot, **projection}
+            )
+        except (TypeError, ValueError, ValidationError):
+            continue
+        actions[available_slot] = parsed.model_dump(mode="json")
+    sanitized["actions"] = actions
+    return sanitized
+
+
+def _expand_compact_model_response(
+    response: CompactMeetingFactsModelResponseV3,
+    package: EvidencePackage,
+) -> MeetingFactsModelResponseV3:
+    """Expand the bounded provider DTO into the public model contract.
+
+    Source type, quote and content hash are immutable evidence properties, so
+    accepting model copies of them adds tokens and disagreement modes without
+    adding information.  Facts with an unknown or oversized source are
+    removed here, and dangling relations/actions are removed with them.  This
+    is the same fail-closed individual-citation behavior used by the verbose
+    compatibility parser and does not spend the optional repair call.
+    """
+    source_map = package.source_map()
+    facts: list[dict[str, Any]] = []
+    retained: dict[str, dict[str, Any]] = {}
+    for fact_id, fact in sorted(response.facts.items(), key=lambda item: _slot_number(item[0])):
+        source_ids = [fact.source_1, fact.source_2, fact.source_3]
+        sources: list[dict[str, Any]] = []
+        invalid_source = False
+        for source_id in (value for value in source_ids if value is not None):
+            source = source_map.get(source_id)
+            if source is None or len(source.text) > 600:
+                invalid_source = True
+                break
+            sources.append({
+                "source_id": source_id,
+                "source_type": source.source_type,
+                "quote": source.text,
+            })
+        if invalid_source or not sources:
+            continue
+        value = {
+            "fact_id": fact_id,
+            "fact_type": fact.type,
+            "certainty": fact.state,
+            "content": fact.content,
+            "sources": sources,
+        }
+        retained[fact_id] = value
+        facts.append(value)
+    overview = _project_model_overview(facts)
+    if overview is None:
+        raise ValueError("compact_facts_empty_after_source_validation")
+
+    relations = [
+        {
+            "relation_type": relation.type,
+            "from_fact_id": relation.from_fact,
+            "to_fact_id": relation.to_fact,
+        }
+        for _relation_id, relation in sorted(
+            response.relations.items(),
+            key=lambda item: _slot_number(item[0]),
+        )
+        if relation.from_fact in retained
+        and relation.to_fact in retained
+        and relation.from_fact != relation.to_fact
+    ]
+    actions = [
+        {
+            "action_id": action_id,
+            "fact_id": action.fact,
+            # Action content is the source-backed action fact.  Asking the
+            # model to repeat it created a second text that could disagree.
+            "content": retained[action.fact]["content"],
+            "owner": action.owner,
+            "due_text": action.due,
+            # Missing provider fit never becomes calendar-ready by default.
+            # The fact state is already a model semantic decision and gives a
+            # deterministic conservative projection without a repair call.
+            "schedule_fit": action.fit or (
+                "low"
+                if retained[action.fact]["certainty"] in {"proposed", "uncertain"}
+                else "medium"
+            ),
+        }
+        for action_id, action in sorted(
+            response.actions.items(),
+            key=lambda item: _slot_number(item[0]),
+        )
+        if action.fact in retained
+    ]
+    return MeetingFactsModelResponseV3.model_validate({
+        "schema_version": 3,
+        "overview": overview,
+        "facts": facts,
+        "relations": relations,
+        "action_candidates": actions,
+    })
+
+
+def _validate_model_response(
+    raw: str,
+    package: EvidencePackage | None = None,
+) -> MeetingFactsModelResponseV3:
     """Validate model JSON after dropping semantically void self-relations.
 
     A relation from a fact to itself cannot carry information and is already
@@ -155,7 +793,20 @@ def _validate_model_response(raw: str) -> MeetingFactsModelResponseV3:
     the single repair attempt; all other structural and enum errors still go
     through the normal repair path.
     """
-    value = _sanitize_model_value(_extract_object(raw))
+    extracted = _extract_object(raw)
+    if (
+        package is not None
+        and isinstance(extracted, dict)
+        and "v" in extracted
+    ):
+        compact = CompactMeetingFactsModelResponseV3.model_validate(
+            _sanitize_compact_value(extracted)
+        )
+        return _expand_compact_model_response(compact, package)
+    # Keep the verbose parser for immutable historical fixtures and rolling
+    # compatibility while immutable historical fixtures are still verified.
+    # The production schema and prompt expose only the bounded compact DTO.
+    value = _sanitize_model_value(extracted, package)
     if isinstance(value, dict) and isinstance(value.get("relations"), list):
         value["relations"] = [
             relation
@@ -199,20 +850,19 @@ def _call_model(
         repair_guidance: list[str] = []
         if "json_invalid" in error_types:
             repair_guidance.append(
-                "上次对象可能未闭合或被截断；减少重复背景事实，确保在输出预算内完整闭合 JSON。"
+                "上次对象可能未闭合；减少重复背景事实，完整闭合 facts、relations、actions；"
+                "写完 f12 后必须结束 facts，不得创建 f13。"
             )
         if "literal_error" in error_types:
             repair_guidance.append("存在枚举值错误；所有枚举必须逐字选自字段契约。")
         if any(path.endswith(".fact_type") for path in error_paths):
             repair_guidance.append(
-                "fact_type 只能表示语义类别：topic/context/conclusion/action/risk/"
-                "question/quote/timeline；proposed 等状态只能写入 certainty。"
+                "facts 槽位中的 type 只能表示语义类别；proposed 等状态只能写入 state。"
             )
         if "missing" in error_types or "extra_forbidden" in error_types:
             repair_guidance.append(
-                "丢弃任何通用摘要字段。根对象必须且只能使用 schema_version、overview、"
-                "facts、relations、action_candidates，并以"
-                '{"schema_version":3,"overview": 开始。'
+                "丢弃任何通用摘要字段。根对象必须且只能使用 v、facts、relations、actions，"
+                "并以" '{"v":3,"facts":{"f1":' "开始。"
             )
         prompt += (
             "\n\n上一次响应没有通过结构协议。根据原证据包重新生成完整对象。"
@@ -226,8 +876,15 @@ def _call_model(
         json.dumps(package.model_payload(), ensure_ascii=False, separators=(",", ":")),
         timeout=600,
         max_tokens=4096,
-        options={"temperature": 0, "num_ctx": 16_384, "num_predict": 4096},
-        response_format=model_response_json_schema(),
+        options={
+            "temperature": 0,
+            "num_ctx": 16_384,
+            "num_predict": 4096,
+            # These strings can only occur as an out-of-contract slot key or
+            # slot reference; quotes inside content are escaped and cannot match.
+            "stop": ['"f13"', '"r17"', '"a7"'],
+        },
+        response_format=_generation_response_schema(),
         priority="background",
         telemetry_operation=operation,
     )
@@ -236,15 +893,36 @@ def _call_model(
 def generate_model_response(package: EvidencePackage) -> tuple[MeetingFactsModelResponseV3, int]:
     raw = _call_model(package, operation="summary.facts.v3")
     try:
-        return _validate_model_response(raw), 1
+        return _validate_model_response(raw, package), 1
     except (ValueError, TypeError, ValidationError) as first_error:
+        compact = _recover_compact_root_prefix(raw)
+        if compact != raw:
+            try:
+                return _validate_model_response(compact, package), 1
+            except (ValueError, TypeError, ValidationError):
+                pass
+        # A delimiter-only repair is deterministic and does not spend the
+        # optional model repair attempt.  It remains fail-closed because the
+        # full schema validator runs immediately afterwards.
+        normalized = _repair_root_array_closures(raw)
+        if normalized != raw:
+            try:
+                return _validate_model_response(normalized, package), 1
+            except (ValueError, TypeError, ValidationError):
+                pass
+        truncated = _repair_truncated_root_arrays(raw)
+        if truncated != raw:
+            try:
+                return _validate_model_response(truncated, package), 1
+            except (ValueError, TypeError, ValidationError):
+                pass
         repaired = _call_model(
             package,
             operation="summary.facts.v3.repair",
             repair_errors=_sanitized_errors(first_error),
         )
         try:
-            return _validate_model_response(repaired), 2
+            return _validate_model_response(repaired, package), 2
         except (ValueError, TypeError, ValidationError) as second_error:
             raise SummaryV3GenerationError(
                 "SUMMARY_V3_FORMAT_INVALID",
@@ -265,8 +943,19 @@ def _quote_matches(quote: str, source: EvidenceSource) -> bool:
 
 
 def _numeric_claims_supported(content: str, quote_text: str) -> bool:
-    normalized_quotes = _compact_whitespace(quote_text)
-    return all(_compact_whitespace(claim) in normalized_quotes for claim in _NUMBER_OR_DATE.findall(content))
+    # A value must match a whole numeric token, not a substring of a different
+    # value. Keep the existing explicit unit/date suffix constraint; a bare
+    # numeric claim can omit the source's unit, but cannot change its value.
+    def atoms(value: str) -> list[tuple[Decimal, str]]:
+        values = []
+        for token in _NUMBER_OR_DATE.findall(_compact_whitespace(value)):
+            number, unit = re.fullmatch(r"(\d+(?:\.\d+)?)(.*)", token).groups()
+            values.append((Decimal(number), unit.replace("％", "%")))
+        return values
+    quoted = atoms(quote_text)
+    return all(any(number == source_number and (not unit or unit == source_unit)
+                   for source_number, source_unit in quoted)
+               for number, unit in atoms(content))
 
 
 def _temporal_claims_supported(content: str, quote_text: str) -> bool:
@@ -695,6 +1384,14 @@ def _resolve_superseded_conflicts(
             older, newer = left, right
         elif right_bounds[1] < left_bounds[0]:
             older, newer = right, left
+        elif left_bounds[1] < right_bounds[1]:
+            # A corrected fact commonly cites the shared correction utterance
+            # and then a later explicit confirmation.  Its source range
+            # overlaps the historical fact, but the added terminal evidence
+            # still establishes a deterministic transcript order.
+            older, newer = left, right
+        elif right_bounds[1] < left_bounds[1]:
+            older, newer = right, left
         else:
             kept_relations.append(relation)
             continue
@@ -915,6 +1612,37 @@ def _supported_action_owner(
     return next(iter(self_speakers)) if len(self_speakers) == 1 else None
 
 
+def _supported_action_due_from_fact(fact: MeetingFactV3) -> str | None:
+    """Recover one explicit bounded due phrase already present in the fact.
+
+    This is not a second action classifier: the model has already emitted and
+    the server has already verified an action fact.  The fallback only copies
+    a single explicit ``...前/内`` phrase when the same normalized phrase is
+    present verbatim in an immutable source.  Ambiguous, normalized-only or
+    unbounded time expressions remain empty.
+    """
+    content_matches = {
+        _compact_whitespace(match.group(0))
+        for match in _EXPLICIT_DUE_BOUND.finditer(fact.content)
+    }
+    if len(content_matches) != 1:
+        return None
+    target = next(iter(content_matches))
+    source_matches: list[str] = []
+    for source in fact.sources:
+        for match in _EXPLICIT_DUE_BOUND.finditer(source.quote):
+            value = match.group(0)
+            if _compact_whitespace(value) == target:
+                source_matches.append(value)
+    normalized_sources = {
+        _compact_whitespace(value): value
+        for value in source_matches
+    }
+    if len(normalized_sources) != 1:
+        return None
+    return next(iter(normalized_sources.values()))
+
+
 _REJECTED_PROPOSAL_SIGNAL = re.compile(
     r"(?:不(?:采用|采纳|考虑|再考虑|执行)|否决|驳回|放弃|不成立|暂不(?:采用|执行))",
 )
@@ -980,6 +1708,10 @@ def _verified_actions(
             continue
         fit = candidate.schedule_fit
         if fact.certainty in {"proposed", "uncertain"}:
+            fit = "low"
+        if _BROAD_ACTION_SIGNAL.search(candidate.content) and not _FINITE_ACTION_SIGNAL.search(candidate.content):
+            # Strategic directions can remain visible as candidates, but are
+            # never calendar-ready without a bounded deliverable verb.
             fit = "low"
         verified = ActionCandidateV3(
             action_id=candidate.action_id,
@@ -1060,7 +1792,7 @@ def _verified_actions(
                 fact_id=fact.fact_id,
                 content=fact.content,
                 owner=_supported_action_owner(owner, fact),
-                due_text=None,
+                due_text=_supported_action_due_from_fact(fact),
                 schedule_fit=(
                     "low" if fact.certainty in {"proposed", "uncertain"} else "medium"
                 ),

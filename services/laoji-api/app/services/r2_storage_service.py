@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import hashlib
 import os
 from pathlib import Path
 from typing import Any, Iterable
@@ -108,6 +109,37 @@ def create_multipart_upload(*, object_key: str, mime_type: str) -> str:
     return upload_id
 
 
+def find_multipart_uploads(*, object_key: str) -> list[str]:
+    """Find recoverable multipart IDs for one deterministic staging key."""
+    client = _client()
+    upload_ids: list[str] = []
+    key_marker: str | None = None
+    upload_marker: str | None = None
+    while True:
+        params: dict[str, Any] = {
+            "Bucket": settings.R2_BUCKET.strip(),
+            "Prefix": object_key,
+        }
+        if key_marker:
+            params["KeyMarker"] = key_marker
+        if upload_marker:
+            params["UploadIdMarker"] = upload_marker
+        response = client.list_multipart_uploads(**params)
+        upload_ids.extend(
+            str(item.get("UploadId") or "").strip()
+            for item in response.get("Uploads") or []
+            if str(item.get("Key") or "") == object_key
+            and str(item.get("UploadId") or "").strip()
+        )
+        if not response.get("IsTruncated"):
+            break
+        key_marker = str(response.get("NextKeyMarker") or "").strip() or None
+        upload_marker = str(response.get("NextUploadIdMarker") or "").strip() or None
+        if not key_marker:
+            break
+    return sorted(set(upload_ids))
+
+
 def presign_upload_parts(
     *, object_key: str, upload_id: str, total_parts: int
 ) -> list[dict[str, Any]]:
@@ -151,6 +183,25 @@ def presign_put_object(*, object_key: str, mime_type: str | None = None) -> str:
         Params=params,
         ExpiresIn=int(settings.R2_PRESIGN_TTL_SECONDS),
         HttpMethod="PUT",
+    )
+
+
+def presign_get_object(*, object_key: str) -> str:
+    """Return a short-lived private URL suitable for ffmpeg range reads.
+
+    MP4/M4A files commonly place their seek index at the end of the object.
+    Feeding those containers through a non-seekable stdin can yield an empty
+    decode even though the media is valid.  The URL remains process-local and
+    stderr is never logged by the transcription pipeline.
+    """
+    return _client().generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": settings.R2_BUCKET.strip(),
+            "Key": object_key,
+        },
+        ExpiresIn=int(settings.R2_PRESIGN_TTL_SECONDS),
+        HttpMethod="GET",
     )
 
 
@@ -221,6 +272,22 @@ def download_object(*, object_key: str, target: Path) -> None:
     _client().download_file(settings.R2_BUCKET.strip(), object_key, str(target))
 
 
+def iter_object_chunks(
+    *,
+    object_key: str,
+    chunk_size: int = 1024 * 1024,
+) -> Iterable[bytes]:
+    """Yield an object through bounded memory without creating a local copy."""
+    response = _client().get_object(Bucket=settings.R2_BUCKET.strip(), Key=object_key)
+    body = response["Body"]
+    bounded = max(64 * 1024, min(4 * 1024 * 1024, int(chunk_size)))
+    try:
+        while chunk := body.read(bounded):
+            yield bytes(chunk)
+    finally:
+        body.close()
+
+
 def object_exists(*, object_key: str) -> bool:
     """Return whether an object is still present without exposing its metadata."""
     try:
@@ -249,6 +316,52 @@ def object_head(*, object_key: str) -> dict[str, Any] | None:
         "content_length": int(response.get("ContentLength") or 0),
         "etag": str(response.get("ETag") or "").strip(),
     }
+
+
+def stream_object_sha256(
+    *,
+    object_key: str,
+    chunk_size: int = 4 * 1024 * 1024,
+    mirror_target: Path | None = None,
+) -> tuple[str, int]:
+    """Verify an R2 object and optionally mirror the same bounded stream.
+
+    ``mirror_target`` must be an unverified unique path supplied by the media
+    cache. This adapter never promotes it to a usable source; the caller does
+    so only after checking both the expected SHA-256 and byte length.
+    """
+    response = _client().get_object(Bucket=settings.R2_BUCKET.strip(), Key=object_key)
+    body = response["Body"]
+    digest = hashlib.sha256()
+    total = 0
+    mirror = None
+    try:
+        if mirror_target is not None:
+            mirror_target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            mirror = mirror_target.open("xb")
+            try:
+                mirror_target.chmod(0o600)
+            except OSError:
+                pass
+        while chunk := body.read(max(64 * 1024, min(16 * 1024 * 1024, int(chunk_size)))):
+            digest.update(chunk)
+            total += len(chunk)
+            if mirror is not None:
+                mirror.write(chunk)
+        if mirror is not None:
+            mirror.flush()
+            os.fsync(mirror.fileno())
+    except BaseException:
+        if mirror is not None:
+            mirror.close()
+        if mirror_target is not None:
+            mirror_target.unlink(missing_ok=True)
+        raise
+    finally:
+        if mirror is not None and not mirror.closed:
+            mirror.close()
+        body.close()
+    return f"sha256:{digest.hexdigest()}", total
 
 
 def delete_object(*, object_key: str) -> None:

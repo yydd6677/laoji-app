@@ -1,6 +1,7 @@
 package com.laoji.nativeplatform.minutes
 
-// MIN-DETAIL-PAGER-001: all supported detail pages remain mounted behind one native pager.
+// MIN-DETAIL-PAGER-001: one native pager owns stable page instances without
+// constructing and laying out every inactive page on the navigation frame.
 
 import android.content.Context
 import android.graphics.Typeface
@@ -13,18 +14,19 @@ import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.laoji.nativeplatform.media.MinutesPlaybackState
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 
 internal class MinutesDetailPagerAdapter(
   context: Context,
   onAction: (Map<String, Any?>) -> Unit,
 ) : RecyclerView.Adapter<MinutesDetailPagerAdapter.Holder>() {
-  private val pages: Map<MinutesDetailTab, MinutesDetailPage> = linkedMapOf(
-    MinutesDetailTab.NOTES to MinutesNotesPage(context, onAction),
-    MinutesDetailTab.TRANSCRIPT to MinutesTranscriptPage(context, onAction),
-    MinutesDetailTab.SUMMARY to MinutesSummaryPage(context, onAction),
-    MinutesDetailTab.SPEAKERS to MinutesSpeakersPage(context, onAction),
-    MinutesDetailTab.INFO to MinutesInfoPage(context, onAction),
-  )
+  private val pageContext = context
+  private val emitAction = onAction
+  private val pages = linkedMapOf<MinutesDetailTab, MinutesDetailPage>()
+  private val renderedKeys = mutableMapOf<MinutesDetailTab, List<Any?>>()
+  private var latestState = MinutesDetailState()
+  private var scrollStateListener: () -> Unit = {}
+  private var restoredScrollPositions = emptyMap<MinutesDetailTab, MinutesDetailPageScrollPosition>()
 
   init {
     setHasStableIds(true)
@@ -35,42 +37,140 @@ internal class MinutesDetailPagerAdapter(
   override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(parent)
 
   override fun onBindViewHolder(holder: Holder, position: Int) {
-    val page = pageFor(MinutesDetailLayoutContract.tabAt(position))
+    val tab = MinutesDetailLayoutContract.tabAt(position)
+    val page = pageFor(tab)
+    renderIfNeeded(tab, page, latestState)
     (page.parent as? ViewGroup)?.removeView(page)
     holder.root.removeAllViews()
     holder.root.addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
   }
 
   fun render(state: MinutesDetailState) {
-    (pageFor(MinutesDetailTab.NOTES) as MinutesNotesPage).render(state)
-    (pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage).render(state)
-    (pageFor(MinutesDetailTab.SUMMARY) as MinutesSummaryPage).render(state)
-    (pageFor(MinutesDetailTab.SPEAKERS) as MinutesSpeakersPage).render(state)
-    (pageFor(MinutesDetailTab.INFO) as MinutesInfoPage).render(state)
+    latestState = state
+    // Background transcript, status, and player updates must not traverse every
+    // attached sibling while the user is reading another page. The selected
+    // page is reconciled now; a sibling is reconciled immediately before it is
+    // selected or rebound by ViewPager.
+    val page = pageFor(state.activeTab)
+    renderIfNeeded(state.activeTab, page, state)
   }
 
   fun onPlaybackState(state: MinutesPlaybackState) {
-    (pageFor(MinutesDetailTab.TRANSCRIPT) as MinutesTranscriptPage).onPlaybackState(state)
+    (existingPageFor(MinutesDetailTab.TRANSCRIPT) as? MinutesTranscriptPage)
+      ?.onPlaybackState(state)
   }
 
-  fun pageFor(tab: MinutesDetailTab): MinutesDetailPage = requireNotNull(pages[tab])
+  fun pageFor(tab: MinutesDetailTab): MinutesDetailPage = pages.getOrPut(tab) {
+    traceMinutes("LaoJi/minutes.page.create.${tab.wireName}") { createPage(tab) }.also { page ->
+      page.setScrollStateListener(scrollStateListener)
+      renderIfNeeded(tab, page, latestState)
+      restoredScrollPositions[tab]?.let(page::restoreScrollPosition)
+    }
+  }
+
+  fun existingPageFor(tab: MinutesDetailTab): MinutesDetailPage? = pages[tab]
+
+  fun prepareForSelection(tab: MinutesDetailTab) {
+    val page = pageFor(tab)
+    renderIfNeeded(tab, page, latestState)
+  }
+
+  private fun createPage(tab: MinutesDetailTab): MinutesDetailPage = when (tab) {
+    MinutesDetailTab.NOTES -> MinutesNotesPage(pageContext, emitAction)
+    MinutesDetailTab.TRANSCRIPT -> MinutesTranscriptPage(pageContext, emitAction)
+    MinutesDetailTab.SUMMARY -> MinutesSummaryPage(pageContext, emitAction)
+    MinutesDetailTab.SPEAKERS -> MinutesSpeakersPage(pageContext, emitAction)
+    MinutesDetailTab.INFO -> MinutesInfoPage(pageContext, emitAction)
+  }
+
+  private fun renderPage(page: MinutesDetailPage, state: MinutesDetailState) {
+    when (page) {
+      is MinutesNotesPage -> page.render(state)
+      is MinutesTranscriptPage -> page.render(state)
+      is MinutesSummaryPage -> page.render(state)
+      is MinutesSpeakersPage -> page.render(state)
+      is MinutesInfoPage -> page.render(state)
+    }
+  }
+
+  private fun renderIfNeeded(tab: MinutesDetailTab, page: MinutesDetailPage, state: MinutesDetailState) {
+    val key = pageRenderKey(tab, state)
+    if (renderedKeys[tab] == key) return
+    traceMinutes("LaoJi/minutes.page.render.${tab.wireName}") { renderPage(page, state) }
+    renderedKeys[tab] = key
+  }
+
+  private fun pageRenderKey(tab: MinutesDetailTab, state: MinutesDetailState): List<Any?> = when (tab) {
+    MinutesDetailTab.NOTES -> listOf(
+      state.meetingId,
+      state.available,
+      state.manualNote,
+      state.manualNoteLoading,
+      state.manualNoteEnabled,
+      state.pageState(tab),
+    )
+    MinutesDetailTab.TRANSCRIPT -> listOf(
+      state.meetingId,
+      state.transcript,
+      state.markers,
+      state.playerSource?.sourceId,
+      state.pageState(tab),
+    )
+    MinutesDetailTab.SUMMARY -> listOf(
+      state.meetingId,
+      state.summary,
+      state.actions,
+      state.canGenerateSummary,
+      state.summaryGenerating,
+      state.summaryActionLabel,
+      state.focusActionId,
+      state.focusActionRequestId,
+      state.pageState(tab),
+    )
+    MinutesDetailTab.SPEAKERS -> listOf(
+      state.meetingId,
+      state.speakers,
+      state.transcript,
+      state.playerSource?.durationMsHint,
+      state.pageState(tab),
+    )
+    MinutesDetailTab.INFO -> listOf(
+      state.meetingId,
+      state.dateTimeLabel,
+      state.location,
+      state.locationLoading,
+      state.canEditLocation,
+      state.pageState(tab),
+    )
+  }
 
   fun setScrollStateListener(listener: () -> Unit) {
+    scrollStateListener = listener
     pages.values.forEach { it.setScrollStateListener(listener) }
   }
 
   fun captureScrollPositions(): Map<MinutesDetailTab, MinutesDetailPageScrollPosition> =
-    pages.mapValues { (_, page) -> page.captureScrollPosition() }
+    MinutesDetailTab.entries.associateWith { tab ->
+      pages[tab]?.captureScrollPosition()
+        ?: restoredScrollPositions[tab]
+        ?: MinutesDetailPageScrollPosition()
+    }
 
   fun restoreScrollPositions(state: MinutesDetailPersistedViewState) {
-    pageFor(MinutesDetailTab.NOTES).restoreScrollPosition(state.notes)
-    pageFor(MinutesDetailTab.TRANSCRIPT).restoreScrollPosition(state.transcript)
-    pageFor(MinutesDetailTab.SUMMARY).restoreScrollPosition(state.summary)
-    pageFor(MinutesDetailTab.SPEAKERS).restoreScrollPosition(state.speakers)
-    pageFor(MinutesDetailTab.INFO).restoreScrollPosition(state.info)
+    restoredScrollPositions = mapOf(
+      MinutesDetailTab.NOTES to state.notes,
+      MinutesDetailTab.TRANSCRIPT to state.transcript,
+      MinutesDetailTab.SUMMARY to state.summary,
+      MinutesDetailTab.SPEAKERS to state.speakers,
+      MinutesDetailTab.INFO to state.info,
+    )
+    pages.forEach { (tab, page) ->
+      restoredScrollPositions[tab]?.let(page::restoreScrollPosition)
+    }
   }
 
   fun focusSummaryAction(state: MinutesDetailState, force: Boolean = false) {
+    if (state.focusActionId.isBlank() || state.focusActionRequestId <= 0L) return
     (pageFor(MinutesDetailTab.SUMMARY) as MinutesSummaryPage).focusAction(
       state.focusActionId,
       state.focusActionRequestId,
@@ -96,7 +196,11 @@ internal class MinutesDetailTabBar(
   private val divider = View(context)
 
   init {
-    setBackgroundColor(MinutesPalette.surface)
+    val labelSize = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP,
+      14f, resources.displayMetrics)
+    minimumHeight = maxOf(context.dp(MinutesDetailLayoutContract.TAB_BAR_HEIGHT_DP),
+      MinutesDetailLayoutContract.minimumTextLineHeightPx(labelSize) + context.dp(4))
+    minutesBackgroundColor { MinutesPalette.surface }
     tabs.orientation = LinearLayout.HORIZONTAL
     tabs.gravity = Gravity.START or Gravity.CENTER_VERTICAL
     addView(
@@ -112,7 +216,7 @@ internal class MinutesDetailTabBar(
       tabViews[tab] = view
       tabs.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
-    divider.setBackgroundColor(MinutesPalette.divider)
+    divider.minutesBackgroundColor { MinutesPalette.divider }
     addView(
       divider,
       LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1, Gravity.BOTTOM).apply {
@@ -134,21 +238,21 @@ internal class MinutesDetailTabBar(
   }
 
   private class TabView(context: Context, label: String) : FrameLayout(context) {
-    private val text = context.textView(label, 14, MinutesPalette.secondary).apply {
+    private val text = context.textView(label, 14, { MinutesPalette.secondary }).apply {
       gravity = Gravity.CENTER
-      typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+      minutesTypeface(Typeface.NORMAL)
       // Speaker counts are appended asynchronously. Keep the tab single-line
       // while its normal/bold measurement is being updated to avoid a one-frame
       // wrap when the selected state changes.
       setSingleLine(true)
       ellipsize = TextUtils.TruncateAt.END
-      // [DEVICE] Matches Feishu's theme-resolved glyph advance on the same 420 dpi device.
+      // [DEVICE] Matches the verified theme-resolved glyph advance on the 420 dpi target.
       textScaleX = 1.025f
     }
     // [SOURCE] ud_tab_item_layout.xml keeps an INVISIBLE bold copy so selection never changes tab width.
-    private val boldMeasureText = context.textView(label, 14, MinutesPalette.secondary, Typeface.BOLD).apply {
+    private val boldMeasureText = context.textView(label, 14, { MinutesPalette.secondary }, Typeface.BOLD).apply {
       gravity = Gravity.CENTER
-      typeface = Typeface.create("sans-serif", Typeface.BOLD)
+      minutesTypeface(Typeface.BOLD)
       setSingleLine(true)
       ellipsize = TextUtils.TruncateAt.END
       textScaleX = 1.025f
@@ -156,7 +260,7 @@ internal class MinutesDetailTabBar(
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     private val indicator = View(context).apply {
-      backgroundShape(MinutesPalette.primary, radiusDp = 1)
+      backgroundShape({ MinutesPalette.primary }, radiusDp = { 1 })
       // The first selection pass may be a no-op for unselected tabs; keep their
       // indicators hidden from the initial frame.
       visibility = View.INVISIBLE
@@ -212,13 +316,17 @@ internal class MinutesDetailTabBar(
       if (isSelected == selected) return
       isSelected = selected
       text.isSelected = selected
-      text.setTextColor(if (selected) MinutesPalette.primary else MinutesPalette.secondary)
-      text.typeface = Typeface.create("sans-serif", if (selected) Typeface.BOLD else Typeface.NORMAL)
+      text.minutesTextColor { if (selected) MinutesPalette.primary else MinutesPalette.secondary }
+      text.minutesTypeface(if (selected) Typeface.BOLD else Typeface.NORMAL)
       indicator.visibility = if (selected) View.VISIBLE else View.INVISIBLE
     }
   }
 }
 
-internal fun ViewPager2.retainAllMinutesDetailPages() {
-  offscreenPageLimit = MinutesDetailLayoutContract.PAGE_COUNT
+internal fun ViewPager2.retainNearbyMinutesDetailPages() {
+  // Page objects themselves are stable in the adapter, so a detached sibling
+  // retains its editor/list state. Keeping one neighbor attached avoids a
+  // first-swipe gap without making list -> detail navigation synchronously
+  // measure five full page trees.
+  offscreenPageLimit = 1
 }

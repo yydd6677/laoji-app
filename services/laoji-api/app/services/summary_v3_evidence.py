@@ -6,11 +6,11 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import os
 import re
 from typing import Any, Iterable
 
-from app.services.llm_provider import embed_texts
-from app.services.summary_v3_store import source_fingerprint
+from app.services.llm_provider import LlmProviderError, embed_texts, embed_texts_cached
 
 
 INPUT_TOKEN_BUDGET = 10_240
@@ -19,21 +19,99 @@ NOTE_MAX_BUDGET = 1_536
 ATTACHMENT_MAX_BUDGET = 1_536
 MMR_LAMBDA = 0.7
 MMR_ADDITIONAL_MIN_SCORE = 0.45
-PACKAGE_METADATA_RESERVE = 256
-FORCED_SIGNAL_BUDGET_RATIO = 0.55
+# The outer package repeats up to 64 compact source aliases in
+# ``priority_source_ids`` and also carries fingerprints plus coverage fields.
+# Reserving only 256 tokens let source selection consume nearly the whole
+# budget and made the final, otherwise valid JSON package fail closed.  This
+# remains inside the fixed 10,240-token model input and still leaves at least
+# the required 75% (7,680 tokens) available to transcript evidence.
+PACKAGE_METADATA_RESERVE = 1_024
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9._:-]{24,}")
 _FORCED_SIGNAL = re.compile(
     r"(?:不是|并非|不要|无需|取消|改为|纠正|更正|确认|负责人|由.{0,12}(?:负责|跟进)|"
     r"(?:今天|明天|后天|本周|下周|本月|下月|季度|年底|月底|周[一二三四五六日天])|"
-    r"\d{1,4}(?:年|月|日|号|点|时|分|%|％|万|亿)|"
+    r"\d{1,4}\s*(?:年|月|日|号|点|时|分|%|％|万|亿)|"
     r"首先|其次|最后|另外|另一方面|关于|接下来|回到|换个话题)",
     re.IGNORECASE,
 )
+_FORCED_CRITICAL_SIGNAL = re.compile(
+    r"(?:不是|并非|不要|无需|取消|改为|纠正|更正|确认|负责人|"
+    r"由.{0,12}(?:负责|跟进)|今天|明天|后天|本周|下周|本月|下月|季度|年底|月底|"
+    r"周[一二三四五六日天]|"
+    r"(?:截止|日期|时间|上午|下午|晚上|凌晨|安排|定于|预约|开会|会议|提交|完成|交付|到期|之前|之后)"
+    r".{0,20}\d{1,4}\s*(?:年|月|日|号|点|时|分)|"
+    r"\d{1,4}\s*(?:年|月|日|号|点|时|分).{0,20}"
+    r"(?:截止|日期|时间|上午|下午|晚上|安排|定于|开会|会议|提交|完成|交付|到期))",
+    re.IGNORECASE,
+)
+_FORCED_CONNECTOR_SIGNAL = re.compile(
+    r"(?:首先|其次|最后|另外|另一方面|关于|接下来|回到|换个话题)",
+    re.IGNORECASE,
+)
+
+
+def source_fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
 _NO_NEW_INFORMATION_SIGNAL = re.compile(
     r"(?:没有|无|未|尚未)[^。！？；]{0,18}(?:新增|形成|产生|指定)?[^。！？；]{0,8}"
     r"(?:决策|决定|行动项|负责人|截止(?:日期|时间))",
 )
+
+# Subtitle/ASR emitters commonly split one utterance into many short rows.
+# Feeding those rows as independent model items spends the context window on
+# repeated ids/timestamps and removes the local syntax needed to understand a
+# topic, correction, or commitment.  Long meetings use deterministic packing
+# below; short meetings retain their original line-level source identity.
+_TRANSCRIPT_PACK_THRESHOLD = 32
+_TRANSCRIPT_PACK_MAX_CHARS = 360
+_TRANSCRIPT_PACK_MAX_DURATION_MS = 30_000
+_MODEL_PRIORITY_SOURCE_LIMIT = 64
+
+
+def _model_priority_source_ids(sources: Iterable["EvidenceSource"]) -> list[str]:
+    """Expose attention hints without deciding whether a source is a fact.
+
+    Dates, corrections and responsibility expressions are already used by the
+    long-meeting selector.  Surfacing the retained IDs helps the single model
+    pass scan past repetitive background, while the model still owns the
+    semantic fact/action decision and the server still verifies every field.
+    """
+    candidates = [
+        source.model_source_id or source.source_id
+        for source in sources
+        if _FORCED_SIGNAL.search(source.text)
+        and not _NO_NEW_INFORMATION_SIGNAL.search(source.text)
+    ]
+    if len(candidates) <= _MODEL_PRIORITY_SOURCE_LIMIT:
+        return candidates
+    half = _MODEL_PRIORITY_SOURCE_LIMIT // 2
+    return [*candidates[:half], *candidates[-half:]]
+
+
+def _model_ordered_sources(sources: Iterable["EvidenceSource"]) -> list["EvidenceSource"]:
+    values = list(sources)
+    priority_ids = set(_model_priority_source_ids(values))
+    if not priority_ids:
+        return values
+    return [
+        *[
+            source for source in values
+            if (source.model_source_id or source.source_id) in priority_ids
+        ],
+        *[
+            source for source in values
+            if (source.model_source_id or source.source_id) not in priority_ids
+        ],
+    ]
 
 
 class SummaryEvidenceIncomplete(RuntimeError):
@@ -89,12 +167,14 @@ class EvidencePackage:
     estimated_tokens: int
 
     def model_payload(self) -> dict[str, Any]:
+        ordered_sources = _model_ordered_sources(self.sources)
         return {
             "schema_version": 3,
             "source_fingerprint": self.source_fingerprint,
             "transcript_revision": self.transcript_revision,
             "coverage": self.coverage,
-            "sources": [source.model_payload() for source in self.sources],
+            "priority_source_ids": _model_priority_source_ids(self.sources),
+            "sources": [source.model_payload() for source in ordered_sources],
         }
 
     def source_map(self) -> dict[str, EvidenceSource]:
@@ -160,17 +240,78 @@ def _split_text(value: str, *, max_chars: int = 800) -> list[str]:
 
 
 def _transcript_sources(lines: list[dict[str, Any]]) -> list[EvidenceSource]:
-    values: list[EvidenceSource] = []
+    """Normalize transcript rows into stable, citation-safe source chunks.
+
+    A long transcript is packed only along its original order and time range.
+    A packed source is still immutable and its quote is the exact normalized
+    concatenation sent to the model; the source timestamp spans all rows in the
+    chunk so UI citation jumps remain deterministic.  Keeping short meetings
+    line-level avoids changing existing source contracts unnecessarily.
+    """
+    normalized: list[dict[str, Any]] = []
     for ordinal, line in enumerate(lines):
         text = str(line.get("text") or "").strip()
         if not text:
             continue
-        raw_id = line.get("id") or f"line-{ordinal}"
+        normalized.append({
+            "ordinal": ordinal,
+            "raw_id": str(line.get("id") or f"line-{ordinal}"),
+            "text": text,
+            "start_ms": _milliseconds(line.get("start_ms"), line.get("start")),
+            "end_ms": _milliseconds(line.get("end_ms"), line.get("end")),
+            "speaker": str(line.get("speaker") or line.get("speaker_label") or "").strip() or None,
+        })
+
+    if len(normalized) <= _TRANSCRIPT_PACK_THRESHOLD:
+        chunks = [[item] for item in normalized]
+    else:
+        chunks: list[list[dict[str, Any]]] = []
+        current: list[dict[str, Any]] = []
+        current_chars = 0
+        for item in normalized:
+            next_chars = current_chars + (1 if current else 0) + len(item["text"])
+            current_start = current[0]["start_ms"] if current else None
+            current_end = item["end_ms"]
+            duration = (
+                current_end - current_start
+                if current_start is not None and current_end is not None
+                else 0
+            )
+            speaker_changed = bool(
+                current
+                and current[-1]["speaker"]
+                and item["speaker"]
+                and current[-1]["speaker"] != item["speaker"]
+            )
+            if current and (
+                speaker_changed
+                or next_chars > _TRANSCRIPT_PACK_MAX_CHARS
+                or duration > _TRANSCRIPT_PACK_MAX_DURATION_MS
+            ):
+                chunks.append(current)
+                current = []
+                current_chars = 0
+            current.append(item)
+            current_chars += (1 if len(current) > 1 else 0) + len(item["text"])
+        if current:
+            chunks.append(current)
+
+    values: list[EvidenceSource] = []
+    for chunk_ordinal, chunk in enumerate(chunks):
+        first = chunk[0]
+        last = chunk[-1]
+        raw_id = first["raw_id"] if len(chunk) == 1 else f"{first['raw_id']}--{last['raw_id']}"
         source_id = f"transcript:{_safe_part(raw_id)}"
-        start_ms = _milliseconds(line.get("start_ms"), line.get("start"))
-        end_ms = _milliseconds(line.get("end_ms"), line.get("end"))
+        start_ms = first["start_ms"]
+        end_ms = last["end_ms"]
         if start_ms is not None and end_ms is not None and end_ms < start_ms:
             end_ms = start_ms
+        speakers = {item["speaker"] for item in chunk}
+        # Do not attribute a packed chunk to a named speaker when any row in
+        # it is unknown; that would turn partial diarization into a false
+        # speaker claim in every citation using the chunk.
+        speaker = next(iter(speakers)) if len(speakers) == 1 and None not in speakers else None
+        text = " ".join(item["text"] for item in chunk)
         values.append(
             EvidenceSource(
                 source_id=source_id,
@@ -179,12 +320,27 @@ def _transcript_sources(lines: list[dict[str, Any]]) -> list[EvidenceSource]:
                 content_hash=_sha256(text),
                 start_ms=start_ms,
                 end_ms=end_ms,
-                ordinal=ordinal,
-                speaker=str(line.get("speaker") or line.get("speaker_label") or "").strip() or None,
-                model_source_id=f"transcript:t{ordinal:x}",
+                ordinal=chunk_ordinal,
+                speaker=speaker,
+                parent_id=(first["raw_id"] if len(chunk) > 1 else None),
+                model_source_id=f"transcript:t{chunk_ordinal:x}",
             )
         )
     return values
+
+
+def normalize_transcript_evidence_sources(
+    lines: list[dict[str, Any]],
+) -> list[EvidenceSource]:
+    """Public adapter for immutable source-stream transcript rows.
+
+    Both the legacy Summary V3 request and the vNext chapter worker must apply
+    the same deterministic subtitle packing. Keeping this boundary public
+    prevents the source-stream path from treating every ASR fragment as an
+    isolated sentence and then rejecting otherwise valid cross-fragment
+    verbatim citations.
+    """
+    return _transcript_sources(lines)
 
 
 def _milliseconds(milliseconds: object, seconds: object) -> int | None:
@@ -288,15 +444,45 @@ def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
 
 def _embed_all(sources: list[EvidenceSource]) -> list[tuple[float, ...]]:
     vectors: list[tuple[float, ...]] = []
-    for offset in range(0, len(sources), 64):
-        batch = sources[offset : offset + 64]
-        vectors.extend(
-            embed_texts(
-                [source.text for source in batch],
-                priority="background",
-                operation="summary.v3.evidence.embedding",
+    try:
+        configured_batch_size = int(os.getenv("SUMMARY_V3_EMBED_BATCH_SIZE", "8"))
+    except (TypeError, ValueError):
+        configured_batch_size = 8
+    batch_size = max(4, min(64, configured_batch_size))
+    try:
+        configured_num_ctx = int(os.getenv("SUMMARY_V3_EMBED_NUM_CTX", "2048"))
+    except (TypeError, ValueError):
+        configured_num_ctx = 2048
+    try:
+        configured_num_gpu = int(os.getenv("SUMMARY_V3_EMBED_NUM_GPU", "0"))
+    except (TypeError, ValueError):
+        configured_num_gpu = 0
+    # Evidence chunks are bounded to 360 characters.  A dedicated 2k CPU
+    # embedding runner keeps the 9B generator resident on a memory-constrained
+    # GPU; using the previous 8k GPU embedding runner evicted and reloaded the
+    # generator before every long summary.  Both knobs remain deployment
+    # configurable for a future host with more GPU headroom.
+    embedding_num_ctx = max(2_048, min(8_192, configured_num_ctx))
+    embedding_num_gpu = max(0, min(999, configured_num_gpu))
+    for offset in range(0, len(sources), batch_size):
+        batch = sources[offset : offset + batch_size]
+        try:
+            vectors.extend(
+                embed_texts_cached(
+                    [source.text for source in batch],
+                    priority="background",
+                    operation="summary.v3.evidence.embedding",
+                    timeout_seconds=45,
+                    num_ctx=embedding_num_ctx,
+                    num_gpu=embedding_num_gpu,
+                    embedder=embed_texts,
+                )
             )
-        )
+        except LlmProviderError as error:
+            # Keep provider outages inside the stable evidence contract. The
+            # worker can then retry or expose SUMMARY_EVIDENCE_INCOMPLETE
+            # without leaking requests/urllib exceptions to the API surface.
+            raise SummaryEvidenceIncomplete("embedding_unavailable") from error
     if len(vectors) != len(sources):
         raise SummaryEvidenceIncomplete("embedding_count_mismatch")
     return vectors
@@ -367,33 +553,33 @@ def _fit_forced_signals(
     sources: list[EvidenceSource],
     budget: int,
 ) -> set[int]:
-    """Keep forced evidence across the full timeline without exhausting the package.
+    """Keep critical signals, then fill the bounded remainder deterministically.
 
-    A short ASR fragment can contain a date or responsibility marker without being
-    a complete fact. Treating every such fragment as mandatory made fragmentation,
-    rather than meeting content, decide whether a summary could be generated.
+    The signal regex intentionally includes weak numeric/connective hints for
+    coverage telemetry, but a long transcript can contain hundreds of routine
+    numbers. Corrections, negations, responsibility claims and explicit
+    temporal expressions are mandatory; weaker hints are admitted in source
+    order only while budget remains. If the critical layer itself cannot fit,
+    the package fails closed rather than emitting a partial summary.
     """
     if not sources:
         return set()
     endpoints = {0, len(sources) - 1}
     selected = endpoints.intersection(range(len(sources)))
-    signal_budget = max(
-        sum(sources[index].token_cost for index in selected),
-        int(budget * FORCED_SIGNAL_BUDGET_RATIO),
+    critical = {
+        index for index in candidates if _FORCED_CRITICAL_SIGNAL.search(sources[index].text)
+    }
+    selected.update(critical)
+    if sum(sources[index].token_cost for index in selected) > budget:
+        raise SummaryEvidenceIncomplete("forced_evidence_exceeds_budget")
+    remainder = sorted(
+        candidates - selected,
+        key=lambda index: (0 if _FORCED_CONNECTOR_SIGNAL.search(sources[index].text) else 1, index),
     )
-    remaining = set(candidates) - selected
-    while remaining:
-        candidate = max(
-            remaining,
-            key=lambda index: (
-                min((abs(index - chosen) for chosen in selected), default=len(sources)),
-                -index,
-            ),
-        )
-        cost = sum(sources[index].token_cost for index in selected)
-        if cost + sources[candidate].token_cost <= signal_budget:
-            selected.add(candidate)
-        remaining.remove(candidate)
+    for index in remainder:
+        candidate_cost = sum(sources[item].token_cost for item in selected) + sources[index].token_cost
+        if candidate_cost <= budget:
+            selected.add(index)
     return selected
 
 
@@ -526,18 +712,25 @@ def _select_auxiliary(
     return selected
 
 
-def build_evidence_package(
-    transcript_lines: list[dict[str, Any]],
-    manual_note: dict[str, Any] | None,
-    attachments: list[dict[str, Any]] | None,
+def build_evidence_package_from_sources(
+    sources: list[EvidenceSource],
     *,
+    source_fingerprint_value: str,
+    transcript_revision: str,
     input_token_budget: int = INPUT_TOKEN_BUDGET,
 ) -> EvidencePackage:
-    sources, fingerprint, transcript_revision = normalize_sources(
-        transcript_lines,
-        manual_note,
-        attachments,
-    )
+    """Build a bounded package from already normalized immutable sources."""
+    if not sources:
+        raise SummaryEvidenceIncomplete("source_empty")
+    fingerprint = source_fingerprint_value
+    if not fingerprint.startswith("sha256:") or len(fingerprint) != 71:
+        raise SummaryEvidenceIncomplete("source_fingerprint_invalid")
+    if not transcript_revision.startswith("sha256:") or len(transcript_revision) != 71:
+        raise SummaryEvidenceIncomplete("transcript_revision_invalid")
+    if len({source.source_id for source in sources}) != len(sources):
+        raise SummaryEvidenceIncomplete("source_id_duplicate")
+    if any(source.ordinal != index for index, source in enumerate(sources)):
+        raise SummaryEvidenceIncomplete("source_ordinal_invalid")
     source_token_budget = max(1, input_token_budget - PACKAGE_METADATA_RESERVE)
     total_cost = sum(source.token_cost for source in sources)
     transcript_indexes = [index for index, source in enumerate(sources) if source.source_type == "transcript"]
@@ -618,12 +811,14 @@ def build_evidence_package(
         "input_token_budget": input_token_budget,
         "estimated_input_tokens": 0,
     }
+    ordered_selected = _model_ordered_sources(selected)
     provisional_payload = {
         "schema_version": 3,
         "source_fingerprint": fingerprint,
         "transcript_revision": transcript_revision,
         "coverage": coverage,
-        "sources": [source.model_payload() for source in selected],
+        "priority_source_ids": _model_priority_source_ids(selected),
+        "sources": [source.model_payload() for source in ordered_selected],
     }
     estimated_tokens = estimate_tokens(
         json.dumps(provisional_payload, ensure_ascii=False, separators=(",", ":"))
@@ -637,6 +832,26 @@ def build_evidence_package(
         transcript_revision=transcript_revision,
         coverage=coverage,
         estimated_tokens=estimated_tokens,
+    )
+
+
+def build_evidence_package(
+    transcript_lines: list[dict[str, Any]],
+    manual_note: dict[str, Any] | None,
+    attachments: list[dict[str, Any]] | None,
+    *,
+    input_token_budget: int = INPUT_TOKEN_BUDGET,
+) -> EvidencePackage:
+    sources, fingerprint, transcript_revision = normalize_sources(
+        transcript_lines,
+        manual_note,
+        attachments,
+    )
+    return build_evidence_package_from_sources(
+        sources,
+        source_fingerprint_value=fingerprint,
+        transcript_revision=transcript_revision,
+        input_token_budget=input_token_budget,
     )
 
 

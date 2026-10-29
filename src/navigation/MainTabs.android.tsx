@@ -62,6 +62,7 @@ export function MainTabsNavigator({ navigation, route }: Props) {
         importantForAccessibility={state.selectedTab === 'Schedule' ? 'auto' : 'no-hide-descendants'}
       >
         <ScheduleScreen
+          active={state.selectedTab === 'Schedule'}
           navigation={navigation}
           onTabPress={handleTabPress}
           bottomBarSelectionCommand={state.bottomBarSelectionCommand}

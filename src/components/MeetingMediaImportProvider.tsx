@@ -7,26 +7,37 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { AppState } from 'react-native';
 import {
   acknowledgeIngestedMeetingMedia,
+  acknowledgeHardwareRecording,
   acknowledgeMeetingMediaImportIntent,
   addMeetingMediaImportIntentListener,
+  addHardwareRecordingListener,
+  listPendingHardwareRecordings,
+  hasNativeHardwareSupport,
+  discardIngestedMeetingMedia,
   getPendingMeetingMediaImportIntent,
   hasNativeMeetingMediaImport,
   ingestMeetingMedia,
   inspectMeetingMediaSource,
   pickMeetingMedia,
   recoverPendingMeetingMediaImports,
+  stageMeetingMediaImport,
   type IngestedMeetingMedia,
   type MeetingMediaImportOrigin,
+  type PendingHardwareRecording,
   type PendingMeetingMediaImportIntent,
 } from 'laoji-native-platform';
 import { secureClientIdFactory, type ScopeKey } from '../domain/meeting';
 import { recoverPreparedMeetingRecordingMerge } from '../application/meeting';
-import { getFeatureFlags } from '../config/featureFlags';
+import { sqliteMeetingNoteRepository } from '../data/repositories/sqliteMeetingNoteRepository';
+import { isLocalDataErasing, localDataEraseRevision } from '../services/localDataEraseState';
+import { diagnosticAudit } from '../services/diagnostics';
+import { recoverMeetingMediaImportBatch } from '../services/meetingMediaImportRecovery';
+import { planHardwareRecordingImport } from '../services/hardwareRecordingImport';
 import { loadDeviceServiceCapabilities } from '../services/deviceApi';
 import { navigationRef } from '../navigation/notificationNavigation';
-import { useAuth } from '../store/AuthStore';
 import { useEvents } from '../store/EventsStore';
 import { useMeetings } from '../store/MeetingsStore';
 import {
@@ -51,7 +62,8 @@ import { useAppDialog } from './AppDialog';
 import { MeetingImportSheet, type MeetingImportDraft } from './MeetingImportSheet';
 
 interface MeetingMediaImportContextValue {
-  busy: boolean;
+  blocked: boolean;
+  blockedLabel: string | null;
   selectMeetingMedia: () => Promise<void>;
 }
 
@@ -75,6 +87,8 @@ type ImportSource = {
 
 type ImportRequest = ImportSource & {
   draft: MeetingMediaImportDraft;
+  presentNavigation?: boolean;
+  background?: boolean;
 };
 
 type PreparedImportRequest = Omit<ImportRequest, 'meetingId' | 'assetId'> & {
@@ -88,6 +102,13 @@ type ImportConfirmation = {
   initialRecordedAtMs: number;
 };
 
+// Every confirmed import is journaled and receives a visible meeting shell
+// immediately.  Only the expensive copy/extract step is bounded: allowing an
+// arbitrary number of MediaCodec jobs to run at once can exhaust vendor codec
+// instances or race disk reservations, while rejecting the third selection
+// made perfectly recoverable work look unavailable to the user.
+const MAX_ACTIVE_MEDIA_PREPARATIONS = 3;
+
 function defaultRecordedAtMs(source: Pick<ImportSource, 'lastModifiedMs' | 'receivedAtMs'>): number {
   const nowMs = Date.now();
   const candidate = source.lastModifiedMs ?? source.receivedAtMs;
@@ -99,8 +120,23 @@ function navigateToMeeting(meetingId: string): void {
   navigationRef.navigate('Transcription', { meetingId });
 }
 
+function saveImportDraftBestEffort(
+  meetingId: string,
+  draft: MeetingMediaImportDraft,
+  checkpoint: 'initial' | 'shell',
+): void {
+  void saveMeetingMediaImportDraft(meetingId, draft).catch(reason => {
+    const code = reason && typeof reason === 'object'
+      ? (reason as { code?: unknown }).code
+      : null;
+    console.warn('[laoji-audit] meeting_media_import_draft_write_failed', JSON.stringify({
+      checkpoint,
+      code: typeof code === 'string' && code.trim() ? code.trim() : 'unknown',
+    }));
+  });
+}
+
 export function MeetingMediaImportProvider({ children }: { children: React.ReactNode }) {
-  const { initializing, mode, session } = useAuth();
   const { searchableEvents } = useEvents();
   const {
     createMeeting,
@@ -109,31 +145,43 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
     updateMeetingStatus,
   } = useMeetings();
   const { showDialog } = useAppDialog();
-  const [busy, setBusy] = useState(false);
   const [confirmation, setConfirmation] = useState<ImportConfirmation | null>(null);
-  const busyRef = useRef(false);
-  const mountedRef = useRef(true);
+  const activePreparationCountRef = useRef(0);
+  const preparationWaitersRef = useRef<Array<() => void>>([]);
   const promptActiveRef = useRef(false);
   const recoveryRunningRef = useRef(false);
   const recoveryGenerationRef = useRef(0);
   const activeIntentTokenRef = useRef<string | null>(null);
   const handledIntentTokensRef = useRef(new Set<string>());
-  const runImportRef = useRef<(source: ImportRequest) => Promise<void>>(async () => {});
+  const meetingsRef = useRef(meetings);
+  const runImportRef = useRef<(source: ImportRequest) => Promise<boolean>>(async () => false);
   const handleIntentRef = useRef<(intent: PendingMeetingMediaImportIntent) => void>(() => {});
   const drainIntentInboxRef = useRef<() => void>(() => {});
-  const scopeKey = useMemo<ScopeKey | null>(() => {
-    if (mode === 'guest') return 'guest';
-    if (mode === 'authenticated' && session) return `user:${session.user.id}`;
-    return null;
-  }, [mode, session]);
+  const scopeKey: ScopeKey = 'guest';
+  const activeImportsRef = useRef(new Set<string>());
 
-  useEffect(() => () => {
-    mountedRef.current = false;
+  useEffect(() => {
+    meetingsRef.current = meetings;
+  }, [meetings]);
+
+  const acquirePreparationSlot = useCallback(async () => {
+    if (activePreparationCountRef.current < MAX_ACTIVE_MEDIA_PREPARATIONS) {
+      activePreparationCountRef.current += 1;
+      return;
+    }
+    await new Promise<void>(resolve => {
+      preparationWaitersRef.current.push(resolve);
+    });
   }, []);
 
-  const setImportBusy = useCallback((value: boolean) => {
-    busyRef.current = value;
-    if (mountedRef.current) setBusy(value);
+  const releasePreparationSlot = useCallback(() => {
+    const next = preparationWaitersRef.current.shift();
+    if (next) {
+      // Transfer the occupied slot directly to the oldest durable import.
+      next();
+      return;
+    }
+    activePreparationCountRef.current = Math.max(0, activePreparationCountRef.current - 1);
   }, []);
 
   const releasePrompt = useCallback(() => {
@@ -166,43 +214,61 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       calendarContext: draft.calendarContext,
       targetMeetingId: draft.targetMeetingId,
     });
+    // Release the private handoff copy only after canonical persistence. A
+    // failed cleanup remains internal retry work, never a manual user inbox.
+    const hardwareAcknowledged = draft.hardwareRecordingId
+      ? await acknowledgeHardwareRecording(draft.hardwareRecordingId).catch(() => false)
+      : true;
     const acknowledged = await acknowledgeIngestedMeetingMedia(media.meetingId, media.assetId);
-    if (acknowledged) await deleteMeetingMediaImportDraft(media.meetingId);
+    if (acknowledged && hardwareAcknowledged) await deleteMeetingMediaImportDraft(media.meetingId);
     return meeting;
   }, [importMeetingMedia]);
 
   const runImport = useCallback(async (source: ImportRequest) => {
-    if (busyRef.current) {
-      return;
-    }
     const request: PreparedImportRequest = {
       ...source,
       meetingId: source.meetingId ?? secureClientIdFactory.create(),
       assetId: source.assetId ?? secureClientIdFactory.create(),
     };
-    promptActiveRef.current = false;
-    setImportBusy(true);
+    if (activeImportsRef.current.has(request.meetingId)) return false;
+    activeImportsRef.current.add(request.meetingId);
+    if (!request.background) promptActiveRef.current = false;
     let copied = Boolean(source.readyMedia);
+    let staged = Boolean(source.readyMedia);
     let ingestedMedia = source.readyMedia ?? null;
     let navigatedMeetingId: string | null = request.draft.targetMeetingId ?? null;
+    let navigationPresented = false;
     let placeholderCreated = false;
+    let preparationAcquired = false;
     let activeDraft = request.draft;
+    let importPhase = 'stage_native_media';
     try {
+      // The native ingest journal and canonical meeting database are the
+      // recovery owners. This small presentation draft preserves title/target
+      // choices, but an AsyncStorage failure must never reject a valid local
+      // recording or make USB/ADB appear required for import.
+      saveImportDraftBestEffort(request.meetingId, activeDraft, 'initial');
+      if (!source.readyMedia) {
+        await stageMeetingMediaImport({
+          sourceUri: request.uri,
+          meetingId: request.meetingId,
+          assetId: request.assetId,
+          origin: request.origin,
+          maximumBytes: LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES,
+        });
+        staged = true;
+      }
       /*
        * A file import is a local-first operation.  Create the lightweight
        * meeting shell and enter its detail page before copying/extracting the
        * media.  The old order made the user wait for the whole ingest + SQLite
        * write + upload kick-off chain while the list upload button spun.
        *
-       * The shell is deliberately only used when the canonical local meeting
-       * store can attach an imported asset.  Legacy fallback builds retain the
-       * previous all-or-nothing path rather than creating a shell that the
-       * compatibility importer cannot reconcile.
+       * The canonical local meeting store attaches the imported asset after
+       * preparation without replacing the first-frame shell.
        */
-      const canOpenImportShell = mode === 'guest'
-        && getFeatureFlags().meetingMediaImportExistingV1
-        && getFeatureFlags().localMeetingDbCanonicalWriteV1;
-      if (!navigatedMeetingId && canOpenImportShell) {
+      if (!navigatedMeetingId) {
+        importPhase = 'create_meeting_shell';
         const placeholder = await createMeeting(activeDraft.title, {
           id: request.meetingId,
           mode: 'offline',
@@ -222,21 +288,33 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         navigatedMeetingId = placeholder.id;
         placeholderCreated = true;
         activeDraft = { ...activeDraft, targetMeetingId: placeholder.id };
+        // Enter the durable shell before any auxiliary storage work. The user
+        // should see accepted work immediately even if draft persistence is
+        // temporarily unavailable.
+        if (request.presentNavigation !== false) navigateToMeeting(placeholder.id);
+        navigationPresented = true;
+        saveImportDraftBestEffort(request.meetingId, activeDraft, 'shell');
         // The shell and native ingest journal intentionally share one stable
         // identity. Recovery can therefore attach the prepared asset to the
         // same record without another mapping lookup or a duplicate shell.
       }
 
-      if (navigatedMeetingId) {
+      if (navigatedMeetingId && !navigationPresented) {
         if (request.intentToken) {
           // Keep the share intent pending until the media is durable; only the
           // visual navigation happens early so a process death remains
           // recoverable.
         }
-        navigateToMeeting(navigatedMeetingId);
+        if (request.presentNavigation !== false) navigateToMeeting(navigatedMeetingId);
+        navigationPresented = true;
       }
 
-      await saveMeetingMediaImportDraft(request.meetingId, activeDraft);
+      // Everything above this point is lightweight and durable.  A fourth or
+      // tenth selection is accepted immediately and can recover after process
+      // death; it merely waits here for bounded codec / file-I/O capacity.
+      await acquirePreparationSlot();
+      preparationAcquired = true;
+      importPhase = 'prepare_native_media';
       const serviceMaximumBytes = source.maximumBytesPromise
         ? await source.maximumBytesPromise
         : source.maximumBytes;
@@ -252,18 +330,32 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       });
       ingestedMedia = media;
       copied = true;
+      importPhase = 'persist_canonical_media';
       const meeting = await persistIngestedMedia(media, activeDraft);
       if (request.intentToken) await finishIntent(request.intentToken);
-      else releasePrompt();
-      if (!navigatedMeetingId) navigateToMeeting(meeting.id);
+      else if (!request.background) releasePrompt();
+      if (!navigatedMeetingId && request.presentNavigation !== false) navigateToMeeting(meeting.id);
+      return true;
     } catch (reason) {
-      promptActiveRef.current = true;
       const code = reason && typeof reason === 'object'
         ? (reason as { code?: unknown }).code
         : null;
+      console.warn('[laoji-audit] meeting_media_import_failed', JSON.stringify({
+        phase: importPhase,
+        code: typeof code === 'string' && code.trim() ? code.trim() : 'unknown',
+      }));
+      // An automatic handoff has no user decision to make. Keep its journal
+      // and source intact; the recovery worker will retry without a modal.
+      if (request.background) return false;
+      promptActiveRef.current = true;
       const closeFailure = () => {
         void (async () => {
-          if (!copied) await deleteMeetingMediaImportDraft(request.meetingId).catch(() => {});
+          if (!copied) {
+            await deleteMeetingMediaImportDraft(request.meetingId).catch(() => {});
+            if (staged) {
+              await discardIngestedMeetingMedia(request.meetingId, request.assetId).catch(() => false);
+            }
+          }
           if (request.intentToken) await finishIntent(request.intentToken);
           else releasePrompt();
         })();
@@ -333,22 +425,79 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
           },
         ],
       });
+      return false;
     } finally {
-      setImportBusy(false);
+      activeImportsRef.current.delete(request.meetingId);
+      if (preparationAcquired) releasePreparationSlot();
       drainIntentInboxRef.current();
     }
   }, [
     createMeeting,
     finishIntent,
     meetings,
-    mode,
     persistIngestedMedia,
     releasePrompt,
-    setImportBusy,
+    acquirePreparationSlot,
+    releasePreparationSlot,
     showDialog,
     updateMeetingStatus,
   ]);
   runImportRef.current = runImport;
+
+  // All verified hardware receives share this automatic adoption path. The
+  // private handoff index is a crash-safe queue, not a second user workflow.
+  useEffect(() => {
+    if (!hasNativeHardwareSupport()) return undefined;
+    let active = true;
+    let draining = false;
+    const retries = new Map<string, { count: number; afterMs: number }>();
+    const receive = async (recording: PendingHardwareRecording) => {
+      if (recording.purpose === 'schedule') return;
+      const revision = localDataEraseRevision();
+      if (!active || recoveryRunningRef.current || isLocalDataErasing()
+        || (retries.get(recording.recordingId)?.afterMs ?? 0) > Date.now()) return;
+      try {
+        const plan = await planHardwareRecordingImport(recording, sqliteMeetingNoteRepository);
+        if (!active || recoveryRunningRef.current || isLocalDataErasing()
+          || localDataEraseRevision() !== revision || plan.kind === 'deferred') return;
+        if (plan.kind === 'adopted') {
+          if (!await acknowledgeHardwareRecording(recording.recordingId)) throw new Error('handoff_cleanup');
+          retries.delete(recording.recordingId);
+          return;
+        }
+        const completed = await runImportRef.current({ uri: recording.localUri, fileName: `${plan.title}.wav`,
+          byteSize: recording.byteSize, lastModifiedMs: recording.recordedAtMs, receivedAtMs: recording.recordedAtMs,
+          origin: 'file_import', mimeType: 'audio/wav', meetingId: plan.meetingId, assetId: recording.recordingId,
+          presentNavigation: false, background: true,
+          draft: { scopeKey: 'guest', title: plan.title, recordedAtMs: plan.recordedAtMs,
+            calendarContext: null, targetMeetingId: plan.targetMeetingId, hardwareRecordingId: recording.recordingId },
+        });
+        if (!completed) throw new Error('handoff_deferred');
+        retries.delete(recording.recordingId);
+      } catch (reason) {
+        const count = Math.min(5, (retries.get(recording.recordingId)?.count ?? 0) + 1);
+        retries.set(recording.recordingId, { count, afterMs: Date.now() + Math.min(300_000, 30_000 * 2 ** (count - 1)) });
+        const code = (reason as { code?: unknown } | null)?.code;
+        diagnosticAudit('hardware_recording_import_deferred', { code: typeof code === 'string' ? code : 'unknown' });
+      }
+    };
+    const reconcile = async () => {
+      if (recoveryRunningRef.current || draining || !active || isLocalDataErasing()) return;
+      draining = true;
+      try {
+        const items = await listPendingHardwareRecordings();
+        const ids = new Set(items.map(item => item.recordingId));
+        for (const id of retries.keys()) if (!ids.has(id)) retries.delete(id);
+        for (const item of items) await receive(item);
+      } catch {
+        diagnosticAudit('hardware_recording_import_deferred', { code: 'queue_unavailable' });
+      } finally { draining = false; }
+    };
+    const listener = addHardwareRecordingListener(() => { void reconcile(); });
+    const timer = setInterval(() => { void reconcile(); }, 3_000);
+    void reconcile();
+    return () => { active = false; listener.remove(); clearInterval(timer); };
+  }, []);
 
   const presentImportConfirmation = useCallback((source: ImportSource) => {
     promptActiveRef.current = true;
@@ -371,7 +520,6 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
   }, [confirmation, finishIntent, releasePrompt]);
 
   const validateImportDraft = useCallback(async (draft: MeetingImportDraft): Promise<string | null> => {
-    if (!scopeKey) return '当前账号状态已变化，请取消后重试。';
     if (draft.targetMeetingId) {
       const target = meetings.find(meeting => meeting.id === draft.targetMeetingId);
       if (!target) return '所选会议已不可用，请重新选择。';
@@ -394,10 +542,9 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
 
   const startConfirmedImport = useCallback((draft: MeetingImportDraft) => {
     const current = confirmation;
-    if (!current || !scopeKey) {
+    if (!current) {
       setConfirmation(null);
-      if (current?.source.intentToken) void finishIntent(current.source.intentToken);
-      else releasePrompt();
+      releasePrompt();
       return;
     }
     const persistentDraft: MeetingMediaImportDraft = {
@@ -422,11 +569,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
 
   const handleIntent = useCallback((intent: PendingMeetingMediaImportIntent) => {
     if (
-      initializing
-      || mode === 'signed_out'
-      || recoveryRunningRef.current
-      || busyRef.current
-      || promptActiveRef.current
+      promptActiveRef.current
       || activeIntentTokenRef.current !== null
     ) return;
     if (handledIntentTokensRef.current.has(intent.token)) return;
@@ -471,53 +614,28 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
       present();
       return;
     }
-    promptActiveRef.current = true;
-    void loadDeviceServiceCapabilities().then(capability => {
-      if (activeIntentTokenRef.current !== intent.token) return;
-      const mediaImport = capability.mediaImport;
-      const supported = mediaImport?.mimeTypes.some(
-        mimeType => mimeType.toLowerCase() === intent.mimeType?.toLowerCase(),
-      );
-      if (supported && mediaImport) {
-        present(Math.min(LOCAL_MEETING_MEDIA_IMPORT_MAX_BYTES, mediaImport.maxBytes));
-        return;
-      }
-      const closeUnsupportedVideo = () => { void finishIntent(intent.token); };
-      showDialog({
-        title: '无法导入',
-        message: '当前服务暂不支持导入这个视频。',
-        tone: 'warning',
-        onDismiss: closeUnsupportedVideo,
-        actions: [{ text: '知道了', role: 'primary', onPress: closeUnsupportedVideo }],
-      });
-    }).catch(() => {
-      if (activeIntentTokenRef.current !== intent.token) return;
-      const closeUnavailableVideo = () => { void finishIntent(intent.token); };
-      showDialog({
-        title: '无法导入',
-        message: '暂时无法确认视频处理能力，请联网后重试。',
-        tone: 'warning',
-        onDismiss: closeUnavailableVideo,
-        actions: [{ text: '知道了', role: 'primary', onPress: closeUnavailableVideo }],
-      });
-    });
-  }, [finishIntent, initializing, mode, presentImportConfirmation, showDialog]);
+    /*
+     * The native intent inbox has already resolved the URI against the
+     * same allow-list used by the importer.  A remote capability probe here
+     * can delay or reject a valid local share before the durable uploader has
+     * a chance to validate the current service session.
+     * Import is local-first, so let the user confirm immediately and let the
+     * durable ingest/upload path report a real server rejection if needed.
+     */
+    present();
+  }, [finishIntent, presentImportConfirmation, showDialog]);
   handleIntentRef.current = handleIntent;
 
   const drainIntentInbox = useCallback(() => {
     if (
-      initializing
-      || mode === 'signed_out'
-      || recoveryRunningRef.current
-      || busyRef.current
-      || promptActiveRef.current
+      promptActiveRef.current
       || activeIntentTokenRef.current !== null
       || !hasNativeMeetingMediaImport()
     ) return;
     void getPendingMeetingMediaImportIntent().then(intent => {
       if (intent) handleIntentRef.current(intent);
     }).catch(() => {});
-  }, [initializing, mode]);
+  }, []);
   drainIntentInboxRef.current = drainIntentInbox;
 
   useEffect(() => {
@@ -530,107 +648,79 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
   }, []);
 
   useEffect(() => {
-    if (initializing || mode === 'signed_out' || !scopeKey || !hasNativeMeetingMediaImport()) return;
+    if (!hasNativeMeetingMediaImport()) return;
     let cancelled = false;
     const generation = recoveryGenerationRef.current + 1;
     recoveryGenerationRef.current = generation;
-    recoveryRunningRef.current = true;
-    void recoverPendingMeetingMediaImports().then(async pending => {
-      if (pending.length > 0 && !cancelled) setImportBusy(true);
-      for (const media of pending) {
-        if (cancelled) return;
-        try {
-          if (media.origin === 'recording_merge') {
-            const recovered = await recoverPreparedMeetingRecordingMerge(scopeKey, media);
-            if (recovered) {
-              await acknowledgeIngestedMeetingMedia(media.meetingId, media.assetId).catch(() => false);
-            }
-            continue;
-          }
-          const savedDraft = await loadMeetingMediaImportDraft(media.meetingId);
-          if (savedDraft && savedDraft.scopeKey !== scopeKey) {
-            promptActiveRef.current = true;
-            const closeScopeMismatch = () => releasePrompt();
-            showDialog({
-              title: '导入尚未完成',
-              message: '这条未完成导入属于其他账号，请切换后继续。',
-              tone: 'warning',
-              onDismiss: closeScopeMismatch,
-              actions: [{ text: '知道了', role: 'primary', onPress: closeScopeMismatch }],
-            });
-            return;
-          }
-          const draft: MeetingMediaImportDraft = savedDraft ?? {
-            scopeKey,
-            title: suggestedMeetingTitleFromFileName(media.fileName),
-            recordedAtMs: defaultRecordedAtMs({
-              lastModifiedMs: media.sourceLastModifiedMs,
-              receivedAtMs: null,
-            }),
-            calendarContext: null,
-            targetMeetingId: null,
-          };
-          await persistIngestedMedia(media, draft);
-        } catch (reason) {
-          const code = reason && typeof reason === 'object'
-            ? (reason as { code?: unknown }).code
-            : null;
-          if (code === 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE' && !cancelled) {
-            const savedDraft = await loadMeetingMediaImportDraft(media.meetingId).catch(() => null);
-            promptActiveRef.current = true;
-            setConfirmation({
-              source: {
-                uri: media.localUri,
-                fileName: media.fileName,
-                byteSize: media.byteSize,
-                lastModifiedMs: media.sourceLastModifiedMs,
-                receivedAtMs: null,
-                origin: media.origin as MeetingMediaImportOrigin,
-                mimeType: media.mimeType,
-                meetingId: media.meetingId,
-                assetId: media.assetId,
-                readyMedia: media,
-              },
-              initialTitle: savedDraft?.title ?? suggestedMeetingTitleFromFileName(media.fileName),
-              initialRecordedAtMs: savedDraft?.recordedAtMs ?? defaultRecordedAtMs({
-                lastModifiedMs: media.sourceLastModifiedMs,
-                receivedAtMs: null,
-              }),
-            });
-            return;
-          }
-          if (!cancelled) {
-            promptActiveRef.current = true;
-            const closeRecoveryFailure = () => releasePrompt();
-            showDialog({
-              title: '导入尚未完成',
-              message: meetingMediaImportErrorMessage(reason),
-              tone: 'warning',
-              onDismiss: closeRecoveryFailure,
-              actions: [{ text: '知道了', role: 'primary', onPress: closeRecoveryFailure }],
-            });
-          }
-          return;
-        }
+    const eraseRevision = localDataEraseRevision();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
+    const active = () => !cancelled && !isLocalDataErasing()
+      && localDataEraseRevision() === eraseRevision;
+    const report = (phase: 'scan' | 'restore', reason: unknown) => {
+      const value = reason as { code?: unknown; name?: unknown } | null;
+      diagnosticAudit('meeting_media_import_recovery_deferred', {
+        phase,
+        code: typeof value?.code === 'string' ? value.code : 'unknown',
+        type: typeof value?.name === 'string' ? value.name : 'unknown',
+      });
+    };
+    const restore = async (media: IngestedMeetingMedia) => {
+      if (media.origin === 'recording_merge') {
+        const recovered = await recoverPreparedMeetingRecordingMerge(scopeKey, media);
+        if (recovered) await acknowledgeIngestedMeetingMedia(media.meetingId, media.assetId);
+        return;
       }
-    }).catch(() => {}).finally(() => {
-      if (recoveryGenerationRef.current !== generation) return;
-      recoveryRunningRef.current = false;
-      setImportBusy(false);
-      drainIntentInboxRef.current();
+      const savedDraft = await loadMeetingMediaImportDraft(media.meetingId);
+      if (savedDraft && savedDraft.scopeKey !== scopeKey) {
+        throw Object.assign(new Error(), { code: 'ERR_MEDIA_IMPORT_SCOPE_MISMATCH' });
+      }
+      const draft: MeetingMediaImportDraft = savedDraft ?? {
+        scopeKey,
+        title: suggestedMeetingTitleFromFileName(media.fileName),
+        recordedAtMs: defaultRecordedAtMs({ lastModifiedMs: media.sourceLastModifiedMs, receivedAtMs: null }),
+        calendarContext: null,
+        targetMeetingId: null,
+      };
+      await persistIngestedMedia(media, draft);
+    };
+    const recover = async () => {
+      if (!active()) return;
+      if (recoveryRunningRef.current || activeImportsRef.current.size > 0 || AppState.currentState !== 'active') {
+        timer = setTimeout(() => { void recover(); }, 15_000);
+        return;
+      }
+      recoveryRunningRef.current = true;
+      try {
+        const complete = await recoverMeetingMediaImportBatch({
+          list: recoverPendingMeetingMediaImports, restore, active, report,
+        });
+        failures = complete ? 0 : Math.min(4, failures + 1);
+      } finally {
+        if (recoveryGenerationRef.current === generation) recoveryRunningRef.current = false;
+        drainIntentInboxRef.current();
+        if (active()) timer = setTimeout(() => { void recover(); }, Math.min(300_000, 30_000 * 2 ** failures));
+      }
+    };
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'active' || recoveryRunningRef.current || !active()) return;
+      if (timer) clearTimeout(timer);
+      void recover();
     });
+    void recover();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
+      subscription.remove();
       if (recoveryGenerationRef.current === generation) {
         recoveryGenerationRef.current += 1;
         recoveryRunningRef.current = false;
-        setImportBusy(false);
       }
     };
-  }, [initializing, mode, persistIngestedMedia, releasePrompt, scopeKey, setImportBusy, showDialog]);
+  }, [persistIngestedMedia, scopeKey]);
 
   const selectMeetingMedia = useCallback(async () => {
-    if (busyRef.current || promptActiveRef.current || recoveryRunningRef.current) return;
+    if (promptActiveRef.current) return;
     if (!hasNativeMeetingMediaImport()) {
       showDialog({
         title: '暂时无法导入',
@@ -688,9 +778,10 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
   }, [presentImportConfirmation, releasePrompt, showDialog]);
 
   const value = useMemo<MeetingMediaImportContextValue>(() => ({
-    busy,
+    blocked: false,
+    blockedLabel: null,
     selectMeetingMedia,
-  }), [busy, selectMeetingMedia]);
+  }), [selectMeetingMedia]);
 
   return (
     <MeetingMediaImportContext.Provider value={value}>
@@ -705,7 +796,7 @@ export function MeetingMediaImportProvider({ children }: { children: React.React
         initialRecordedAtMs={confirmation?.initialRecordedAtMs ?? Date.now()}
         events={searchableEvents}
         meetings={meetings}
-        allowExistingMeeting={getFeatureFlags().meetingMediaImportExistingV1}
+        allowExistingMeeting
         onClose={closeImportConfirmation}
         onValidate={validateImportDraft}
         onImport={startConfirmedImport}

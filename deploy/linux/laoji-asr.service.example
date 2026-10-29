@@ -1,0 +1,24 @@
+[Unit]
+Description=LaoJi Qwen3-ASR service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/laoji-service-platform/compact-production/backend
+EnvironmentFile=%h/.config/laoji/laoji.env
+Environment=PYTHONUNBUFFERED=1
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=HF_HUB_OFFLINE=1
+ExecStart=%h/laoji-service-platform/.venvs/laoji-compact-py312/bin/python %h/laoji-service-platform/runtime/asr/qwen_asr_service/server.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=900
+TimeoutStopSec=60
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

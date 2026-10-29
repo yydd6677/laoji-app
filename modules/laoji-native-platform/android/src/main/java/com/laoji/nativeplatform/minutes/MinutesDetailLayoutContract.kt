@@ -15,6 +15,10 @@ internal object MinutesDetailLayoutContract {
   const val HEADER_TOP_PADDING_DP = 20
   const val HEADER_BOTTOM_PADDING_DP = 16
   const val SUBTITLE_TOP_MARGIN_DP = 6
+  const val PLAYER_TRACK_LANE_HEIGHT_DP = 32
+  // Bundled fonts have at most 1.448em ascent+descent. Use actual text pixels because Android's
+  // nonlinear font scaling does not preserve the ratio between independently scaled sp values.
+  fun minimumTextLineHeightPx(textSizePx: Float): Int = kotlin.math.ceil(textSizePx * 1.5f).toInt()
   const val PAGE_COUNT = 5
 
   data class PreScrollResult(

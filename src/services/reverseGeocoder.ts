@@ -23,7 +23,12 @@ export type ReverseGeocoderFetch = (
   },
 ) => Promise<ReverseGeocoderHttpResponse>;
 
-export type ReverseGeocoderAccessToken = () => Promise<string | null>;
+export type ReverseGeocoderDeviceAuthorization = {
+  token: string;
+  dataEpoch: string;
+};
+
+export type ReverseGeocoderAuthorization = () => Promise<ReverseGeocoderDeviceAuthorization | null>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -163,7 +168,7 @@ export function createHttpReverseGeocoder(
   url: string,
   fetchImpl: ReverseGeocoderFetch = defaultFetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  accessToken: ReverseGeocoderAccessToken | null = null,
+  authorization: ReverseGeocoderAuthorization | null = null,
 ): ReverseGeocoderAdapter {
   const endpoint = endpointUrl(url);
   const requestTimeoutMs = timeoutValue(timeoutMs);
@@ -178,13 +183,16 @@ export function createHttpReverseGeocoder(
         // timing only the first promise would leave the UI waiting forever.
         const request = Promise.resolve()
           .then(async () => {
-            const token = await accessToken?.().catch(() => null);
+            const deviceAuthorization = await authorization?.().catch(() => null);
             return fetchImpl(endpoint, {
               method: 'POST',
               headers: {
                 accept: 'application/json',
                 'content-type': 'application/json',
-                ...(token ? { authorization: `Bearer ${token}` } : {}),
+                ...(deviceAuthorization ? {
+                  authorization: `Bearer ${deviceAuthorization.token}`,
+                  'x-laoji-data-epoch': deviceAuthorization.dataEpoch,
+                } : {}),
               },
               body: JSON.stringify({
                 schema_version: 1,

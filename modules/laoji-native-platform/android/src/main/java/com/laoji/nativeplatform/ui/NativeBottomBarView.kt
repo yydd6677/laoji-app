@@ -25,8 +25,6 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.graphics.PathParser
 import com.laoji.nativeplatform.NativeThemePreference
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
@@ -41,18 +39,21 @@ enum class NativeBottomTab(val wireName: String, val label: String) {
 }
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
-private class NativeBottomTabItemView(
+internal class NativeBottomTabItemView(
   context: Context,
   private val tab: NativeBottomTab,
-  private val palette: NativeUiPalette,
+  private var palette: NativeUiPalette,
   private val onClick: () -> Unit,
 ) : FrameLayout(context) {
-  private val selectedColor = palette.primary
-  private val iconDrawable = NativeBottomTabIconDrawable(tab, palette.textSecondary, selectedColor)
+  private val iconDrawable = NativeBottomTabIconDrawable(tab, palette.textSecondary, palette.primary)
   private val iconContainer = FrameLayout(context).apply {
     clipChildren = false
     clipToPadding = false
+    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+  }
+  private val selectionPill = View(context).apply {
+    alpha = 0f
+    scaleX = 0.72f
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
   private val icon = ImageView(context).apply {
@@ -64,7 +65,6 @@ private class NativeBottomTabItemView(
     text = tab.label
     textSize = NativeBottomBarContract.LABEL_TEXT_SP
     gravity = Gravity.CENTER
-    setTextColor(palette.textSecondary)
     val horizontalPadding = dp(NativeBottomBarContract.LABEL_HORIZONTAL_PADDING_DP)
     setPadding(horizontalPadding, 0, horizontalPadding, 0)
     isSingleLine = true
@@ -97,16 +97,11 @@ private class NativeBottomTabItemView(
     clipChildren = false
     clipToPadding = false
 
-    FeishuEvidenceRuntime.bind(this, "UI-SHELL-BOTTOM-MAIN-001", "tab", "bottom-tab-${tab.wireName}")
-    FeishuEvidenceRuntime.bind(
-      iconContainer,
-      "UI-SHELL-BOTTOM-MAIN-001",
-      "icon-container",
-      "bottom-tab-${tab.wireName}-icon-container",
-    )
-    FeishuEvidenceRuntime.bind(icon, "UI-SHELL-BOTTOM-MAIN-001", "icon", "bottom-tab-${tab.wireName}-icon")
-    FeishuEvidenceRuntime.bind(label, "UI-SHELL-BOTTOM-MAIN-001", "label", "bottom-tab-${tab.wireName}-label")
 
+    iconContainer.addView(
+      selectionPill,
+      LayoutParams(dp(44f), dp(30f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL),
+    )
     iconContainer.addView(
       icon,
       LayoutParams(dp(NativeBottomBarContract.ICON_SIZE_DP), dp(NativeBottomBarContract.ICON_SIZE_DP), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL),
@@ -126,15 +121,41 @@ private class NativeBottomTabItemView(
       },
     )
     setOnClickListener { onClick() }
+    NativeUiTokens.bindTheme(this) { next ->
+      palette = next
+      iconDrawable.setColors(next.textSecondary, next.primary)
+      label.setTextColor(if (isSelected) next.primary else next.textSecondary)
+      label.typeface = LaojiThemeTypography.typeface(context)
+      selectionPill.background = NativeUiTokens.roundedBackground(
+        context, next.primarySoft, when (NativeThemePreference.read(context)) {
+          "vivid" -> 14f
+          "paper" -> 8f
+          "midnight" -> 11f
+          else -> 10f
+        },
+      )
+    }
   }
 
   fun setItemSelected(value: Boolean, animateSelection: Boolean = false) {
+    val changed = isSelected != value
     if (!value) icon.clearAnimation()
     isSelected = value
     icon.isSelected = value
     label.isSelected = value
     iconDrawable.setSelected(value)
-    label.setTextColor(if (value) selectedColor else palette.textSecondary)
+    label.setTextColor(if (value) palette.primary else palette.textSecondary)
+    selectionPill.animate().cancel()
+    if (changed && isLaidOut) {
+      selectionPill.animate()
+        .alpha(if (value) 1f else 0f)
+        .scaleX(if (value) 1f else 0.72f)
+        .setDuration(170L)
+        .start()
+    } else {
+      selectionPill.alpha = if (value) 1f else 0f
+      selectionPill.scaleX = if (value) 1f else 0.72f
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
       stateDescription = if (value) "当前页面" else null
     }
@@ -150,6 +171,7 @@ private class NativeBottomTabItemView(
 
   override fun onDetachedFromWindow() {
     icon.clearAnimation()
+    selectionPill.animate().cancel()
     super.onDetachedFromWindow()
   }
 
@@ -161,8 +183,8 @@ private class NativeBottomTabItemView(
 // Minutes tab silhouette while LaoJi keeps its own Chinese product label.
 private class NativeBottomTabIconDrawable(
   private val tab: NativeBottomTab,
-  private val normalColor: Int,
-  private val selectedColor: Int,
+  private var normalColor: Int,
+  private var selectedColor: Int,
 ) : Drawable() {
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     style = Paint.Style.STROKE
@@ -173,6 +195,12 @@ private class NativeBottomTabIconDrawable(
     "M10.466 8.146l-3.444 7.402a0.831 0.831 0 0 1-1.104 0.403l-3.514-1.639A0.831 0.831 0 0 1 2 13.21l3.443-7.4a2.77 2.77 0 0 1 5.022 2.337zm-2.017 6.743l1.212 3.33a2.489 2.489 0 0 0 3.189 1.489l0.012-0.005a2.478 2.478 0 0 0 1.018-0.695c0.15-0.163 0.277-0.351 0.376-0.562l3.309-7.096a2.216 2.216 0 0 0-4.016-1.873l-0.988 2.119-1.133-3.113-2.98 6.406zm10.599-1.307l0.784-1.681a1.662 1.662 0 1 1 3.011 1.405l-2.492 5.345a1.946 1.946 0 0 1-1.13 1.081l-0.027 0.01a1.939 1.939 0 0 1-2.485-1.159l-0.654-1.797 2.336-5.009 0.657 1.805zM5.544 18.187l-2.986 1.57a0.564 0.564 0 0 1-0.815-0.38l-0.729-3.302a0.565 0.565 0 0 1 0.791-0.635l3.715 1.734a0.566 0.566 0 0 1 0.024 1.013z",
   ))
   private var selected = false
+
+  fun setColors(normal: Int, selected: Int) {
+    normalColor = normal
+    selectedColor = selected
+    invalidateSelf()
+  }
 
   fun setSelected(value: Boolean) {
     if (selected == value) return
@@ -225,7 +253,6 @@ private class NativeBottomTabIconDrawable(
 }
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("UI-SHELL-BOTTOM-MAIN-001")
 class LaojiNativeBottomBarView(
   context: Context,
   appContext: AppContext,
@@ -252,21 +279,20 @@ class LaojiNativeBottomBarView(
 
   init {
     setWillNotDraw(false)
-    if (NativeThemePreference.isVivid(context)) {
-      // The vivid skin turns the flat source bar into a lightly inset panel;
-      // the standard skin keeps the source-shaped edge-to-edge surface.
-      background = NativeUiTokens.roundedBackground(context, palette.surface, 18f, palette.divider)
-    } else {
-      setBackgroundColor(palette.surface)
-    }
     clipChildren = false
     clipToPadding = false
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-    FeishuEvidenceRuntime.bind(this, "UI-SHELL-BOTTOM-MAIN-001", "navigation", "bottom-bar")
-    FeishuEvidenceRuntime.bind(divider, "UI-SHELL-BOTTOM-MAIN-001", "divider", "bottom-bar-divider")
     addView(divider)
     addView(scheduleItem)
     addView(meetingsItem)
+    NativeUiTokens.bindTheme(this) { next ->
+      background = if (NativeThemePreference.isVivid(context)) {
+        NativeUiTokens.roundedBackground(context, next.surface, 18f, next.divider)
+      } else {
+        android.graphics.drawable.ColorDrawable(next.surface)
+      }
+      divider.setBackgroundColor(next.divider)
+    }
     updateSelection(animateTab = null)
     setOnApplyWindowInsetsListener { _, insets ->
       val nextNavigationInset = insets.navigationBarInsetBottom()

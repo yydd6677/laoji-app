@@ -1,14 +1,13 @@
 {
   "platform": "android",
-  "version_name": "1.1.10",
-  "version_code": 118,
-  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.1.10-118.apk",
-  "sha256": "sha256:b5ce1ce8e3f5dc42043d0ed2e4cf90094f43ee887322701328cec4cbc67fc04f",
-  "size_bytes": 82278571,
+  "version_name": "1.3.2",
+  "version_code": 315,
+  "apk_url": "https://laoji.cloud/downloads/android/laoji-1.3.2-315.apk",
+  "sha256": "sha256:86b0b680f4f601299aefcb82edcc458d92770bbff9ee34b3296954fc23289a89",
+  "size_bytes": 46007111,
   "release_notes": [
-    "上传录音转写时持续显示已完成的文字片段，并缩短整体处理时间。",
-    "会议整理和会议问答会参考当前我的笔记，问答引用可跳回原始笔记。",
-    "管理标签入口移至分类查看的标签页，设置文书同步更新。"
+    "改善日程解析遇到网络波动时的恢复，修正超时和信息不完整的提示。",
+    "修复手机录音启动时的错误提示，减少开始录音前的等待。"
   ],
   "minimum_supported_version_code": 106
 }

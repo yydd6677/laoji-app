@@ -1,29 +1,40 @@
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
+ARG CUDA_IMAGE=nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04
+FROM ${CUDA_IMAGE}
 
-WORKDIR /app
+ENV VIRTUAL_ENV=/opt/laoji/venv \
+    PATH=/opt/laoji/venv/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-venv \
+    python3 \
+    python3-venv \
     python3-pip \
     libsndfile1 \
     ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && python -m pip install --upgrade pip
+    && python3 -m venv "$VIRTUAL_ENV" \
+    && python -m pip install --no-cache-dir --upgrade pip
 
-# 离线安装 PyTorch（从本地 wheel 文件，CUDA 12.8）
-COPY docker-wheels/ /wheels/
-RUN python -m pip install --no-cache-dir --find-links=/wheels/ /wheels/torch*.whl /wheels/torchaudio*.whl
+WORKDIR /app
 
-# 安装其他依赖（从本地 wheels 优先）
-COPY requirements-prod.txt ./
-RUN python -m pip install --no-cache-dir -r requirements-prod.txt
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu130
+ARG TORCH_VERSION=2.11.0
+COPY requirements-compact.txt ./
+RUN python -m pip install --no-cache-dir \
+      --index-url "$PYTORCH_INDEX_URL" \
+      "torch==${TORCH_VERSION}" "torchaudio==${TORCH_VERSION}" \
+    && python -m pip install --no-cache-dir -r requirements-compact.txt
 
 COPY . .
 
-EXPOSE 8000
+RUN useradd --create-home --uid 10001 laoji \
+    && chown -R laoji:laoji /app
+USER laoji
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 18020
+
+# This image contains no credentials. Inject the same private environment used
+# by the systemd topology and publish the container only on host loopback.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "18020", "--workers", "1", "--ws-ping-interval", "25", "--ws-ping-timeout", "300"]

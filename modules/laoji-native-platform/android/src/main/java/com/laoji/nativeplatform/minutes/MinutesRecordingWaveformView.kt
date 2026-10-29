@@ -102,6 +102,14 @@ internal class MinutesRecordingWaveformView @JvmOverloads constructor(
   private var frameScheduled = false
   private var lastSignalAtMs = Long.MIN_VALUE
 
+  init {
+    minutesDrawing {
+      paint.color = MinutesPalette.secondary
+      paint.alpha = 128
+      invalidate()
+    }
+  }
+
   private val frameCallback = object : Runnable {
     override fun run() {
       frameScheduled = false

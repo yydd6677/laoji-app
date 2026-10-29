@@ -22,7 +22,6 @@ class ProfileEntryView(
   context: Context,
   private val appContext: AppContext,
 ) : FrameLayout(context) {
-  private val palette = NativeUiTokens.palette(context)
   private val avatarFrame = FrameLayout(context)
   private val placeholder = ImageView(context)
   private val image = ImageView(context)
@@ -34,20 +33,7 @@ class ProfileEntryView(
   init {
     isFocusable = true
     updateAccessibilityLabel("打开设置")
-    background = RippleDrawable(
-      ColorStateList.valueOf(palette.primarySoft),
-      null,
-      GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(palette.surface)
-      },
-    )
-
     avatarFrame.apply {
-      background = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(palette.surfaceOverlay)
-      }
       outlineProvider = ViewOutlineProvider.BACKGROUND
       clipToOutline = true
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -59,7 +45,6 @@ class ProfileEntryView(
 
     placeholder.apply {
       setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_settings_outline)
-      imageTintList = ColorStateList.valueOf(palette.textTertiary)
       scaleType = ImageView.ScaleType.CENTER_INSIDE
       setPadding(dp(7f), dp(7f), dp(7f), dp(7f))
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -78,6 +63,15 @@ class ProfileEntryView(
       image,
       LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
     )
+    NativeUiTokens.bindTheme(this) { palette ->
+      background = RippleDrawable(ColorStateList.valueOf(palette.primarySoft), null,
+        GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(palette.surface) })
+      avatarFrame.background = GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(palette.surfaceOverlay)
+      }
+      placeholder.imageTintList = ColorStateList.valueOf(palette.textTertiary)
+    }
   }
 
   fun setSnapshot(snapshot: Map<String, Any?>) {

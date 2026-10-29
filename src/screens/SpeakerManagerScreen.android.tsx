@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,38 +8,27 @@ import {
 } from 'laoji-native-platform';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { readableErrorMessage } from '../services/errors';
-import { fetchDeviceSpeakerProfiles, fetchSpeakers, type SpeakerProfile } from '../services/speakers';
-import { useAuth } from '../store/AuthStore';
+import { fetchDeviceSpeakerProfiles, type SpeakerProfile } from '../services/speakers';
 import type { RootStackParamList } from '../types';
 import { buildNativeSpeakerManagerSnapshot } from '../native/nativeSpeakerSnapshots';
-import { Colors as C } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'SpeakerManager'> };
 
 // MIN-SPEAKER-001: Android renders the speaker repository through one native list owner.
 export function SpeakerManagerScreen({ navigation }: Props) {
-  const { accessToken, isGuest } = useAuth();
+  const { colors: C } = useTheme();
   const [speakers, setSpeakers] = useState<SpeakerProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const generationRef = useRef(0);
-  const deviceMode = isGuest || !accessToken;
-
-  useLayoutEffect(() => {
-    generationRef.current += 1;
-    setSpeakers([]);
-    setLoading(false);
-    setError('');
-  }, [accessToken, isGuest]);
 
   const load = useCallback(async () => {
     const generation = ++generationRef.current;
     setLoading(true);
     setError('');
     try {
-      const result = deviceMode
-        ? await fetchDeviceSpeakerProfiles()
-        : await fetchSpeakers(accessToken!);
+      const result = await fetchDeviceSpeakerProfiles();
       if (generationRef.current === generation) setSpeakers(result);
     } catch (reason) {
       if (generationRef.current === generation) {
@@ -48,7 +37,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
     } finally {
       if (generationRef.current === generation) setLoading(false);
     }
-  }, [accessToken, deviceMode]);
+  }, []);
 
   useFocusEffect(useCallback(() => {
     void load();
@@ -63,7 +52,7 @@ export function SpeakerManagerScreen({ navigation }: Props) {
     phase: loading ? 'loading' : error ? 'error' : 'ready',
     message: error,
     speakers,
-  }), [accessToken, error, isGuest, loading, speakers]);
+  }), [error, loading, speakers]);
 
   const handleAction = useCallback((action: NativeSpeakerAction) => {
     switch (action.type) {

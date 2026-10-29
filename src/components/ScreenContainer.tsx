@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors as C } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface Props {
   children: React.ReactNode;
@@ -22,9 +22,10 @@ export function ScreenContainer({
   bg,
   edges = ['top', 'bottom'],
 }: Props) {
+  const { colors } = useTheme();
   return (
     <SafeAreaView
-      style={[s.root, { backgroundColor: bg ?? C.appBg }, style]}
+      style={[s.root, { backgroundColor: bg ?? colors.appBg }, style]}
       edges={edges}
     >
       {children}

@@ -1,4 +1,4 @@
-"""Response headers for API routes that may contain account or meeting data."""
+"""Response headers for API routes that may contain private device data."""
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -16,9 +16,7 @@ class SensitiveApiHeadersMiddleware:
         # provider's current API-cache defaults would make a future rule
         # change capable of serving one device's data to another request.
         sensitive = scope.get("type") == "http" and (
-            path.startswith("/api/auth")
-            or path.startswith("/api/laoji")
-            or path.startswith("/api/device")
+            path.startswith("/api/device")
             or path.startswith("/api/location")
         )
 

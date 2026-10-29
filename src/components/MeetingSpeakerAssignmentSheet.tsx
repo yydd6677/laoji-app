@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -16,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 
 const MOTION_MS = 300;
 const MAX_NAME_LENGTH = 120;
@@ -70,7 +70,8 @@ export function MeetingSpeakerAssignmentSheet({
   onClose: () => void;
   onSave: (value: MeetingSpeakerAssignmentValue) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -457,15 +458,15 @@ export function MeetingSpeakerAssignmentSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
   sheet: { width: '100%', borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center' },
   titleAction: { width: 72, height: 44, alignItems: 'center', justifyContent: 'center' },
-  titleActionText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  titleActionText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
   inputFrame: {
     height: 40,
     marginTop: 4,
@@ -476,21 +477,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  input: { flex: 1, height: 40, marginLeft: 8, paddingVertical: 0, fontSize: 16, lineHeight: 24 },
+  input: { flex: 1, height: 40, marginLeft: 8, paddingVertical: 0, fontFamily, fontSize: 16, lineHeight: 24 },
   errorSlot: { height: 30, paddingHorizontal: 16, justifyContent: 'center' },
-  errorText: { fontSize: 12, lineHeight: 18 },
+  errorText: { fontFamily, fontSize: 12, lineHeight: 18 },
   candidateList: { flex: 1 },
-  sectionLabel: { height: 32, paddingHorizontal: 16, paddingTop: 10, fontSize: 12, lineHeight: 18 },
+  sectionLabel: { height: 32, paddingHorizontal: 16, paddingTop: 10, fontFamily, fontSize: 12, lineHeight: 18 },
   profileState: { height: 44, alignItems: 'center', justifyContent: 'center' },
-  profileError: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 10, fontSize: 13, lineHeight: 20 },
+  profileError: { minHeight: 44, paddingHorizontal: 16, paddingVertical: 10, fontFamily, fontSize: 13, lineHeight: 20 },
   candidate: { height: 52, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center' },
   candidateAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  candidateText: { flex: 1, marginLeft: 12, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  candidateText: { flex: 1, marginLeft: 12, fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
   bottomBar: { minHeight: 56, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center' },
   batchAction: { minHeight: 55, flex: 1, paddingLeft: 12, paddingRight: 8, flexDirection: 'row', alignItems: 'center' },
   batchSpacer: { flex: 1 },
   checkbox: { width: 20, height: 20, borderRadius: 4, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  batchText: { flex: 1, marginLeft: 8, fontSize: 14, lineHeight: 20, fontWeight: '400' },
+  batchText: { flex: 1, marginLeft: 8, fontFamily, fontSize: 14, lineHeight: 20, fontWeight: '400' },
   doneButton: { minWidth: 60, height: 28, marginRight: 16, paddingHorizontal: 8, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  doneText: { fontSize: 14, lineHeight: 20, fontWeight: '400' },
+  doneText: { fontFamily, fontSize: 14, lineHeight: 20, fontWeight: '400' },
 });

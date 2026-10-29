@@ -20,6 +20,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.DecelerateInterpolator
+import com.laoji.nativeplatform.ui.NativeUiTokens
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -32,15 +33,13 @@ class CalendarShellIconView(
   context: Context,
   private val icon: CalendarShellIcon
 ) : View(context) {
-  private val palette = CalendarUi.palette(context)
   private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.textPrimary
     style = Paint.Style.STROKE
     strokeWidth = CalendarUi.dp(context, 1.8f)
     strokeCap = Paint.Cap.ROUND
     strokeJoin = Paint.Join.ROUND
   }
-  private val pressedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.surfaceMuted }
+  private val pressedPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
   init {
     isClickable = true
@@ -50,6 +49,11 @@ class CalendarShellIconView(
       CalendarShellIcon.SEARCH -> "搜索日程"
     }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) tooltipText = contentDescription
+    NativeUiTokens.bindTheme(this) {
+      val palette = CalendarUi.palette(context)
+      iconPaint.color = palette.textPrimary
+      pressedPaint.color = palette.surfaceMuted
+    }
   }
 
   override fun onDraw(canvas: Canvas) {
@@ -112,7 +116,7 @@ class CalendarCreateFabView(context: Context) : View(context) {
   private val actionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.surface }
   private val selectedActionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = palette.accent }
   private val actionShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(28, 0, 0, 0) }
-  private val actionRingBaseAlpha = Color.alpha(palette.divider)
+  private var actionRingBaseAlpha = Color.alpha(palette.divider)
   private val actionRingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = Color.rgb(Color.red(palette.divider), Color.green(palette.divider), Color.blue(palette.divider))
     style = Paint.Style.STROKE
@@ -174,6 +178,20 @@ class CalendarCreateFabView(context: Context) : View(context) {
     contentDescription = "新建日程"
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) tooltipText = contentDescription
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+    NativeUiTokens.bindTheme(this) {
+      val current = CalendarUi.palette(context)
+      fabPaint.color = current.accent
+      pressedFabPaint.color = current.accent
+      actionPaint.color = current.surface
+      selectedActionPaint.color = current.accent
+      actionRingBaseAlpha = Color.alpha(current.divider)
+      actionRingPaint.color = current.divider
+      arcPaint.color = current.accent
+      lightIconPaint.color = current.accentText
+      darkIconPaint.color = current.textPrimary
+      CalendarUi.restyleTextPaint(context, labelPaint, current.textPrimary)
+      CalendarUi.restyleTextPaint(context, selectedLabelPaint, current.accentText)
+    }
   }
 
   fun setActionListener(listener: CalendarCreateActionListener?) {

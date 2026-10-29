@@ -18,13 +18,11 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.view.ViewGroup
-import com.laoji.nativeplatform.evidence.FeishuEvidence
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 
 @SuppressLint("ViewConstructor")
-@FeishuEvidence("CAL-DETAIL-EDIT-001", "UI-TITLE-COMMON-001")
 class CalendarDetailPageView(
   context: Context,
   appContext: AppContext,
@@ -48,7 +46,7 @@ class CalendarDetailPageView(
     onAction(mapOf("type" to "retry"))
   }
   private val busyOverlay = FrameLayout(context).apply {
-    setBackgroundColor(CalendarPagePalette.scrim)
+    pageBackgroundColor { CalendarPagePalette.scrim }
     isClickable = true
     isFocusable = true
     contentDescription = "正在删除日程"
@@ -66,7 +64,7 @@ class CalendarDetailPageView(
     // CAL-DETAIL-001: Keep Android-managed page children visible inside ExpoView.
     setWillNotDraw(false)
     clipToPadding = false
-    setBackgroundColor(CalendarPagePalette.body)
+    pageBackgroundColor { CalendarPagePalette.body }
     scroll.addView(body, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     val page = LinearLayout(context).apply {
       orientation = LinearLayout.VERTICAL
@@ -102,13 +100,13 @@ class CalendarDetailPageView(
     titleBar.setDividerVisible(false)
     titleBar.setSecondaryLeftTitle(
       state.title,
-      CalendarPagePalette.primaryHeader,
+      { CalendarPagePalette.primaryHeader },
       titleAlphaForScroll(scroll.scrollY),
     )
     titleBar.setLeftIconAction(
       com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back,
       "返回",
-      CalendarPagePalette.text,
+      { CalendarPagePalette.text },
       CalendarTitleIconSize.SMALL,
       trailingPaddingDp = 0f,
       debounce = false,
@@ -117,14 +115,14 @@ class CalendarDetailPageView(
       titleBar.addRightIconAction(
         com.laoji.nativeplatform.R.drawable.laoji_ic_edit_outline,
         "编辑日程",
-        CalendarPagePalette.text,
+        { CalendarPagePalette.text },
         CalendarTitleIconSize.SMALL,
         debounce = true,
       ) { emit("edit") }
       titleBar.addRightIconAction(
         com.laoji.nativeplatform.R.drawable.laoji_ic_delete_outline,
         "删除日程",
-        CalendarPagePalette.text,
+        { CalendarPagePalette.text },
         CalendarTitleIconSize.SMALL,
         debounce = true,
       ) {
@@ -172,14 +170,14 @@ class CalendarDetailPageView(
   private fun buildHeader(): View = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
     setPadding(context.pageDp(16), 0, context.pageDp(16), context.pageDp(30))
-    background = GradientDrawable(
+    pageBackground { GradientDrawable(
       GradientDrawable.Orientation.TOP_BOTTOM,
       intArrayOf(CalendarPagePalette.primarySoft, CalendarPagePalette.body),
-    )
+    ) }
     val summaryRow = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.TOP
-      val marker = View(context).apply { pageShape(CalendarPagePalette.primaryHeader, 4f) }
+      val marker = View(context).apply { pageShape({ CalendarPagePalette.primaryHeader }, 4f) }
       addView(marker, LinearLayout.LayoutParams(context.pageDp(14), context.pageDp(14)).apply {
         topMargin = context.pageDp(17)
         rightMargin = context.pageDp(18)
@@ -188,7 +186,7 @@ class CalendarDetailPageView(
         context.pageText(
           state.title,
           20f,
-          CalendarPagePalette.primaryHeader,
+          { CalendarPagePalette.primaryHeader },
           Typeface.BOLD,
         ).apply { maxLines = 2 },
         LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -198,7 +196,7 @@ class CalendarDetailPageView(
     }
     addView(summaryRow, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     addView(
-      context.pageText(state.timeLabel, 14f, CalendarPagePalette.primaryHeader).apply {
+      context.pageText(state.timeLabel, 14f, { CalendarPagePalette.primaryHeader }).apply {
         maxLines = 3
       },
       LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
@@ -208,7 +206,7 @@ class CalendarDetailPageView(
     )
     state.repeatLabel?.takeIf(String::isNotBlank)?.let { label ->
       addView(
-        context.pageText(label, 14f, CalendarPagePalette.placeholder).apply { maxLines = 2 },
+        context.pageText(label, 14f, { CalendarPagePalette.placeholder }).apply { maxLines = 2 },
         LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
           leftMargin = context.pageDp(32)
         },
@@ -224,7 +222,7 @@ class CalendarDetailPageView(
       minimumHeight = context.pageDp(44)
       addView(ImageView(context).apply {
         setImageResource(iconRes)
-        imageTintList = android.content.res.ColorStateList.valueOf(CalendarPagePalette.placeholder)
+        pageIconTint { android.content.res.ColorStateList.valueOf(CalendarPagePalette.placeholder) }
         contentDescription = null
         setPadding(context.pageDp(16), context.pageDp(3), context.pageDp(16), context.pageDp(3))
       }, LinearLayout.LayoutParams(context.pageDp(48), context.pageDp(22)))
@@ -234,7 +232,7 @@ class CalendarDetailPageView(
     }
 
   private fun buildMeetingAction(action: CalendarMeetingAction): TextView =
-    context.pageText(action.label, 17f, Color.WHITE).apply {
+    context.pageText(action.label, 17f, { Color.WHITE }).apply {
       gravity = Gravity.CENTER
       isEnabled = action.enabled
       isClickable = action.enabled
@@ -242,7 +240,7 @@ class CalendarDetailPageView(
       contentDescription = listOf(action.label, action.statusLabel)
         .filter(String::isNotBlank)
         .joinToString("，")
-      background = StateListDrawable().apply {
+      pageBackground { StateListDrawable().apply {
         addState(
           intArrayOf(android.R.attr.state_pressed),
           GradientDrawable().apply {
@@ -264,13 +262,13 @@ class CalendarDetailPageView(
             cornerRadius = context.pageDp(6).toFloat()
           },
         )
-      }
-      setTextColor(
+      } }
+      pageTextColors {
         android.content.res.ColorStateList(
           arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
           intArrayOf(CalendarPagePalette.disabled, Color.WHITE),
-        ),
-      )
+        )
+      }
       setOnClickListener {
         if (action.enabled) emit("meetingAction", mapOf("meetingActionKind" to action.kind))
       }
@@ -315,14 +313,14 @@ class CalendarDetailPageView(
       minimumHeight = context.pageDp(56)
       addView(
         ProgressBar(context).apply {
-          indeterminateTintList = android.content.res.ColorStateList.valueOf(CalendarPagePalette.primary)
+          pageDrawing { indeterminateTintList = android.content.res.ColorStateList.valueOf(CalendarPagePalette.primary) }
         },
         LinearLayout.LayoutParams(context.pageDp(20), context.pageDp(20)).apply {
           rightMargin = context.pageDp(12)
         },
       )
       addView(
-        context.pageText(message ?: "正在读取上次会议", 14f, CalendarPagePalette.secondary),
+        context.pageText(message ?: "正在读取上次会议", 14f, { CalendarPagePalette.secondary }),
         LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
       )
     }
@@ -335,14 +333,14 @@ class CalendarDetailPageView(
       minimumHeight = context.pageDp(56)
       isClickable = true
       isFocusable = true
-      background = seriesRowBackground()
+      pageBackground { seriesRowBackground() }
       contentDescription = "${message ?: "上次会议内容暂时无法读取"}，重试"
       addView(
-        context.pageText(message ?: "上次会议内容暂时无法读取", 14f, CalendarPagePalette.secondary),
+        context.pageText(message ?: "上次会议内容暂时无法读取", 14f, { CalendarPagePalette.secondary }),
         LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
       )
       addView(
-        context.pageText("重试", 14f, CalendarPagePalette.primary).apply { gravity = Gravity.CENTER },
+        context.pageText("重试", 14f, { CalendarPagePalette.primary }).apply { gravity = Gravity.CENTER },
         LinearLayout.LayoutParams(context.pageDp(60), context.pageDp(44)),
       )
       setOnClickListener { emit("retrySeriesMemory") }
@@ -356,19 +354,19 @@ class CalendarDetailPageView(
       minimumHeight = context.pageDp(64)
       isClickable = true
       isFocusable = true
-      background = seriesRowBackground()
+      pageBackground { seriesRowBackground() }
       contentDescription = listOf("上次会议", previous.title, previous.dateLabel, "查看记录")
         .filter(String::isNotBlank)
         .joinToString("，")
       addView(
         LinearLayout(context).apply {
           orientation = LinearLayout.VERTICAL
-          addView(context.pageText("上次会议", 16f, CalendarPagePalette.text))
+          addView(context.pageText("上次会议", 16f, { CalendarPagePalette.text }))
           addView(
             context.pageText(
               listOf(previous.title, previous.dateLabel).filter(String::isNotBlank).joinToString(" · "),
               13f,
-              CalendarPagePalette.secondary,
+              { CalendarPagePalette.secondary },
             ).apply {
               maxLines = 1
               ellipsize = android.text.TextUtils.TruncateAt.END
@@ -380,7 +378,7 @@ class CalendarDetailPageView(
       addView(
         ImageView(context).apply {
           setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_chevron_right_bold)
-          imageTintList = android.content.res.ColorStateList.valueOf(CalendarPagePalette.placeholder)
+          pageIconTint { android.content.res.ColorStateList.valueOf(CalendarPagePalette.placeholder) }
           contentDescription = null
           setPadding(context.pageDp(14), context.pageDp(14), context.pageDp(14), context.pageDp(14))
         },
@@ -390,7 +388,7 @@ class CalendarDetailPageView(
     }
 
   private fun seriesSectionLabel(label: String): View =
-    context.pageText(label, 13f, CalendarPagePalette.secondary).apply {
+    context.pageText(label, 13f, { CalendarPagePalette.secondary }).apply {
       setPadding(context.pageDp(16), context.pageDp(10), context.pageDp(16), context.pageDp(4))
     }
 
@@ -402,21 +400,21 @@ class CalendarDetailPageView(
       minimumHeight = context.pageDp(44)
       isClickable = true
       isFocusable = true
-      background = seriesRowBackground()
+      pageBackground { seriesRowBackground() }
       contentDescription = if (decision.sourceSegmentId != null || decision.sourceStartMs != null) {
         "决定，${decision.content}，定位来源文字"
       } else {
         "决定，${decision.content}，查看来源会议"
       }
       addView(
-        View(context).apply { pageShape(CalendarPagePalette.primary, 2f) },
+        View(context).apply { pageShape({ CalendarPagePalette.primary }, 2f) },
         LinearLayout.LayoutParams(context.pageDp(4), context.pageDp(4)).apply {
           topMargin = context.pageDp(8)
           rightMargin = context.pageDp(10)
         },
       )
       addView(
-        context.pageText(decision.content, 15f, CalendarPagePalette.text).apply { maxLines = 3 },
+        context.pageText(decision.content, 15f, { CalendarPagePalette.text }).apply { maxLines = 3 },
         LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
       )
       setOnClickListener {
@@ -435,18 +433,18 @@ class CalendarDetailPageView(
       minimumHeight = context.pageDp(52)
       isClickable = true
       isFocusable = true
-      background = seriesRowBackground()
+      pageBackground { seriesRowBackground() }
       contentDescription = listOf("未完成事项", action.content, action.metaLabel, "查看来源")
         .filterNotNull()
         .filter(String::isNotBlank)
         .joinToString("，")
       addView(
         View(context).apply {
-          background = GradientDrawable().apply {
+          pageBackground { GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(Color.TRANSPARENT)
             setStroke(context.pageDp(1), CalendarPagePalette.placeholder)
-          }
+          } }
         },
         LinearLayout.LayoutParams(context.pageDp(16), context.pageDp(16)).apply {
           topMargin = context.pageDp(2)
@@ -456,9 +454,9 @@ class CalendarDetailPageView(
       addView(
         LinearLayout(context).apply {
           orientation = LinearLayout.VERTICAL
-          addView(context.pageText(action.content, 15f, CalendarPagePalette.text).apply { maxLines = 3 })
+          addView(context.pageText(action.content, 15f, { CalendarPagePalette.text }).apply { maxLines = 3 })
           action.metaLabel?.takeIf(String::isNotBlank)?.let { meta ->
-            addView(context.pageText(meta, 12f, CalendarPagePalette.secondary).apply {
+            addView(context.pageText(meta, 12f, { CalendarPagePalette.secondary }).apply {
               maxLines = 1
               ellipsize = android.text.TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
@@ -474,12 +472,12 @@ class CalendarDetailPageView(
     }
 
   private fun seriesCarryForwardAction(): TextView =
-    context.pageText("带入我的笔记", 15f, CalendarPagePalette.primary).apply {
+    context.pageText("带入我的笔记", 15f, { CalendarPagePalette.primary }).apply {
       gravity = Gravity.CENTER
       minimumHeight = context.pageDp(44)
       isClickable = true
       isFocusable = true
-      background = seriesRowBackground()
+      pageBackground { seriesRowBackground() }
       contentDescription = "选择内容带入我的笔记"
       setOnClickListener { emit("carrySeriesMemory") }
     }

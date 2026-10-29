@@ -18,8 +18,8 @@ import androidx.core.widget.TextViewCompat
  */
 internal class MinutesOperationStatusView(context: android.content.Context) : LinearLayout(context) {
   internal val progress = ProgressBar(context, null, android.R.attr.progressBarStyleSmall)
-  internal val message = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
-  internal val detail = context.textView(textSizeSp = 12, color = MinutesPalette.faint)
+  internal val message = context.textView(textSizeSp = 13, color = { MinutesPalette.secondary })
+  internal val detail = context.textView(textSizeSp = 12, color = { MinutesPalette.faint })
   internal val actionHost = FrameLayout(context)
   private val textColumn = LinearLayout(context)
   private var compactHeaderMode = false
@@ -117,7 +117,7 @@ internal class MinutesOperationStatusView(context: android.content.Context) : Li
       detail.visibility = View.GONE
       progress.visibility = View.GONE
       actionHost.visibility = View.GONE
-      background = null
+      minutesBackground { null }
       visibility = View.GONE
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
       return
@@ -126,7 +126,7 @@ internal class MinutesOperationStatusView(context: android.content.Context) : Li
     visibility = View.VISIBLE
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
     message.text = cleanLabel
-    message.setTextColor(statusToneColor(tone))
+    message.minutesTextColor { statusToneColor(tone) }
     detail.text = detailText.trim()
     detail.visibility = if (compactHeaderMode || detailText.isBlank()) View.GONE else View.VISIBLE
     val running = cleanLabel.contains("正在")
@@ -136,15 +136,17 @@ internal class MinutesOperationStatusView(context: android.content.Context) : Li
       || cleanLabel.contains("生成")
       || cleanLabel.contains("保存")
     progress.visibility = if (!issue && running) View.VISIBLE else View.GONE
-    progress.indeterminateTintList = android.content.res.ColorStateList.valueOf(statusToneColor(tone))
+    progress.minutesDrawing {
+      progress.indeterminateTintList = android.content.res.ColorStateList.valueOf(statusToneColor(tone))
+    }
     actionHost.visibility = if (showAction) View.VISIBLE else if (compactHeaderMode) View.GONE else View.INVISIBLE
     backgroundShape(
-      when (tone) {
+      { when (tone) {
         "danger" -> MinutesPalette.dangerSoft
         "warning" -> withAlpha(MinutesPalette.warning, 24)
         else -> MinutesPalette.primarySoft
-      },
-      radiusDp = if (compactHeaderMode) 14 else 6,
+      } },
+      radiusDp = { if (compactHeaderMode) 14 else 6 },
     )
     contentDescription = listOf(cleanLabel, detailText.trim())
       .filter { it.isNotBlank() }

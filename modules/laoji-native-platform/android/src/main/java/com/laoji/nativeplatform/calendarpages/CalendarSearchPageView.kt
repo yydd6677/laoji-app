@@ -40,12 +40,13 @@ class CalendarSearchPageView(
   private var actionListener: ((Map<String, Any?>) -> Unit)? = null
   private val root = LinearLayout(context).apply {
     orientation = LinearLayout.VERTICAL
-    setBackgroundColor(CalendarPagePalette.body)
+    pageBackgroundColor { CalendarPagePalette.body }
   }
   private val queryInput = EditText(context).apply {
     setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-    setTextColor(CalendarPagePalette.text)
-    setHintTextColor(CalendarPagePalette.placeholder)
+    pageTextColor { CalendarPagePalette.text }
+    pageTypeface(Typeface.NORMAL)
+    pageDrawing { setHintTextColor(CalendarPagePalette.placeholder) }
     hint = "搜索日程"
     background = null
     isSingleLine = true
@@ -55,7 +56,7 @@ class CalendarSearchPageView(
   private val clearButton = context.pageIconButton(
     com.laoji.nativeplatform.R.drawable.laoji_ic_close,
     "清空搜索",
-    CalendarPagePalette.placeholder,
+    { CalendarPagePalette.placeholder },
   )
   private val recycler = RecyclerView(context).apply {
     layoutManager = LinearLayoutManager(context)
@@ -83,7 +84,7 @@ class CalendarSearchPageView(
     val searchBar = LinearLayout(context).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
-      setBackgroundColor(CalendarPagePalette.body)
+      pageBackgroundColor { CalendarPagePalette.body }
       addView(
         context.pageIconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "关闭搜索").apply {
           setOnClickListener { emitAction(mapOf("type" to "close")) }
@@ -96,7 +97,7 @@ class CalendarSearchPageView(
         context.pageIconButton(
           com.laoji.nativeplatform.R.drawable.laoji_ic_search_outline,
           "搜索",
-          CalendarPagePalette.placeholder,
+          { CalendarPagePalette.placeholder },
         ).apply { isClickable = false },
         LinearLayout.LayoutParams(context.pageDp(32), context.pageDp(56)),
       )
@@ -255,18 +256,18 @@ private class CalendarSearchRowHolder(
     gravity = Gravity.CENTER
   }
   private val marker = View(context).apply {
-    pageShape(CalendarPagePalette.primary, 2f)
+    pageShape({ CalendarPagePalette.primary }, 2f)
   }
   private val title = context.pageText(sizeSp = 16f).apply {
     maxLines = 1
   }
-  private val time = context.pageText(sizeSp = 12f, color = CalendarPagePalette.secondary).apply {
+  private val time = context.pageText(sizeSp = 12f, color = { CalendarPagePalette.secondary }).apply {
     maxLines = 1
   }
 
   init {
     root.orientation = LinearLayout.VERTICAL
-    root.setBackgroundColor(CalendarPagePalette.body)
+    root.pageBackgroundColor { CalendarPagePalette.body }
     root.addView(month, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.pageDp(44)))
     dateLane.addView(weekday, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     dateLane.addView(day, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))

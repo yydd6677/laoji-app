@@ -21,7 +21,7 @@ object NativeUserMessages {
         normalized.contains("failed to fetch") ||
         normalized.contains("connection refused") -> "暂时无法连接老记服务，请检查网络后重试。"
       normalized.contains("timeout") || normalized.contains("timed out") -> "请求超时，请稍后重试。"
-      normalized.contains("401") || normalized.contains("unauthorized") || normalized.contains("token") -> "登录已过期，请重新登录。"
+      normalized.contains("401") || normalized.contains("unauthorized") || normalized.contains("token") -> "设备凭据已失效，请重新打开老记。"
       normalized.contains("permission") || normalized.contains("microphone") || normalized.contains("recording") ->
         "录音暂时不可用，请稍后重试。"
       normalized.contains("parse") || normalized.contains("schedule") -> "日程解析失败，请检查输入后重试。"

@@ -17,11 +17,15 @@ import android.widget.SeekBar
 import android.widget.TextView
 import androidx.constraintlayout.widget.ConstraintLayout
 import com.laoji.nativeplatform.minutes.MinutesPalette
+import com.laoji.nativeplatform.minutes.MinutesDetailLayoutContract
 import com.laoji.nativeplatform.minutes.MinutesPlayerSource
 import com.laoji.nativeplatform.minutes.backgroundHorizontalGradient
 import com.laoji.nativeplatform.minutes.dp
 import com.laoji.nativeplatform.minutes.formatClock
 import com.laoji.nativeplatform.minutes.iconButton
+import com.laoji.nativeplatform.minutes.minutesBackgroundColor
+import com.laoji.nativeplatform.minutes.minutesDrawing
+import com.laoji.nativeplatform.minutes.minutesIconColors
 import com.laoji.nativeplatform.minutes.textView
 import com.laoji.nativeplatform.minutes.withAlpha
 
@@ -33,11 +37,12 @@ class MinutesPlayerView(
   private val speedSheet = MinutesPlaybackSpeedSheet(context)
   private val content = ConstraintLayout(context).apply { id = View.generateViewId() }
   private val seekArea = ConstraintLayout(context).apply { id = View.generateViewId() }
-  private val position = context.textView(textSizeSp = 12, color = MinutesPalette.faint)
-  private val duration = context.textView(textSizeSp = 12, color = MinutesPalette.faint)
+  private val position = context.textView(textSizeSp = 12, color = { MinutesPalette.faint })
+  private val duration = context.textView(textSizeSp = 12, color = { MinutesPalette.faint })
   private val seekBar = SeekBar(context)
+  private val seekThumb = MinutesSeekThumbDrawable(context)
   private val controls = ConstraintLayout(context).apply { id = View.generateViewId() }
-  private val speed = context.textView("1x", 16, MinutesPalette.text)
+  private val speed = context.textView("1x", 16, { MinutesPalette.text })
   private val rewind = context.iconButton(
     com.laoji.nativeplatform.R.drawable.laoji_ic_back_15s,
     "后退 15 秒",
@@ -50,7 +55,7 @@ class MinutesPlayerView(
     com.laoji.nativeplatform.R.drawable.laoji_ic_forward_15s,
     "前进 15 秒",
   )
-  private val error = context.textView(textSizeSp = 13, color = MinutesPalette.danger)
+  private val error = context.textView(textSizeSp = 13, color = { MinutesPalette.danger })
   private var latestState = MinutesPlaybackState()
   private var trackingSeek = false
   private var attached = false
@@ -65,15 +70,17 @@ class MinutesPlayerView(
   }
 
   init {
-    setBackgroundColor(MinutesPalette.surface)
-    content.setBackgroundColor(MinutesPalette.surface)
+    val clockLineHeight = MinutesDetailLayoutContract.minimumTextLineHeightPx(position.textSize)
+    minutesBackgroundColor { MinutesPalette.surface }
+    content.minutesBackgroundColor { MinutesPalette.surface }
     addView(
       content,
       FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT),
     )
     content.addView(
       seekArea,
-      ConstraintLayout.LayoutParams(0, context.dp(45)).apply {
+      ConstraintLayout.LayoutParams(0,
+        context.dp(MinutesDetailLayoutContract.PLAYER_TRACK_LANE_HEIGHT_DP) + clockLineHeight).apply {
         topToTop = ConstraintLayout.LayoutParams.PARENT_ID
         startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
@@ -93,14 +100,16 @@ class MinutesPlayerView(
     )
 
     position.id = View.generateViewId()
-    position.includeFontPadding = true
+    position.includeFontPadding = false
+    position.maxLines = 1
     position.gravity = Gravity.START or Gravity.CENTER_VERTICAL
     duration.id = View.generateViewId()
-    duration.includeFontPadding = true
+    duration.includeFontPadding = false
+    duration.maxLines = 1
     duration.gravity = Gravity.END or Gravity.CENTER_VERTICAL
     seekArea.addView(
       position,
-      ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+      ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, clockLineHeight).apply {
         bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         leftMargin = context.dp(20)
@@ -108,7 +117,7 @@ class MinutesPlayerView(
     )
     seekArea.addView(
       duration,
-      ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+      ConstraintLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, clockLineHeight).apply {
         bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
         rightMargin = context.dp(20)
@@ -121,17 +130,15 @@ class MinutesPlayerView(
     // or the endpoint thumbs are clipped by its bounds.
     seekBar.setPadding(context.dp(8), 0, context.dp(8), 0)
     seekBar.max = SEEK_RANGE
-    seekBar.progressBackgroundTintList = ColorStateList.valueOf(MinutesPalette.timelineTrack)
-    seekBar.secondaryProgressTintList = ColorStateList.valueOf(withAlpha(MinutesPalette.recordGradientStart, 77))
-    seekBar.progressTintList = ColorStateList.valueOf(MinutesPalette.recordGradientStart)
+    seekBar.minutesDrawing {
+      seekBar.progressBackgroundTintList = ColorStateList.valueOf(MinutesPalette.timelineTrack)
+      seekBar.secondaryProgressTintList = ColorStateList.valueOf(withAlpha(MinutesPalette.recordGradientStart, 77))
+      seekBar.progressTintList = ColorStateList.valueOf(MinutesPalette.recordGradientStart)
+      seekThumb.applyTheme()
+    }
     seekBar.thumbTintList = null
     seekBar.thumbTintMode = null
-    seekBar.thumb = MinutesSeekThumbDrawable(
-      context,
-      outerColor = MinutesPalette.primarySoft,
-      ringColor = MinutesPalette.surface,
-      coreColor = MinutesPalette.primary,
-    )
+    seekBar.thumb = seekThumb
     seekBar.thumbTintList = null
     seekBar.thumbTintMode = null
     seekBar.splitTrack = false
@@ -158,13 +165,11 @@ class MinutesPlayerView(
       seekBar,
       ConstraintLayout.LayoutParams(0, context.dp(24)).apply {
         topToTop = ConstraintLayout.LayoutParams.PARENT_ID
-        bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
         startToStart = ConstraintLayout.LayoutParams.PARENT_ID
         endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
         leftMargin = context.dp(20)
         rightMargin = context.dp(20)
         topMargin = context.dp(8)
-        bottomMargin = context.dp(13)
       },
     )
 
@@ -202,11 +207,11 @@ class MinutesPlayerView(
       },
     )
     playPause.backgroundHorizontalGradient(
-      MinutesPalette.recordGradientStart,
-      MinutesPalette.recordGradientEnd,
-      radiusDp = 24,
+      { MinutesPalette.recordGradientStart },
+      { MinutesPalette.recordGradientEnd },
+      radiusDp = { 24 },
     )
-    playPause.imageTintList = ColorStateList.valueOf(android.graphics.Color.WHITE)
+    playPause.minutesIconColors { ColorStateList.valueOf(android.graphics.Color.WHITE) }
     playPause.setPadding(context.dp(30), context.dp(13), context.dp(28), context.dp(13))
     playPause.setOnClickListener { controller.toggle() }
     controls.addView(
@@ -232,7 +237,7 @@ class MinutesPlayerView(
       },
     )
     error.maxLines = 2
-    error.setBackgroundColor(MinutesPalette.surface)
+    error.minutesBackgroundColor { MinutesPalette.surface }
     error.setPadding(context.dp(16), 0, context.dp(16), 0)
     error.gravity = Gravity.CENTER
     error.isClickable = true
@@ -311,7 +316,7 @@ class MinutesPlayerView(
     if (state.isPlaying) {
       playPause.setPadding(context.dp(29), context.dp(13), context.dp(29), context.dp(13))
     } else {
-      // Feishu offsets the asymmetric play glyph 1dp to the right.
+      // Offset the asymmetric play glyph 1dp to the right.
       playPause.setPadding(context.dp(30), context.dp(13), context.dp(28), context.dp(13))
     }
     playPause.contentDescription = if (state.isPlaying) "暂停会议录音" else "播放会议录音"
@@ -335,24 +340,28 @@ class MinutesPlayerView(
   }
 }
 
-/** Keeps the source asset's three colors even when the platform theme tints SeekBar thumbs. */
+/** Keeps the same thumb instance while its three semantic paint roles change. */
 private class MinutesSeekThumbDrawable(
   context: Context,
-  outerColor: Int,
-  ringColor: Int,
-  coreColor: Int,
 ) : Drawable() {
   private val sizePx = context.dp(16)
   private val ringInsetPx = context.dp(1).toFloat()
   private val coreInsetPx = context.dp(3).toFloat()
   private val outerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = outerColor
+    color = MinutesPalette.primarySoft
   }
   private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = ringColor
+    color = MinutesPalette.surface
   }
   private val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = coreColor
+    color = MinutesPalette.primary
+  }
+
+  fun applyTheme() {
+    outerPaint.color = MinutesPalette.primarySoft
+    ringPaint.color = MinutesPalette.surface
+    corePaint.color = MinutesPalette.primary
+    invalidateSelf()
   }
 
   override fun draw(canvas: Canvas) {

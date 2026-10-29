@@ -15,6 +15,14 @@ config.transformer = {
   }),
 };
 config.watchFolders = [path.join(__dirname, 'modules')];
+// Gradle atomically recreates these directories during a native build. They
+// contain no JS input; watching them races deletion and can crash Metro while
+// an emulator is running. Keep actual native source/assets visible.
+const existingBlockList = config.resolver.blockList;
+config.resolver.blockList = [
+  ...(Array.isArray(existingBlockList) ? existingBlockList : existingBlockList ? [existingBlockList] : []),
+  /[\\/]modules[\\/]laoji-native-platform[\\/]android[\\/](?:build|\.gradle|\.kotlin)(?:[\\/]|$)/,
+];
 config.resolver.extraNodeModules = {
   ...(config.resolver.extraNodeModules || {}),
   'laoji-native-platform': path.join(__dirname, 'modules/laoji-native-platform'),

@@ -22,6 +22,7 @@ import android.widget.TextView
 import com.laoji.nativeplatform.minutes.MinutesPalette
 import com.laoji.nativeplatform.minutes.backgroundShape
 import com.laoji.nativeplatform.minutes.dp
+import com.laoji.nativeplatform.minutes.minutesTextColor
 import com.laoji.nativeplatform.minutes.textView
 
 internal class MinutesPlaybackSpeedSheet(private val sourceContext: Context) {
@@ -41,7 +42,7 @@ internal class MinutesPlaybackSpeedSheet(private val sourceContext: Context) {
       // Dialog content already stops above the navigation bar. Adding its inset
       // again creates a second, empty navigation slot at the bottom of the sheet.
       setPadding(0, activity.dp(32), 0, activity.dp(24))
-      backgroundShape(MinutesPalette.surface, radiusDp = 12)
+      backgroundShape({ MinutesPalette.surface }, radiusDp = { 12 })
       importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
       contentDescription = "播放速度"
     }
@@ -114,7 +115,7 @@ private class MinutesPlaybackSpeedItem(
   private val label: TextView = context.textView(
     text = "${rateLabel(rate)}x",
     textSizeSp = 15,
-    color = MinutesPalette.text,
+    color = { MinutesPalette.text },
     weight = Typeface.BOLD,
   )
 
@@ -122,7 +123,7 @@ private class MinutesPlaybackSpeedItem(
     isClickable = true
     isFocusable = true
     contentDescription = "${rateLabel(rate)} 倍速"
-    bar.backgroundShape(MinutesPalette.disabled, radiusDp = 2)
+    bar.backgroundShape({ MinutesPalette.disabled }, radiusDp = { 2 })
     addView(
       bar,
       LayoutParams(context.dp(3), context.dp(barHeightDp), Gravity.TOP or Gravity.CENTER_HORIZONTAL),
@@ -136,8 +137,8 @@ private class MinutesPlaybackSpeedItem(
 
   fun setRateSelected(selected: Boolean) {
     isSelected = selected
-    bar.backgroundShape(if (selected) MinutesPalette.primary else MinutesPalette.disabled, radiusDp = 2)
-    label.setTextColor(if (selected) MinutesPalette.primary else MinutesPalette.text)
+    bar.backgroundShape({ if (selected) MinutesPalette.primary else MinutesPalette.disabled }, radiusDp = { 2 })
+    label.minutesTextColor { if (selected) MinutesPalette.primary else MinutesPalette.text }
     label.text = "${rateLabel(rate)}${if (selected) "X" else "x"}"
     label.visibility = if (selected || alwaysShowLabel) View.VISIBLE else View.INVISIBLE
   }

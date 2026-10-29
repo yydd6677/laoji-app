@@ -4,14 +4,10 @@ import {
   type CreateMeetingMarkerResult,
   type DeleteMeetingMarkerResult,
 } from '../application/meeting';
-import {
-  sqliteMeetingNoteRepository,
-  type MarkerRecord,
-  type MeetingNoteAggregate,
-} from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
+import type { MarkerRecord, MeetingNoteAggregate } from "../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../domain/meeting';
 import { assertScopeKey } from '../domain/meeting';
-import { requestMeetingMarkerSync } from '../application/meeting/markerSyncTrigger';
 
 const createMarkerUseCase = new CreateMeetingMarkerUseCase(sqliteMeetingNoteRepository);
 const deleteMarkerUseCase = new DeleteMeetingMarkerUseCase(sqliteMeetingNoteRepository);
@@ -60,7 +56,6 @@ export async function createMeetingMarker(
     scopeKey,
     positionMs,
   });
-  if (scopeKey !== 'guest') requestMeetingMarkerSync(scopeKey);
   return result;
 }
 
@@ -75,6 +70,5 @@ export async function deleteMeetingMarker(
     markerId,
     scopeKey,
   });
-  if (result.applied && scopeKey !== 'guest') requestMeetingMarkerSync(scopeKey);
   return result;
 }

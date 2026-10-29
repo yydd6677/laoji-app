@@ -16,7 +16,7 @@ export interface UpcomingEventProjectionItem {
 
 export interface UpcomingEventsProjection {
   schemaVersion: typeof UPCOMING_EVENTS_PROJECTION_SCHEMA_VERSION;
-  scopeKey: 'guest' | `user:${string}`;
+  scopeKey: 'guest';
   updatedAtMs: number;
   expiresAtMs: number;
   hideTitles: boolean;
@@ -35,14 +35,9 @@ export interface NativeSystemEntryProjectionState {
 interface LaojiSystemEntriesNativeModule {
   writeUpcomingEventsProjection(json: string): Promise<NativeSystemEntryProjectionState>;
   clearUpcomingEventsProjection(): Promise<void>;
-  getUpcomingEventsProjectionState(): Promise<NativeSystemEntryProjectionState>;
 }
 
 const nativeModule = requireOptionalNativeModule<LaojiSystemEntriesNativeModule>('LaojiSystemEntries');
-
-export function hasNativeSystemEntries(): boolean {
-  return nativeModule !== null;
-}
 
 export async function writeNativeUpcomingEventsProjection(
   projection: UpcomingEventsProjection,
@@ -62,18 +57,4 @@ export async function writeNativeUpcomingEventsProjection(
 
 export async function clearNativeUpcomingEventsProjection(): Promise<void> {
   await nativeModule?.clearUpcomingEventsProjection();
-}
-
-export async function getNativeUpcomingEventsProjectionState(): Promise<NativeSystemEntryProjectionState> {
-  if (!nativeModule) {
-    return {
-      available: false,
-      fresh: false,
-      schemaVersion: null,
-      eventCount: 0,
-      updatedAtMs: null,
-      expiresAtMs: null,
-    };
-  }
-  return nativeModule.getUpcomingEventsProjectionState();
 }

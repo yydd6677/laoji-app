@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from typing import Callable, Iterable, Iterator
 import urllib.error
 import urllib.parse
@@ -32,6 +33,7 @@ from app.asr.model_manager import ModelManager, SpeakerEmbeddingExtractor
 from app.asr.streaming_vad import StreamingVAD
 from app.config import settings
 from app.services.speaker_db_service import bytes_to_ndarray, get_speaker_db
+from app.privacy_logging import privacy_log
 
 
 SAMPLE_RATE = 16_000
@@ -43,11 +45,18 @@ ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS = max(
         int(os.getenv("LAOJI_ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS", "4000")),
     ),
 )
+ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS = max(
+    1_000,
+    min(
+        ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
+        int(os.getenv("LAOJI_ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS", "4000")),
+    ),
+)
 ASR_OFFLINE_BATCH_MAX_AUDIO_MS = max(
     ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
     min(
         120_000,
-        int(os.getenv("LAOJI_ASR_OFFLINE_BATCH_MAX_AUDIO_MS", "12000")),
+        int(os.getenv("LAOJI_ASR_OFFLINE_BATCH_MAX_AUDIO_MS", "32000")),
     ),
 )
 SPEAKER_PIPELINE_MAX_PENDING = max(
@@ -166,7 +175,7 @@ def _normalized_source_sha256(value: str) -> str:
     return match.group(1)
 
 
-def _pipeline_fingerprint(*, model_revision: str) -> str:
+def _pipeline_fingerprint(*, model_revision: str, speaker_enabled: bool = True) -> str:
     contract = {
         "schema_version": PIPELINE_SCHEMA_VERSION,
         "model_revision": model_revision,
@@ -174,14 +183,17 @@ def _pipeline_fingerprint(*, model_revision: str) -> str:
         "vad": {
             "silence_ms": 600,
             "pre_roll_ms": 250,
+            "first_max_speech_ms": ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS,
             "max_speech_ms": ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS,
             "energy_threshold": 0.0002,
         },
         "asr_batch": {
             "max_items": ASR_BATCH_LIMIT,
+            "first_max_audio_ms": ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS,
             "max_audio_ms": ASR_OFFLINE_BATCH_MAX_AUDIO_MS,
         },
         "speaker": {
+            "enabled": speaker_enabled,
             "model": "campplus-zh-cn",
             "cosine": SPEAKER_COSINE_THRESHOLD,
             "gap": SPEAKER_GAP_THRESHOLD,
@@ -204,6 +216,7 @@ class CheckpointStore:
         source_sha256: str,
         source_size: int,
         model_revision: str,
+        speaker_enabled: bool = True,
     ) -> None:
         safe_job_id = re.sub(r"[^A-Za-z0-9._-]", "_", job_id)[:160]
         if not safe_job_id:
@@ -217,7 +230,10 @@ class CheckpointStore:
         )
         self.segments = self.root / "segments"
         self.segments.mkdir(parents=True, exist_ok=True)
-        fingerprint = _pipeline_fingerprint(model_revision=model_revision)
+        fingerprint = _pipeline_fingerprint(
+            model_revision=model_revision,
+            speaker_enabled=speaker_enabled,
+        )
         expected = {
             "schema_version": PIPELINE_SCHEMA_VERSION,
             "job_id": job_id,
@@ -457,7 +473,7 @@ def stream_speech_segments(
     vad = StreamingVAD(vad_model, sample_rate=SAMPLE_RATE)
     vad.set_min_silence_duration(600)
     vad.set_pre_roll_duration(250, initial_duration_ms=250)
-    vad.set_max_speech_duration(ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS)
+    vad.set_max_speech_duration(ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS)
     vad.set_min_energy_threshold(0.0002)
     process = subprocess.Popen(
         [
@@ -500,7 +516,7 @@ def stream_speech_segments(
             end_ms = max(start_ms + 1, int(segment.end_ms))
             audio = np.asarray(segment.audio_data, dtype=np.float32)
             if audio.size:
-                yield SpeechAudio(
+                emitted = SpeechAudio(
                     ordinal=ordinal,
                     segment_id=_stable_segment_id(source_sha256, ordinal, start_ms, end_ms),
                     start_ms=start_ms,
@@ -508,6 +524,9 @@ def stream_speech_segments(
                     audio=audio,
                 )
                 ordinal += 1
+                yield emitted
+                if ordinal == 1:
+                    vad.set_max_speech_duration(ASR_OFFLINE_SEGMENT_MAX_AUDIO_MS)
 
     try:
         while True:
@@ -725,9 +744,21 @@ def transcribe_recording_asset(
     segment_iterator: Callable[[], Iterable[SpeechAudio]] | None = None,
     progress: Callable[[float], None] | None = None,
     partial: Callable[[list[dict], float, int], None] | None = None,
+    on_speech_segment: Callable[[SpeechAudio], None] | None = None,
+    on_stable_segment: Callable[[SpeechAudio, dict], None] | None = None,
+    speaker_enabled: bool = True,
+    source_size_override: int | None = None,
+    source_duration_ms_override: int | None = None,
 ) -> CompactTranscriptionResult:
     source = Path(source_path)
-    if not source.is_file() or source.stat().st_size < 1:
+    if segment_iterator is None and (not source.is_file() or source.stat().st_size < 1):
+        raise CompactTranscriptionError("recording_content_missing")
+    source_size = (
+        int(source_size_override)
+        if source_size_override is not None
+        else int(source.stat().st_size)
+    )
+    if source_size < 1:
         raise CompactTranscriptionError("recording_content_missing")
     source_digest = _normalized_source_sha256(source_sha256)
     asr = client or BatchAsrClient()
@@ -737,27 +768,33 @@ def transcribe_recording_asset(
         job_id=job_id,
         source_path=source,
         source_sha256=source_digest,
-        source_size=source.stat().st_size,
+        source_size=source_size,
         model_revision=model_revision,
+        speaker_enabled=speaker_enabled,
     )
-    duration_ms = _probe_duration_ms(source)
+    duration_ms = (
+        max(1, int(source_duration_ms_override))
+        if source_duration_ms_override is not None
+        else _probe_duration_ms(source)
+    )
     manager = model_manager or ModelManager.get_instance()
     vad_model = manager.create_vad_model()
     if vad_model is None and segment_iterator is None:
         raise CompactTranscriptionError("vad_not_ready")
-    camp_model = manager.get_camp_model()
+    camp_model = manager.get_camp_model() if speaker_enabled else None
     extractor = (
         SpeakerEmbeddingExtractor(camp_model, device=manager.device)
         if camp_model is not None
         else None
     )
-    profiles = _load_registered_profiles(owner_user_id)
+    profiles = _load_registered_profiles(owner_user_id) if speaker_enabled else []
     records: list[TranscriptRecord] = []
     pending: list[tuple[SpeechAudio, Future[np.ndarray | None] | None]] = []
     speaker_tasks: list[
         tuple[TranscriptRecord, Future[np.ndarray | None]]
     ] = []
     pending_audio_ms = 0
+    submitted_batch_count = 0
     observed_end_ms = 0
     speaker_executor = (
         ThreadPoolExecutor(max_workers=1, thread_name_prefix="laoji-campplus")
@@ -788,14 +825,24 @@ def transcribe_recording_asset(
         speaker_tasks = remaining
 
     def flush() -> None:
-        nonlocal pending_audio_ms
+        nonlocal pending_audio_ms, submitted_batch_count
         if not pending:
             return
         segments = [item[0] for item in pending]
+        batch_audio_ms = pending_audio_ms
+        started_at = time.perf_counter()
         results = asr.transcribe(segments, language)
+        wall_ms = max(0, round((time.perf_counter() - started_at) * 1000))
+        queue_ms = max((int(item.get("queue_ms") or 0) for item in results.values()), default=0)
+        infer_ms = max((int(item.get("infer_ms") or 0) for item in results.values()), default=0)
+        batch_ordinal = submitted_batch_count
+        submitted_batch_count += 1
         published: list[dict] = []
+        stable_callbacks: list[tuple[SpeechAudio, dict]] = []
         for segment, embedding_future in pending:
             checkpoint = store.save(segment, results[segment.segment_id])
+            if on_stable_segment is not None:
+                stable_callbacks.append((segment, checkpoint))
             record = TranscriptRecord(
                 ordinal=segment.ordinal,
                 segment_id=segment.segment_id,
@@ -821,6 +868,19 @@ def transcribe_recording_asset(
                 })
         pending.clear()
         pending_audio_ms = 0
+        privacy_log(
+            "transcription_batch_completed",
+            capability="media.upload",
+            batch_ordinal=batch_ordinal,
+            first_batch=batch_ordinal == 0,
+            items=len(segments),
+            audio_ms=batch_audio_ms,
+            queue_ms=max(0, queue_ms),
+            infer_ms=max(0, infer_ms),
+            wall_ms=wall_ms,
+            model_revision=model_revision,
+            status="completed",
+        )
         if partial is not None and published:
             processed_end_ms = max(item["end_ms"] for item in published)
             partial(
@@ -828,6 +888,11 @@ def transcribe_recording_asset(
                 min(1.0, max(0.0, 0.05 + 0.80 * processed_end_ms / max(1, duration_ms))),
                 processed_end_ms,
             )
+        # Stable text is the user-facing critical path. Speaker spool work is
+        # deliberately invoked only after the durable text callback returned.
+        if on_stable_segment is not None:
+            for segment, checkpoint in stable_callbacks:
+                on_stable_segment(segment, checkpoint)
         settle_speaker_tasks()
         while len(speaker_tasks) > SPEAKER_PIPELINE_MAX_PENDING:
             settle_speaker_tasks(wait_for_one=True)
@@ -846,13 +911,20 @@ def transcribe_recording_asset(
             if not _ITEM_ID_RE.fullmatch(segment.segment_id):
                 raise CompactTranscriptionError("segment_id_invalid")
             observed_end_ms = max(observed_end_ms, segment.end_ms)
+            if on_speech_segment is not None:
+                on_speech_segment(segment)
             segment_audio_ms = max(
                 1,
                 round(segment.audio.size * 1000 / SAMPLE_RATE),
             )
+            batch_audio_limit = (
+                ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS
+                if submitted_batch_count == 0
+                else ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+            )
             if pending and (
                 len(pending) >= ASR_BATCH_LIMIT
-                or pending_audio_ms + segment_audio_ms > ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+                or pending_audio_ms + segment_audio_ms > batch_audio_limit
             ):
                 flush()
             embedding_future = submit_embedding(segment)
@@ -868,14 +940,36 @@ def transcribe_recording_asset(
                     embedding=None,
                 )
                 records.append(record)
+                if partial is not None and record.text.strip():
+                    partial(
+                        [{
+                            "ordinal": record.ordinal,
+                            "segment_id": record.segment_id,
+                            "text": record.text,
+                            "language": record.language,
+                            "model_revision": model_revision,
+                            "start_ms": record.start_ms,
+                            "end_ms": record.end_ms,
+                            "confidence": 0.0,
+                        }],
+                        min(1.0, max(0.0, 0.05 + 0.80 * record.end_ms / max(1, duration_ms))),
+                        record.end_ms,
+                    )
+                if on_stable_segment is not None:
+                    on_stable_segment(segment, checkpoint)
                 if embedding_future is not None:
                     speaker_tasks.append((record, embedding_future))
             else:
                 pending.append((segment, embedding_future))
                 pending_audio_ms += segment_audio_ms
+                batch_audio_limit = (
+                    ASR_OFFLINE_FIRST_BATCH_MAX_AUDIO_MS
+                    if submitted_batch_count == 0
+                    else ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+                )
                 if (
                     len(pending) >= ASR_BATCH_LIMIT
-                    or pending_audio_ms >= ASR_OFFLINE_BATCH_MAX_AUDIO_MS
+                    or pending_audio_ms >= batch_audio_limit
                 ):
                     flush()
             settle_speaker_tasks()
@@ -891,7 +985,8 @@ def transcribe_recording_asset(
     records = _deduplicate_overlaps(records)
     if not records:
         raise CompactTranscriptionError("no_speech")
-    _assign_speakers(records, profiles)
+    if speaker_enabled:
+        _assign_speakers(records, profiles)
     turns = [
         {
             "segment_id": record.segment_id,
@@ -907,15 +1002,18 @@ def transcribe_recording_asset(
     result = CompactTranscriptionResult(
         model=asr.model,
         model_revision=model_revision,
-        source_duration_ms=duration_ms,
+        source_duration_ms=max(duration_ms, observed_end_ms),
         turns=turns,
         checkpoint_dir=str(store.root),
     )
     store.save_final(result)
     report(1.0)
-    print(
-        "[Compact-ASR] completed job=%s segments=%d duration_ms=%d model_revision=%s"
-        % (job_id, len(turns), duration_ms, model_revision),
-        flush=True,
+    privacy_log(
+        "transcription_completed",
+        capability="media.upload",
+        segments=len(turns),
+        duration_ms=duration_ms,
+        model_revision=model_revision,
+        status="completed",
     )
     return result

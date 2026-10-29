@@ -1,6 +1,6 @@
 import React from 'react';
 import { Animated, BackHandler, Easing, StyleSheet, useWindowDimensions } from 'react-native';
-import { Colors as C } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 
 const HIGH_LEVEL_DECELERATE = (value: number) => 1 - Math.pow(1 - value, 10);
 const MEDIUM_LEVEL_DECELERATE = (value: number) => 1 - Math.pow(1 - value, 6);
@@ -24,13 +24,14 @@ export function CalendarSlidePage({
   enterDuration?: number;
   exitDuration?: number;
 }) {
+  const { colors: C, reduceMotion } = useTheme();
   const { width, height } = useWindowDimensions();
   const [mounted, setMounted] = React.useState(visible);
   const mountedRef = React.useRef(visible);
   const transitionRef = React.useRef(0);
   const progress = React.useRef(new Animated.Value(visible ? 1 : 0)).current;
-  const resolvedEnterDuration = enterDuration ?? duration ?? (direction === 'vertical' ? 800 : 180);
-  const resolvedExitDuration = exitDuration ?? duration ?? (direction === 'vertical' ? 300 : 180);
+  const resolvedEnterDuration = reduceMotion ? 0 : enterDuration ?? duration ?? (direction === 'vertical' ? 800 : 180);
+  const resolvedExitDuration = reduceMotion ? 0 : exitDuration ?? duration ?? (direction === 'vertical' ? 300 : 180);
   const enterEasing = direction === 'vertical'
     ? HIGH_LEVEL_DECELERATE
     : Easing.out(Easing.ease);
@@ -93,6 +94,7 @@ export function CalendarSlidePage({
     <Animated.View
       style={[
         s.root,
+        { backgroundColor: C.body },
         { transform },
       ]}
       pointerEvents={visible ? 'auto' : 'none'}
@@ -107,5 +109,5 @@ export function CalendarSlidePage({
 }
 
 const s = StyleSheet.create({
-  root: { ...StyleSheet.absoluteFillObject, zIndex: 100, backgroundColor: C.body },
+  root: { ...StyleSheet.absoluteFillObject, zIndex: 100 },
 });

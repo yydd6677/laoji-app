@@ -14,6 +14,7 @@ import {
   isEligibleCachedFix,
   raceLocationProviders,
   resolveGeocodedAddress,
+  watchLocationProvider,
   type AddressConfidence,
   type AddressGranularity,
   type GeocodedAddressParts,
@@ -22,11 +23,11 @@ import {
   type ReverseGeocoderAdapter,
 } from './currentAddressPolicy';
 import { createHttpReverseGeocoder } from './reverseGeocoder';
-import { loadStoredToken } from './auth';
+import { getLocalDeviceRealtimeAuth } from './deviceApi';
 
 const CURRENT_LOCATION_TIMEOUT_MS = 12_000;
 const NATIVE_LOCATION_TIMEOUT_MS = 10_000;
-const DEGRADED_LOCATION_GRACE_MS = 1_200;
+const DEGRADED_LOCATION_GRACE_MS = 3_000;
 const SYSTEM_GEOCODER_TIMEOUT_MS = 4_000;
 const CONFIGURED_GEOCODER_TIMEOUT_MS = 5_000;
 
@@ -148,7 +149,10 @@ function configuredGeocoder(): ReverseGeocoderAdapter | null {
       url,
       undefined,
       CONFIGURED_GEOCODER_TIMEOUT_MS,
-      loadStoredToken,
+      async () => {
+        const auth = await getLocalDeviceRealtimeAuth();
+        return { token: auth.deviceToken, dataEpoch: auth.dataEpoch };
+      },
     );
   } catch {
     // Configuration validation normally rejects this before a build is made;
@@ -195,48 +199,19 @@ async function position(): Promise<LocationFix> {
 }
 
 function expoLiveLocationAttempt(): LocationProviderAttempt {
-  let subscription: Location.LocationSubscription | null = null;
-  let cancelled = false;
-  let resolveResult: (value: Location.LocationObject | null) => void = () => undefined;
-  let rejectResult: (reason: unknown) => void = () => undefined;
-  const result = new Promise<Location.LocationObject | null>((resolve, reject) => {
-    resolveResult = resolve;
-    rejectResult = reject;
-    void Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.Balanced, mayShowUserSettingsDialog: true },
-      value => {
-        if (cancelled) return;
-        subscription?.remove();
-        subscription = null;
-        resolve(value);
-      },
-    ).then(value => {
-      if (cancelled) {
-        value.remove();
-        return;
-      }
-      subscription = value;
-    }).catch(reject);
-  });
-  return {
-    provider: 'expo-live',
-    result: result.then(value => value ? expoLocationFix(value, 'live', 'expo-live') : null),
-    cancel: () => {
-      if (cancelled) return;
-      cancelled = true;
-      subscription?.remove();
-      subscription = null;
-      resolveResult(null);
-    },
-  };
+  return watchLocationProvider('expo-live', onFix => Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.High, mayShowUserSettingsDialog: false },
+      value => onFix(expoLocationFix(value, 'live', 'expo-live')),
+    ));
 }
 
 function expoCurrentPositionAttempt(): LocationProviderAttempt {
   let cancelled = false;
   const result = Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Balanced,
-    // The watch provider owns the optional system-settings prompt. Avoid two
-    // simultaneous prompts when both Expo providers race on Android.
+    accuracy: Location.Accuracy.High,
+    // Permission/services checks already have an explicit owner. An optional
+    // Google accuracy dialog can background the app and stall every racing
+    // provider even when ordinary GPS is available.
     mayShowUserSettingsDialog: false,
   }).then(value => {
     if (cancelled) return null;

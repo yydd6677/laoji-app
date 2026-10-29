@@ -1,19 +1,30 @@
-import { getAppStorageItem, setAppStorageItem } from './appStorage';
+import { deviceV2Request } from './deviceV2Api';
 
-const GENERATION_RETENTION_KEY = '@laoji:privacy:retainGeneratedResults:v1';
+type RetentionPreference = { schema_version: 2; enabled: boolean; revision: number };
 
-/**
- * The default is deliberately false.  This is a local preference rather than
- * an account setting because the device is the owner of the user's data.
- */
-export async function loadGenerationRetentionPreference(): Promise<boolean> {
-  try {
-    return (await getAppStorageItem(GENERATION_RETENTION_KEY)) === 'true';
-  } catch {
-    return false;
+function enabledFrom(value: RetentionPreference): boolean {
+  if (value?.schema_version !== 2 || typeof value.enabled !== 'boolean'
+    || !Number.isSafeInteger(value.revision) || value.revision < 0) {
+    throw new Error('生成结果保留设置响应无效');
   }
+  return value.enabled;
 }
 
-export async function saveGenerationRetentionPreference(value: boolean): Promise<void> {
-  await setAppStorageItem(GENERATION_RETENTION_KEY, value ? 'true' : 'false');
+// The server owns permission. Never revive the former local-only opt-in or
+// report a successful change before the authenticated server confirms it.
+export async function loadGenerationRetentionPreference(): Promise<boolean> {
+  return enabledFrom(await deviceV2Request<RetentionPreference>(
+    '/privacy/generated-results', {}, '暂时无法读取保留设置',
+  ));
+}
+
+export async function saveGenerationRetentionPreference(enabled: boolean): Promise<boolean> {
+  const result = enabledFrom(await deviceV2Request<RetentionPreference>(
+    '/privacy/generated-results', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }, '保留设置未保存',
+  ));
+  if (result !== enabled) throw new Error('保留设置未确认');
+  return result;
 }

@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { CalendarSlidePage } from './CalendarSlidePage';
 import { CalendarDetailTitleBar, CalendarTextTitleBar } from './CalendarTitleBar';
 import { CalendarSwitch } from './CalendarSwitch';

@@ -3,16 +3,14 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { BEST_SPEED, zip } from 'react-native-zip-archive';
 import type {
-  MeetingContentShareSection,
-  MeetingContentShareSnapshot,
   MeetingSummaryActionCandidate,
   MeetingSummaryDocument,
   MeetingFactsResultV3,
   MeetingTemplate,
 } from '../domain/meeting';
-import type { MarkerRecord, MeetingAttachmentRecord } from '../data/repositories';
+import type { MarkerRecord, MeetingAttachmentRecord } from "../data/repositories/meetingNoteRepository";
 import { Meeting, TranscriptLine } from '../types';
-import { ApiMeetingAudioInfo, fetchMeetingAudioInfo } from './api';
+import type { MeetingAudioInfo } from './meetingAudioInfo';
 import { meetingAudioUrlErrorMessage, validateMeetingAudioUrl } from './meetingAudioSecurity';
 import { meetingSummaryTextToPlainText } from './meetingSummaryFormat';
 import {
@@ -21,7 +19,6 @@ import {
   meetingSummarySectionsForPresentation,
 } from './meetingSummaryDocument';
 import { diagnosticAudit } from './diagnostics';
-import { meetingRemoteIdentity } from '../utils/meetingMedia';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { isStoredMeetingAttachmentUri } from './meetingAttachmentStorage';
 import { toSimplifiedChinese } from '../utils/simplifiedChinese';
@@ -45,7 +42,6 @@ export type MeetingShareErrorCode =
   | 'NO_AUDIO'
   | 'NO_MARKERS'
   | 'NO_ATTACHMENTS'
-  | 'LINK_AUDIO_UNSUPPORTED'
   | 'NO_MEETING_CONTENT'
   | 'SHARING_UNAVAILABLE';
 export const MEETING_SHARE_RETENTION_MS = 10 * 60 * 1000;
@@ -71,9 +67,7 @@ export interface MeetingShareInput {
   attachments?: readonly MeetingAttachmentRecord[];
   transcriptRevisionId?: string | null;
   summaryVersionId?: string | null;
-  isGuest: boolean;
-  accessToken?: string | null;
-  audioInfo?: ApiMeetingAudioInfo | null;
+  audioInfo?: MeetingAudioInfo | null;
 }
 
 export interface MeetingShareManifest {
@@ -261,11 +255,17 @@ type TextShareContent = {
   included: MeetingShareContentKey[];
 };
 
+type MeetingShareSection = {
+  key: Exclude<MeetingShareContentKey, 'audio'>;
+  title: string;
+  content: string;
+};
+
 function buildSelectedMeetingSections(
   selection: MeetingShareSelection,
   input: MeetingShareInput,
-): MeetingContentShareSection[] {
-  const sections: MeetingContentShareSection[] = [];
+): MeetingShareSection[] {
+  const sections: MeetingShareSection[] = [];
   if (selection.info) {
     sections.push({ key: 'info', title: '基本会议信息', content: buildMeetingInfoText(input.meeting) });
   }
@@ -317,7 +317,7 @@ function buildSelectedMeetingDocument(
   input: MeetingShareInput,
 ): TextShareContent {
   const sections = buildSelectedMeetingSections(selection, input);
-  const markdownSection = (section: MeetingContentShareSection): string => {
+  const markdownSection = (section: MeetingShareSection): string => {
     const content = toSimplifiedChinese(section.content).replace(/^\s*•\s+/gm, '- ');
     if (section.key === 'info') {
       return content.split('\n').filter(Boolean).map(line => `- ${line}`).join('\n');
@@ -332,26 +332,6 @@ function buildSelectedMeetingDocument(
         ].join('\n\n')
       : '',
     included: sections.map(section => section.key),
-  };
-}
-
-export function buildMeetingContentShareSnapshot(
-  selection: MeetingShareSelection,
-  input: MeetingShareInput,
-): MeetingContentShareSnapshot {
-  if (selection.audio) {
-    throw new MeetingShareError('LINK_AUDIO_UNSUPPORTED', 'meeting content links do not include audio');
-  }
-  const sections = buildSelectedMeetingSections(selection, input);
-  if (sections.length === 0) {
-    throw new MeetingShareError('NO_MEETING_CONTENT', 'selected meeting content is unavailable');
-  }
-  return {
-    schema_version: 1,
-    sections,
-    source_summary_version_id: input.summaryVersionId?.trim()
-      || input.summaryDocument?.remoteVersionId?.trim()
-      || null,
   };
 }
 
@@ -414,7 +394,7 @@ function pathToFileUri(path: string): string {
   return path.startsWith('file://') ? path : `file://${path}`;
 }
 
-function audioExtension(info: ApiMeetingAudioInfo): string {
+function audioExtension(info: MeetingAudioInfo): string {
   const source = info.file_name || info.url.split(/[?#]/)[0];
   const match = source.match(/\.([A-Za-z0-9]{2,6})$/);
   if (match) return `.${match[1].toLowerCase()}`;
@@ -477,7 +457,7 @@ export async function buildMeetingShareManifest(
   };
 }
 
-async function resolveAudioInfo(input: MeetingShareInput): Promise<ApiMeetingAudioInfo | null> {
+async function resolveAudioInfo(input: MeetingShareInput): Promise<MeetingAudioInfo | null> {
   if (input.audioInfo) return input.audioInfo;
   const localUri = input.meeting.audioLocalUri;
   if (localUri) {
@@ -494,11 +474,7 @@ async function resolveAudioInfo(input: MeetingShareInput): Promise<ApiMeetingAud
       // Fall through to the cloud copy when a stale local URI is unavailable.
     }
   }
-  if (input.isGuest || !input.accessToken) return null;
-  const remoteMeetingId = meetingRemoteIdentity(input.meeting);
-  return remoteMeetingId
-    ? fetchMeetingAudioInfo(remoteMeetingId, input.accessToken)
-    : null;
+  return null;
 }
 
 async function materializeAudio(
@@ -512,16 +488,12 @@ async function materializeAudio(
   if (audio.url.startsWith('file://') || audio.url.startsWith('content://')) {
     await FileSystem.copyAsync({ from: audio.url, to: targetUri });
   } else {
-    if (audio.requires_auth && !input.accessToken) throw new Error('meeting audio authentication required');
+    if (audio.requires_auth) throw new Error('meeting audio authentication required');
     const remoteUrl = validateMeetingAudioUrl(audio.url, {
       requiresAuth: audio.requires_auth,
       expiresAt: audio.expires_at,
     });
-    const result = await FileSystem.downloadAsync(remoteUrl, targetUri, {
-      headers: audio.requires_auth && input.accessToken
-        ? { Authorization: `Bearer ${input.accessToken}` }
-        : undefined,
-    });
+    const result = await FileSystem.downloadAsync(remoteUrl, targetUri);
     if (result.status < 200 || result.status >= 300) {
       throw new Error(`meeting audio download failed: ${result.status}`);
     }
@@ -654,7 +626,6 @@ export function meetingShareErrorMessage(error: unknown): string {
     if (error.code === 'NO_AUDIO') return '当前会议没有可分享的录音文件。';
     if (error.code === 'NO_MARKERS') return '所选标记已不存在，请重新选择。';
     if (error.code === 'NO_ATTACHMENTS') return '所选附件暂时无法读取，请稍后重试。';
-    if (error.code === 'LINK_AUDIO_UNSUPPORTED') return '录音请使用文件分享。';
     if (error.code === 'NO_MEETING_CONTENT') return '所选会议内容当前不可分享，请重新选择。';
     if (error.code === 'SHARING_UNAVAILABLE') return '当前设备暂不支持系统文件分享。';
   }

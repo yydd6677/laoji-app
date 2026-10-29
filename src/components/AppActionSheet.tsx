@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors as C } from '../theme/colors';
+import type { ColorPalette } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 
 export const ACTION_PANEL_GEOMETRY = {
   edgeMargin: 12,
@@ -30,19 +31,18 @@ export type AppActionSheetItem = {
 };
 
 export function AppActionSheet({
-  feishuEvidence,
   visible,
   title,
   items,
   onClose,
 }: {
-  // CAL-REPEAT-RRULE-001: callers attach their source contract to the real modal root.
-  feishuEvidence?: string;
   visible: boolean;
   title?: string;
   items: AppActionSheetItem[];
   onClose: () => void;
 }) {
+  const { colors: C, appearance, reduceMotion } = useTheme();
+  const s = useMemo(() => createStyles(C, appearance.fontFamily), [C, appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -66,7 +66,7 @@ export function AppActionSheet({
     progress.stopAnimation();
     Animated.timing(progress, {
       toValue: 0,
-      duration: ACTION_PANEL_GEOMETRY.animationDuration,
+      duration: reduceMotion ? 0 : ACTION_PANEL_GEOMETRY.animationDuration,
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (!finished || transitionRef.current !== transition) return;
@@ -77,7 +77,7 @@ export function AppActionSheet({
       setClosing(false);
       afterExit?.();
     });
-  }, [progress]);
+  }, [progress, reduceMotion]);
 
   useEffect(() => {
     if (visible) {
@@ -90,14 +90,14 @@ export function AppActionSheet({
       progress.setValue(0);
       Animated.timing(progress, {
         toValue: 1,
-        duration: ACTION_PANEL_GEOMETRY.animationDuration,
+        duration: reduceMotion ? 0 : ACTION_PANEL_GEOMETRY.animationDuration,
         useNativeDriver: true,
       }).start();
       return;
     }
 
     finishPresentation();
-  }, [finishPresentation, progress, visible]);
+  }, [finishPresentation, progress, reduceMotion, visible]);
 
   useEffect(() => () => {
     transitionRef.current += 1;
@@ -127,7 +127,7 @@ export function AppActionSheet({
       statusBarTranslucent
       onRequestClose={requestClose}
     >
-      <View nativeID={feishuEvidence} style={s.root} accessibilityViewIsModal>
+      <View style={s.root} accessibilityViewIsModal>
         <Animated.View
           pointerEvents="auto"
           style={[s.backdrop, { opacity: progress }]}
@@ -200,7 +200,7 @@ export function AppActionSheet({
   );
 }
 
-const s = StyleSheet.create({
+const createStyles = (C: ColorPalette, fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: C.overlay },
   frame: {
@@ -223,7 +223,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { maxWidth: '100%', fontSize: ACTION_PANEL_GEOMETRY.titleSize, lineHeight: 20, fontWeight: '400', color: C.faint, textAlign: 'center' },
+  title: { maxWidth: '100%', fontFamily, fontSize: ACTION_PANEL_GEOMETRY.titleSize, lineHeight: 20, fontWeight: '400', color: C.faint, textAlign: 'center' },
   headerDivider: { height: ACTION_PANEL_GEOMETRY.dividerHeight, backgroundColor: C.divider },
   item: {
     position: 'relative',
@@ -235,7 +235,7 @@ const s = StyleSheet.create({
     backgroundColor: C.body,
   },
   itemPressed: { backgroundColor: C.inputBg },
-  itemLabel: { maxWidth: '100%', fontSize: ACTION_PANEL_GEOMETRY.itemSize, lineHeight: 24, fontWeight: '400', textAlign: 'center' },
+  itemLabel: { maxWidth: '100%', fontFamily, fontSize: ACTION_PANEL_GEOMETRY.itemSize, lineHeight: 24, fontWeight: '400', textAlign: 'center' },
   itemDivider: { position: 'absolute', left: 0, right: 0, bottom: 0, height: ACTION_PANEL_GEOMETRY.dividerHeight, backgroundColor: C.divider },
   cancel: {
     width: '100%',
@@ -248,5 +248,5 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     marginTop: ACTION_PANEL_GEOMETRY.cancelGap,
   },
-  cancelText: { fontSize: ACTION_PANEL_GEOMETRY.itemSize, lineHeight: 24, fontWeight: '400', color: C.text },
+  cancelText: { fontFamily, fontSize: ACTION_PANEL_GEOMETRY.itemSize, lineHeight: 24, fontWeight: '400', color: C.text },
 });

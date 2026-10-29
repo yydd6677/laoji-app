@@ -18,9 +18,12 @@ import com.laoji.nativeplatform.transfer.meetingUploadTag
 import com.laoji.nativeplatform.audio.RecorderServiceClient
 import com.laoji.nativeplatform.audio.RecordingRepository
 import com.laoji.nativeplatform.mediaimport.MediaIngestor
-import com.laoji.nativeplatform.mediaclip.MediaClipExporter
+import com.laoji.nativeplatform.legacy.LegacyMediaClipCleanup
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.functions.Coroutine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -28,9 +31,27 @@ class LaojiTransferModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LaojiTransfer")
 
-    AsyncFunction("setCredentialLease") { scope: String, generation: Long, apiBaseUrl: String, accessToken: String ->
+    AsyncFunction("setDeviceV2CredentialLease") {
+        scope: String,
+        generation: Long,
+        apiBaseUrl: String,
+        accessToken: String,
+        deviceId: String,
+        deviceEpochId: String,
+        keyVersion: Int,
+        expiresAtMs: Long,
+      ->
       CredentialLeaseStore(requireContext()).put(
-        CredentialLease(scope, generation, apiBaseUrl.trim().trimEnd('/'), accessToken)
+        CredentialLease(
+          scope = scope,
+          generation = generation,
+          apiBaseUrl = apiBaseUrl.trim().trimEnd('/'),
+          accessToken = accessToken,
+          deviceId = deviceId,
+          deviceEpochId = deviceEpochId,
+          keyVersion = keyVersion,
+          expiresAtMs = expiresAtMs,
+        )
       )
     }
 
@@ -41,20 +62,27 @@ class LaojiTransferModule : Module() {
 
     AsyncFunction("enqueueMeetingUpload") { input: Map<String, Any?> ->
       val scope = input.requiredString("scope")
+      val credentialScope = (input["credentialScope"] as? String)?.takeIf { it.isNotBlank() } ?: scope
       val generation = input.requiredLong("generation")
       val meetingId = input.requiredString("meetingId")
-      val remoteMeetingId = input.requiredString("remoteMeetingId")
       val operationId = input.requiredString("operationId")
       val fileUri = input.requiredString("fileUri")
       val mimeType = input.requiredString("mimeType")
-      val fileName = input.requiredString("fileName")
-      val protocol = input.requiredString("protocol")
-      val recordingAssetId = input["recordingAssetId"] as? String ?: ""
-      val recordingRole = input["recordingRole"] as? String ?: "primary"
-      val recordingOrigin = input["recordingOrigin"] as? String ?: "captured"
+      val recordingAssetId = input.requiredString("recordingAssetId")
       val expectedBytes = input.requiredLong("expectedBytes")
-      val durationMs = input.requiredLong("durationMs")
-      val checksumSha256 = input["checksumSha256"] as? String ?: ""
+      val checksumSha256 = input.requiredString("checksumSha256")
+      val deviceId = input.requiredString("deviceId")
+      val deviceEpochId = input.requiredString("deviceEpochId")
+      val bindingId = input.requiredString("bindingId")
+      val bindingGeneration = input.requiredString("bindingGeneration")
+      val bindingRevision = input.requiredLong("bindingRevision")
+      val cancelRevision = input.requiredLong("cancelRevision")
+      val assetGeneration = input.requiredString("assetGeneration")
+      require(bindingGeneration.matches(Regex("^[0-9a-f]{32}$"))) {
+        "binding identity is required"
+      }
+      require(bindingRevision >= 1 && cancelRevision >= 0) { "binding revision is invalid" }
+      require(assetGeneration.matches(Regex("^[0-9a-f]{32}$"))) { "asset generation is invalid" }
       if (MeetingDeletionStore(requireContext()).isDeleted(scope, meetingId)) {
         throw IllegalStateException("meeting has been deleted")
       }
@@ -64,39 +92,56 @@ class LaojiTransferModule : Module() {
         .setInputData(
           workDataOf(
             MeetingUploadWorker.KEY_SCOPE to scope,
+            MeetingUploadWorker.KEY_CREDENTIAL_SCOPE to credentialScope,
             MeetingUploadWorker.KEY_GENERATION to generation,
             MeetingUploadWorker.KEY_MEETING_ID to meetingId,
-            MeetingUploadWorker.KEY_REMOTE_MEETING_ID to remoteMeetingId,
             MeetingUploadWorker.KEY_OPERATION_ID to operationId,
             MeetingUploadWorker.KEY_FILE_URI to fileUri,
             MeetingUploadWorker.KEY_MIME_TYPE to mimeType,
-            MeetingUploadWorker.KEY_FILE_NAME to fileName,
-            MeetingUploadWorker.KEY_PROTOCOL to protocol,
+            MeetingUploadWorker.KEY_PROTOCOL to MeetingUploadWorker.PROTOCOL_DEVICE_V2_R2,
             MeetingUploadWorker.KEY_RECORDING_ASSET_ID to recordingAssetId,
-            MeetingUploadWorker.KEY_RECORDING_ROLE to recordingRole,
-            MeetingUploadWorker.KEY_RECORDING_ORIGIN to recordingOrigin,
             MeetingUploadWorker.KEY_EXPECTED_BYTES to expectedBytes,
-            MeetingUploadWorker.KEY_DURATION_MS to durationMs,
-            MeetingUploadWorker.KEY_CHECKSUM_SHA256 to checksumSha256
+            MeetingUploadWorker.KEY_CHECKSUM_SHA256 to checksumSha256,
+            MeetingUploadWorker.KEY_DEVICE_ID to deviceId,
+            MeetingUploadWorker.KEY_DEVICE_EPOCH_ID to deviceEpochId,
+            MeetingUploadWorker.KEY_BINDING_ID to bindingId,
+            MeetingUploadWorker.KEY_BINDING_GENERATION to bindingGeneration,
+            MeetingUploadWorker.KEY_BINDING_REVISION to bindingRevision,
+            MeetingUploadWorker.KEY_CANCEL_REVISION to cancelRevision,
+            MeetingUploadWorker.KEY_ASSET_GENERATION to assetGeneration,
           )
         )
         .addTag(scopeTag(scope))
+        .addTag(scopeTag(credentialScope))
         .addTag(meetingUploadTag(scope, meetingId))
         .addTag(operationTag(operationId))
         .build()
-      WorkManager.getInstance(requireContext()).enqueueUniqueWork(
-        "laoji-meeting-upload:$scope:$operationId",
+      val uniqueWorkName = "laoji-device-v2-r2:$deviceEpochId:$recordingAssetId:$assetGeneration"
+      val workManager = WorkManager.getInstance(requireContext())
+      workManager.enqueueUniqueWork(
+        uniqueWorkName,
         ExistingWorkPolicy.KEEP,
         request
       )
-      request.id.toString()
+      // KEEP may retain an older request. Returning the newly-built UUID here
+      // strands JS on a permanent `missing` state, even though the old work is
+      // still running. Resolve the actual unique work after enqueue instead.
+      val uniqueInfos = workManager
+        .getWorkInfosForUniqueWork(uniqueWorkName)
+        .get(5, TimeUnit.SECONDS)
+      val actual = uniqueInfos.firstOrNull { !it.state.isFinished }
+        ?: uniqueInfos.firstOrNull()
+        ?: throw IllegalStateException("unique upload work was not persisted")
+      actual.id.toString()
     }
 
-    AsyncFunction("getUploadState") { workId: String ->
-      val info = WorkManager.getInstance(requireContext())
-        .getWorkInfoById(UUID.fromString(workId))
-        .get(5, TimeUnit.SECONDS)
-      workInfoMap(info)
+    AsyncFunction("getUploadState") Coroutine { workId: String ->
+      withContext(Dispatchers.IO) {
+        val info = WorkManager.getInstance(requireContext())
+          .getWorkInfoById(UUID.fromString(workId))
+          .get(5, TimeUnit.SECONDS)
+        workInfoMap(info)
+      }
     }
 
     AsyncFunction("cancelUpload") { workId: String ->
@@ -112,7 +157,7 @@ class LaojiTransferModule : Module() {
         RecorderServiceClient.currentSessionId(),
       )
       val deletedImportedFiles = MediaIngestor(context).deleteMeetingAssets(meetingId)
-      val deletedClipFiles = MediaClipExporter(context).deleteMeeting(meetingId)
+      val deletedClipFiles = LegacyMediaClipCleanup.deleteMeeting(context, meetingId)
       mapOf("deletedFiles" to deletedFiles + deletedImportedFiles + deletedClipFiles)
     }
   }
@@ -130,6 +175,7 @@ class LaojiTransferModule : Module() {
       "remoteAssetId" to info.outputData.getString(MeetingUploadWorker.KEY_REMOTE_ASSET_ID),
       "remoteRevision" to info.outputData.getLong(MeetingUploadWorker.KEY_REMOTE_REVISION, -1)
         .takeIf { it >= 1 },
+      "transcriptionTaskId" to info.outputData.getString(MeetingUploadWorker.KEY_TRANSCRIPTION_TASK_ID),
       "runAttemptCount" to info.runAttemptCount
     )
   }

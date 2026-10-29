@@ -1,14 +1,12 @@
 import type { IngestedMeetingMedia } from 'laoji-native-platform';
 import {
   assertScopeKey,
+  createSecureAssetGeneration,
   transitionProcessingStage,
   type ScopeKey,
 } from '../../domain/meeting';
-import type {
-  MeetingNoteAggregate,
-  MeetingNoteRepository,
-  RecordingAssetRecord,
-} from '../../data/repositories';
+import type { MeetingNoteAggregate, MeetingNoteRepository, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 
 export type AttachImportedMeetingMediaErrorCode =
   | 'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE'
@@ -124,14 +122,13 @@ export class AttachImportedMeetingMediaUseCase {
           'target meeting is unavailable',
         );
       }
-      const [capture, upload, summary, currentAsset, primary] = await Promise.all([
+      const [capture, upload, currentAsset, primary] = await Promise.all([
         transaction.getStage(targetMeetingId, input.scopeKey, 'capture'),
         transaction.getStage(targetMeetingId, input.scopeKey, 'upload'),
-        transaction.getStage(targetMeetingId, input.scopeKey, 'summary'),
         transaction.getRecordingAsset(targetMeetingId, assetId, input.scopeKey),
         transaction.getPrimaryRecording(targetMeetingId, input.scopeKey),
       ]);
-      if (!capture || !upload || !summary) {
+      if (!capture || !upload) {
         throw new AttachImportedMeetingMediaError(
           'ERR_MEDIA_IMPORT_TARGET_UNAVAILABLE',
           'target meeting processing state is incomplete',
@@ -166,12 +163,12 @@ export class AttachImportedMeetingMediaUseCase {
         meeting.updatedAtMs,
         capture.updatedAtMs,
         upload.updatedAtMs,
-        summary.updatedAtMs,
       );
       try {
         await transaction.saveRecordingAsset({
           id: assetId,
           meetingId: targetMeetingId,
+          assetGeneration: createSecureAssetGeneration(),
           role: primary ? 'secondary' : 'primary',
           origin: 'imported',
           nativeSessionId: null,
@@ -182,8 +179,11 @@ export class AttachImportedMeetingMediaUseCase {
           byteSize,
           durationMs,
           checksumSha256,
+          sourceSha256: canonicalRecordingSourceSha256(checksumSha256),
           waveformJson: null,
           localState: 'local_ready',
+          uploadOperationId: null,
+          remoteObjectRevision: null,
           createdAtMs: updatedAtMs,
           updatedAtMs,
           lastVerifiedAtMs: updatedAtMs,
@@ -204,17 +204,7 @@ export class AttachImportedMeetingMediaUseCase {
           inputFingerprint: null,
         }, updatedAtMs), input.scopeKey);
       }
-      if (input.scopeKey === 'guest') {
-        if (upload.status !== 'not_required') {
-          await transaction.upsertStage(transitionProcessingStage(upload, {
-            stage: 'upload',
-            status: 'not_required',
-            progress: null,
-            jobId: null,
-            inputFingerprint: null,
-          }, updatedAtMs), input.scopeKey);
-        }
-      } else if (upload.status === 'not_required' || upload.status === 'uploaded') {
+      if (upload.status === 'not_required' || upload.status === 'uploaded') {
         await transaction.upsertStage(transitionProcessingStage(upload, {
           stage: 'upload',
           status: 'queued',
@@ -224,19 +214,9 @@ export class AttachImportedMeetingMediaUseCase {
         }, updatedAtMs), input.scopeKey);
       }
 
-      const summaryBecameStale = await transaction.markCurrentSummaryStale(
-        targetMeetingId,
-        input.scopeKey,
-      );
-      if (summaryBecameStale && summary.status === 'ready') {
-        await transaction.upsertStage(transitionProcessingStage(summary, {
-          stage: 'summary',
-          status: 'stale',
-          progress: null,
-          jobId: null,
-          inputFingerprint: null,
-        }, updatedAtMs), input.scopeKey);
-      }
+      // Receiving bytes is not new summary evidence. The transcript/note
+      // writers invalidate a result only after its actual content changes.
+      // In particular, the final hardware file can arrive after live text.
 
       await transaction.updateMeeting(targetMeetingId, input.scopeKey, {
         ...(primary ? {} : {

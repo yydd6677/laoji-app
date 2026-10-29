@@ -36,8 +36,8 @@ export const DEFAULT_PROFILE: UserProfile = {
   avatarLocalUri: null,
 };
 
-export const GUEST_PROFILE: UserProfile = {
-  nickname: '访客用户',
+export const LOCAL_PROFILE: UserProfile = {
+  nickname: '老记用户',
   email: '',
   phone: '',
   avatarInitial: '',

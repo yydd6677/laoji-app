@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "evidenceOwner": "docs/quality/EXPERIENCE-SLICE-20261025.md",
+  "patterns": [
+    {
+      "patternId": "chrome.theme-continuity",
+      "implementationPaths": ["modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/ui/NativeUiTokens.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/ui/NativeBottomBarView.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarChromeViews.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/MonthCalendarViews.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/DayTimelineViews.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/SingleDayCalendarView.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/DayAllDaySectionView.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/calendar/CalendarShellViews.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/ui/NativeOverlayHosts.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/ui/NativeToastHostView.kt"],
+      "nativeOrRn": "native",
+      "stateCases": ["selected", "cached", "theme-change", "background-theme-write", "expanded-date", "timeline-scroll", "weekend", "date-panel", "year-month-wheel", "all-day-scroll", "create-drag-selection", "edit-time-endpoint", "repeat-end-date", "save-disabled-meaning", "open-native-dialog", "open-native-menu", "toast-lifetime", "provider-route-continuity"],
+      "themeCases": ["neutral", "vivid", "paper", "midnight"],
+      "runnerPaths": ["modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/ui/NativeThemeContinuityTest.kt", "tools/tests/shared-control-theme.test.cjs"]
+    },
+    {
+      "patternId": "chrome.detail",
+      "implementationPaths": ["modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/minutes/MinutesDetailSurface.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/media/Media3MinutesPlayerAdapter.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/media/MediaSessionMinutesPlayerController.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/media/MinutesPlaybackRecoveryWriter.kt"],
+      "nativeOrRn": "native",
+      "stateCases": ["ready", "status-change", "tab-change", "reenter", "theme-change", "unsaved-title", "player-progress", "player-recovery-off-main", "player-clear-fence", "player-seek-before-play", "player-bundled-fonts-1-1.3-2", "open-menu", "transcript-search-selection"],
+      "themeCases": ["neutral", "vivid", "paper", "midnight"],
+      "runnerPaths": ["modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/minutes/MinutesExperienceTest.kt", "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/minutes/MeetingReleaseJourneyTest.kt"]
+    },
+    {
+      "patternId": "content.editorial",
+      "implementationPaths": ["modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/minutes/MinutesDetailPages.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/minutes/MinutesSummaryLeadView.kt"],
+      "nativeOrRn": "native",
+      "stateCases": ["short", "long", "expanded", "status-change", "recycled", "restore", "action-focus"],
+      "themeCases": ["neutral", "vivid", "paper", "midnight"],
+      "runnerPaths": ["modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/minutes/MinutesExperienceTest.kt", "modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/minutes/MinutesSummaryRecyclerTest.kt"]
+    },
+    {
+      "patternId": "input.conversation",
+      "implementationPaths": ["src/components/MeetingQuestionSheet.tsx", "src/components/KeyboardFrame.tsx"],
+      "nativeOrRn": "rn",
+      "stateCases": ["source-loading", "ready", "sending", "failure", "history", "reopen", "theme"],
+      "themeCases": ["neutral", "vivid", "paper", "midnight"],
+      "runnerPaths": ["tools/tests/meeting-question-continuity.test.cjs", "tools/tests/keyboard-frame.test.cjs", "tools/tests/question-theme-typography.test.cjs"]
+    },
+    {
+      "patternId": "input.capture",
+      "implementationPaths": ["modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceHostView.kt", "modules/laoji-native-platform/android/src/main/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceFields.kt"],
+      "nativeOrRn": "native",
+      "stateCases": ["confirmation", "confirmation-long", "confirmation-font2", "equal-update", "theme-draft-composition", "theme-clarification", "theme-held-capture"],
+      "themeCases": ["neutral", "vivid", "paper", "midnight"],
+      "runnerPaths": ["modules/laoji-native-platform/android/src/androidTest/java/com/laoji/nativeplatform/schedulevoice/ScheduleVoiceExperienceTest.kt"]
+    }
+  ]
+}

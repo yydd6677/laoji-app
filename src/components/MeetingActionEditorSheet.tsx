@@ -16,7 +16,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { FEISHU_MOTION, getFeishuTokens } from '../theme/feishuTokens';
+import { UI_MOTION } from '../theme/uiTokens';
+import { useTheme } from '../theme/ThemeProvider';
 import { meetingActionReminderAtForDue } from '../services/notifications';
 
 export interface MeetingActionEditorValue {
@@ -70,13 +71,14 @@ function ReminderToggle({
   disabled: boolean;
   onToggle: () => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const progress = useRef(new Animated.Value(enabled ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.timing(progress, {
       toValue: enabled ? 1 : 0,
-      duration: FEISHU_MOTION.fabSegment,
+      duration: UI_MOTION.fabSegment,
       easing: Easing.inOut(Easing.ease),
       useNativeDriver: true,
     }).start();
@@ -129,7 +131,8 @@ export function MeetingActionEditorSheet({
   onSave: (value: MeetingActionEditorSaveValue) => void;
   onStatusChange: (status: 'pending' | 'dismissed') => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -429,32 +432,32 @@ export function MeetingActionEditorSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
   sheet: { flexShrink: 1, borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center' },
   titleAction: { width: 72, height: 44, alignItems: 'center', justifyContent: 'center' },
-  titleActionText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '500' },
+  titleActionText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '500' },
   form: { paddingHorizontal: 16, paddingBottom: 4 },
-  label: { fontSize: 13, lineHeight: 20, marginBottom: 6 },
+  label: { fontFamily, fontSize: 13, lineHeight: 20, marginBottom: 6 },
   sectionLabel: { marginTop: 14 },
-  contentInput: { minHeight: 88, maxHeight: 160, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, lineHeight: 23 },
-  singleInput: { height: 48, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, fontSize: 16, lineHeight: 23 },
+  contentInput: { minHeight: 88, maxHeight: 160, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, fontFamily, fontSize: 16, lineHeight: 23 },
+  singleInput: { height: 48, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, fontFamily, fontSize: 16, lineHeight: 23 },
   dateRow: { height: 48, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center' },
-  dateText: { flex: 1, fontSize: 16, lineHeight: 23 },
-  clearDate: { fontSize: 14, lineHeight: 22, paddingHorizontal: 4 },
+  dateText: { flex: 1, fontFamily, fontSize: 16, lineHeight: 23 },
+  clearDate: { fontFamily, fontSize: 14, lineHeight: 22, paddingHorizontal: 4 },
   reminderRow: { height: 56, marginTop: 10, borderWidth: 1, borderRadius: 6, paddingLeft: 12, paddingRight: 4, flexDirection: 'row', alignItems: 'center' },
   reminderCopy: { flex: 1 },
-  reminderTitle: { fontSize: 16, lineHeight: 22 },
-  reminderValue: { marginTop: 1, fontSize: 12, lineHeight: 17 },
+  reminderTitle: { fontFamily, fontSize: 16, lineHeight: 22 },
+  reminderValue: { marginTop: 1, fontFamily, fontSize: 12, lineHeight: 17 },
   toggleTarget: { width: 48, height: 44, alignItems: 'center', justifyContent: 'center' },
   toggleTrack: { width: 40, height: 24, borderRadius: 12 },
   toggleThumb: { position: 'absolute', left: 6, width: 20, height: 20, borderRadius: 10 },
   errorSlot: { height: 32, justifyContent: 'center' },
-  error: { fontSize: 13, lineHeight: 18 },
+  error: { fontFamily, fontSize: 13, lineHeight: 18 },
   save: { height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  saveText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  saveText: { fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
 });

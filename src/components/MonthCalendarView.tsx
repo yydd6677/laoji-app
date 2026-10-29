@@ -290,7 +290,6 @@ function MonthPage({
   width,
   height,
   active,
-  selectedDate,
   today,
   events,
   onSelectDate,
@@ -732,7 +731,7 @@ function ExpandedDayPage({
         <View style={s.emptyCopy}>
           <Text style={s.emptyText}>暂无日程，</Text>
           <TouchableOpacity onPress={() => onCreate(date)} activeOpacity={0.7}>
-            <Text style={s.emptyAction}>点击创建</Text>
+            <Text style={s.emptyAction}>新建日程</Text>
           </TouchableOpacity>
         </View>
       </View>

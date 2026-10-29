@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.StatFs
 import android.system.Os
 import android.system.OsConstants
+import android.util.Log
 import expo.modules.kotlin.exception.CodedException
 import org.json.JSONObject
 import java.io.File
@@ -14,9 +15,15 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 
-private val mediaImportIoLock = Any()
+private val mediaImportRootLock = Any()
+private val mediaImportIoLocks = ConcurrentHashMap<String, Any>()
+private val mediaImportRecoveryBackoff = MediaImportRecoveryBackoff()
+
+private fun mediaImportLockFor(meetingId: String): Any =
+  mediaImportIoLocks.computeIfAbsent(meetingId) { Any() }
 
 internal class MediaImportException(
   code: String,
@@ -132,13 +139,13 @@ internal class MediaIngestor(context: Context) {
   private val appContext = context.applicationContext
   private val root = File(appContext.filesDir, "meeting-audio/imports")
 
-  fun ingest(
+  fun stage(
     sourceUri: String,
     meetingId: String,
     assetId: String,
     origin: String,
     maximumBytes: Long,
-  ): IngestedMeetingMedia = synchronized(mediaImportIoLock) {
+  ): Boolean = synchronized(mediaImportLockFor(meetingId.trim())) {
     val normalizedMeetingId = validateIdentity(meetingId, "meeting")
     val normalizedAssetId = validateIdentity(assetId, "asset")
     if (origin !in setOf("file_import", "share_intent", "recording_merge")) {
@@ -155,12 +162,20 @@ internal class MediaIngestor(context: Context) {
     val metadata = resolveMediaSourceMetadata(appContext, uri)
     val mimeType = resolvedSupportedMimeType(metadata.fileName, metadata.mimeType)
       ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "不支持此录音格式")
+    val videoSource = mimeType.startsWith("video/")
     metadata.byteSize?.let { size ->
       if (size <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "录音文件为空")
-      if (size > maximumBytes) throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "录音文件超过大小限制")
+      // A video container can be much larger than the audio track LaoJi keeps.
+      // Applying the remote audio limit to the source video rejected valid
+      // imports before extraction (for example, a 1.5 GiB video with a small
+      // AAC track). Audio sources are already the final upload payload and can
+      // be checked immediately; video output is checked while extracting.
+      if (!videoSource && size > maximumBytes) {
+        throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "该录音过大，暂无法上传")
+      }
     }
     ensureRoot()
-    ensureSpace(metadata.byteSize, maximumBytes)
+    ensureSpace(if (videoSource) null else metadata.byteSize, maximumBytes)
     val directory = File(root, normalizedMeetingId)
     if (!directory.exists() && !directory.mkdirs()) {
       throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "无法创建录音保存位置")
@@ -168,7 +183,91 @@ internal class MediaIngestor(context: Context) {
     if (!directory.isDirectory) {
       throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
     }
+    val extension = if (videoSource) "m4a" else preferredMediaExtension(metadata.fileName, mimeType)
+    val tempFileName = if (videoSource) {
+      "$normalizedAssetId.audio.part"
+    } else {
+      "$normalizedAssetId.$extension.part"
+    }
+    val finalFileName = "$normalizedAssetId.$extension"
+    val journalFile = File(directory, JOURNAL_FILE)
+    val current = readJournal(journalFile)
+    if (current != null) {
+      if (
+        current.meetingId != normalizedMeetingId
+        || current.assetId != normalizedAssetId
+        || current.origin != origin
+        || current.sourceUri != uri.toString()
+      ) {
+        throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "这条录音已经导入")
+      }
+      return@synchronized true
+    }
+    if (File(directory, tempFileName).exists() || File(directory, finalFileName).exists()) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "这条录音已经导入")
+    }
+    writeJournal(
+      directory,
+      journalFile,
+      MediaIngestJournal(
+        meetingId = normalizedMeetingId,
+        assetId = normalizedAssetId,
+        origin = origin,
+        sourceUri = uri.toString(),
+        sourceLastModifiedMs = metadata.lastModifiedMs,
+        fileName = metadata.fileName,
+        mimeType = mimeType,
+        state = "staged",
+        tempFileName = tempFileName,
+        finalFileName = finalFileName,
+        byteSize = null,
+        durationMs = null,
+        checksumSha256 = null,
+        createdAtMs = System.currentTimeMillis().coerceAtLeast(0L),
+      ),
+    )
+    true
+  }
+
+  fun ingest(
+    sourceUri: String,
+    meetingId: String,
+    assetId: String,
+    origin: String,
+    maximumBytes: Long,
+  ): IngestedMeetingMedia = synchronized(mediaImportLockFor(meetingId.trim())) {
+    val normalizedMeetingId = validateIdentity(meetingId, "meeting")
+    val normalizedAssetId = validateIdentity(assetId, "asset")
+    if (origin !in setOf("file_import", "share_intent", "recording_merge")) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "会议录音来源无效")
+    }
+    if (maximumBytes <= 0L || maximumBytes > MAXIMUM_SUPPORTED_BYTES) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_INVALID_INPUT", "会议录音大小限制无效")
+    }
+    val uri = runCatching { Uri.parse(sourceUri.trim()) }.getOrNull()
+      ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法读取所选录音")
+    if (uri.scheme !in setOf("content", "file")) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_UNREADABLE", "无法读取所选录音")
+    }
+    val metadata = resolveMediaSourceMetadata(appContext, uri)
+    val mimeType = resolvedSupportedMimeType(metadata.fileName, metadata.mimeType)
+      ?: throw MediaImportException("ERR_MEDIA_IMPORT_UNSUPPORTED_TYPE", "不支持此录音格式")
     val videoSource = mimeType.startsWith("video/")
+    metadata.byteSize?.let { size ->
+      if (size <= 0L) throw MediaImportException("ERR_MEDIA_IMPORT_EMPTY", "录音文件为空")
+      if (!videoSource && size > maximumBytes) {
+        throw MediaImportException("ERR_MEDIA_IMPORT_TOO_LARGE", "该录音过大，暂无法上传")
+      }
+    }
+    ensureRoot()
+    ensureSpace(if (videoSource) null else metadata.byteSize, maximumBytes)
+    val directory = File(root, normalizedMeetingId)
+    if (!directory.exists() && !directory.mkdirs()) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "无法创建录音保存位置")
+    }
+    if (!directory.isDirectory) {
+      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
+    }
     val extension = if (videoSource) "m4a" else preferredMediaExtension(metadata.fileName, mimeType)
     var finalFile = File(directory, "$normalizedAssetId.$extension")
     val tempFile = if (videoSource) {
@@ -189,15 +288,50 @@ internal class MediaIngestor(context: Context) {
     current?.readyResult(directory)?.takeIf {
       it.meetingId == normalizedMeetingId && it.assetId == normalizedAssetId
     }?.let { return@synchronized it }
-    val staleVideoFile = videoSource && (
-      File(directory, "$normalizedAssetId.m4a").exists()
-        || File(directory, "$normalizedAssetId.wav").exists()
-    )
-    if (finalFile.exists() || tempFile.exists() || staleVideoFile) {
+    // A process death can leave a journal in copying/extracting/prepared. The
+    // old implementation treated its temporary file as an identity conflict,
+    // which left the optimistic meeting shell stuck in `preparing` forever.
+    // Reuse the same journal identity and restart the idempotent ingest from
+    // the source. A prepared temp file is finalized without decoding again.
+    val resumable = current != null && current.state in setOf("staged", "copying", "extracting", "prepared")
+    if (resumable && current!!.state == "prepared") {
+      val preparedTemp = File(directory, current.tempFileName)
+      val preparedFinal = File(directory, current.finalFileName)
+      if (!preparedFinal.exists() && preparedTemp.isFile) {
+        Os.rename(preparedTemp.absolutePath, preparedFinal.absolutePath)
+        syncDirectory(directory)
+      }
+      val completed = current.copy(state = "ready").readyResult(directory)
+      if (completed != null) {
+        writeJournal(directory, journalFile, current.copy(state = "ready"))
+        return@synchronized completed
+      }
+    }
+    if (!resumable && (finalFile.exists() || tempFile.exists())) {
       throw MediaImportException("ERR_MEDIA_IMPORT_IDENTITY_CONFLICT", "这条录音已经导入")
     }
+    if (resumable) {
+      // Partial copying/extraction is never trusted. Remove only the partial
+      // bytes and keep the journal identity so a retry is deterministic.
+      File(directory, current!!.tempFileName).delete()
+      File(directory, current.finalFileName).delete()
+      finalFile = File(directory, if (videoSource) "$normalizedAssetId.m4a" else current.finalFileName)
+    }
     val createdAtMs = System.currentTimeMillis().coerceAtLeast(0L)
-    var journal = MediaIngestJournal(
+    var journal = if (resumable) {
+      current!!.copy(
+        sourceUri = uri.toString(),
+        sourceLastModifiedMs = metadata.lastModifiedMs,
+        fileName = metadata.fileName,
+        mimeType = mimeType,
+        state = if (videoSource) "extracting" else "copying",
+        tempFileName = if (videoSource) "$normalizedAssetId.audio.part" else "$normalizedAssetId.${preferredMediaExtension(metadata.fileName, mimeType)}.part",
+        finalFileName = finalFile.name,
+        byteSize = null,
+        durationMs = null,
+        checksumSha256 = null,
+      )
+    } else MediaIngestJournal(
       normalizedMeetingId,
       normalizedAssetId,
       origin,
@@ -289,48 +423,84 @@ internal class MediaIngestor(context: Context) {
         ?: throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存结果不完整")
     } catch (error: Throwable) {
       tempFile.delete()
-      if (!finalFile.exists()) journalFile.delete()
+      if (current != null && current.state in setOf("staged", "copying", "extracting", "prepared")) {
+        // Keep a resumable journal after a transient provider/IO failure. The
+        // next application start can retry the same source and shell identity
+        // instead of leaving an orphaned `preparing` meeting.
+        writeJournal(
+          directory,
+          journalFile,
+          journal.copy(
+            state = if (videoSource) "extracting" else "copying",
+            byteSize = null,
+            durationMs = null,
+            checksumSha256 = null,
+          ),
+        )
+      } else if (!finalFile.exists()) journalFile.delete()
       syncDirectory(directory)
       if (error is MediaImportException) throw error
       throw MediaImportException("ERR_MEDIA_IMPORT_FAILED", "录音导入失败", error)
     }
   }
 
-  fun recoverPending(): List<IngestedMeetingMedia> = synchronized(mediaImportIoLock) {
-    if (!root.exists()) return@synchronized emptyList()
-    root.listFiles { file -> file.isDirectory }.orEmpty().sortedBy { it.name }.mapNotNull { directory ->
-      val journalFile = File(directory, JOURNAL_FILE)
-      val journal = readJournal(journalFile) ?: run {
-        directory.listFiles { file -> file.name.endsWith(".part") }.orEmpty().forEach(File::delete)
-        return@mapNotNull null
-      }
-      when (journal.state) {
-        "ready" -> journal.readyResult(directory)
-        "prepared" -> {
-          val temp = File(directory, journal.tempFileName)
-          val final = File(directory, journal.finalFileName)
-          if (!final.exists() && temp.isFile) {
-            runCatching {
+  fun recoverPending(): List<IngestedMeetingMedia> {
+    val directories = synchronized(mediaImportRootLock) {
+      if (!root.exists()) return emptyList()
+      root.listFiles { file -> file.isDirectory }.orEmpty().sortedBy { it.name }
+    }
+    mediaImportRecoveryBackoff.retain(directories.map { it.name }.toSet())
+    return directories.mapNotNull { directory ->
+      if (!mediaImportRecoveryBackoff.ready(directory.name)) return@mapNotNull null
+      try { synchronized(mediaImportLockFor(directory.name)) {
+        val journalFile = File(directory, JOURNAL_FILE)
+        val journal = readJournal(journalFile) ?: run {
+          directory.listFiles { file -> file.name.endsWith(".part") }.orEmpty().forEach(File::delete)
+          return@mapNotNull null
+        }
+        when (journal.state) {
+          "ready" -> journal.readyResult(directory)
+          "prepared" -> {
+            val temp = File(directory, journal.tempFileName)
+            val final = File(directory, journal.finalFileName)
+            if (!final.exists() && temp.isFile) {
               Os.rename(temp.absolutePath, final.absolutePath)
               syncDirectory(directory)
-            }.getOrElse { return@mapNotNull null }
+            }
+            val ready = journal.copy(state = "ready")
+            val result = ready.readyResult(directory) ?: return@mapNotNull null
+            writeJournal(directory, journalFile, ready)
+            result
           }
-          val ready = journal.copy(state = "ready")
-          val result = ready.readyResult(directory) ?: return@mapNotNull null
-          writeJournal(directory, journalFile, ready)
-          result
+          "staged", "copying", "extracting" -> ingest(
+            sourceUri = journal.sourceUri,
+            meetingId = journal.meetingId,
+            assetId = journal.assetId,
+            origin = journal.origin,
+            maximumBytes = MAXIMUM_SUPPORTED_BYTES,
+          )
+          else -> {
+            File(directory, journal.tempFileName).delete()
+            journalFile.delete()
+            syncDirectory(directory)
+            null
+          }
         }
-        else -> {
-          File(directory, journal.tempFileName).delete()
-          journalFile.delete()
-          syncDirectory(directory)
-          null
-        }
+      }.also { mediaImportRecoveryBackoff.succeeded(directory.name) } } catch (error: Exception) {
+        // Leave this journal intact and continue the other imports. Never
+        // include source URIs, filenames or exception messages in release logs.
+        val code = (error as? CodedException)?.code ?: "unknown"
+        var cause: Throwable = error
+        repeat(8) { cause.cause?.takeIf { it !== cause }?.let { cause = it } }
+        val errno = (cause as? android.system.ErrnoException)?.errno ?: 0
+        Log.w("LaojiMediaImport", "recovery_deferred code=$code cause=${cause.javaClass.simpleName} errno=$errno")
+        mediaImportRecoveryBackoff.failed(directory.name)
+        null
       }
     }
   }
 
-  fun acknowledge(meetingId: String, assetId: String): Boolean = synchronized(mediaImportIoLock) {
+  fun acknowledge(meetingId: String, assetId: String): Boolean = synchronized(mediaImportLockFor(meetingId.trim())) {
     val directory = File(root, validateIdentity(meetingId, "meeting"))
     val journalFile = File(directory, JOURNAL_FILE)
     val journal = readJournal(journalFile) ?: return@synchronized false
@@ -341,7 +511,7 @@ internal class MediaIngestor(context: Context) {
     deleted
   }
 
-  fun discard(meetingId: String, assetId: String): Boolean = synchronized(mediaImportIoLock) {
+  fun discard(meetingId: String, assetId: String): Boolean = synchronized(mediaImportLockFor(meetingId.trim())) {
     val directory = File(root, validateIdentity(meetingId, "meeting"))
     val journalFile = File(directory, JOURNAL_FILE)
     val journal = readJournal(journalFile) ?: return@synchronized false
@@ -358,7 +528,7 @@ internal class MediaIngestor(context: Context) {
     changed
   }
 
-  fun deleteMeetingAssets(meetingId: String): Int = synchronized(mediaImportIoLock) {
+  fun deleteMeetingAssets(meetingId: String): Int = synchronized(mediaImportLockFor(meetingId.trim())) {
     val directory = File(root, validateIdentity(meetingId, "meeting"))
     if (!directory.exists()) return@synchronized 0
     if (!directory.isDirectory) {
@@ -373,11 +543,13 @@ internal class MediaIngestor(context: Context) {
   }
 
   private fun ensureRoot() {
-    if (!root.exists() && !root.mkdirs()) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "无法创建录音保存位置")
-    }
-    if (!root.isDirectory) {
-      throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
+    synchronized(mediaImportRootLock) {
+      if (!root.exists() && !root.mkdirs()) {
+        throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "无法创建录音保存位置")
+      }
+      if (!root.isDirectory) {
+        throw MediaImportException("ERR_MEDIA_IMPORT_STORAGE", "录音保存位置不可用")
+      }
     }
   }
 

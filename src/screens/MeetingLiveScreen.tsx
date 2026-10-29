@@ -13,16 +13,14 @@ import {
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
-import { Colors as C, withAlpha } from '../theme/colors';
+import { Appearance, Colors as C, withAlpha } from '../theme/colors';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Waveform } from '../components/Common';
 import { MinutesDetailTitleBar } from '../components/MinutesDetailTitleBar';
 import { useAppDialog } from '../components/AppDialog';
-import { useAuth } from '../store/AuthStore';
 import { useMeetings } from '../store/MeetingsStore';
-import { uploadMeetingAudio } from '../services/api';
 import { createMeetingBinding, getDeviceRealtimeAuth } from '../services/deviceApi';
 import { createMeetingRecordingFinalizer, finalizeMeetingRecording } from '../services/meetingRecording';
 import { RealtimeAsrAudioStats, RealtimeAsrSession, RealtimeAsrStatus, startRealtimeAsr } from '../services/realtimeAsr';
@@ -35,7 +33,6 @@ import {
   shouldCheckpointTranscript,
 } from '../utils/meetingMedia';
 import { createClientRequestState, requestStateForPayload } from '../services/clientRequestId';
-import { enqueueNativeMeetingUpload } from '../native/nativeTransferCoordinator';
 import { readableErrorMessage } from '../services/errors';
 import { speakerDisplayLabel } from '../utils/speakerLabels';
 import { displayMeetingTitle } from '../utils/meetingTitle';
@@ -103,7 +100,6 @@ class MeetingStartCancelledError extends Error {
 }
 
 export function MeetingLiveScreen({ navigation, route }: Props) {
-  const { accessToken, isGuest, session } = useAuth();
   const {
     meetings,
     createMeeting,
@@ -150,7 +146,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const transcriptScrollRef = useRef<ScrollView | null>(null);
   const meetingStartedAtRef = useRef(new Date());
   const createRequestRef = useRef(createClientRequestState('meeting'));
-  const recordingStorageScope = isGuest ? 'guest' : session ? `user:${session.user.id}` : 'signed_out';
+  const recordingStorageScope = 'guest';
 
   const recordingElapsedAt = useCallback((now = Date.now()) => {
     if (!startedAtRef.current) return 0;
@@ -232,40 +228,20 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
   const persistStoppedSession = useCallback(async (
     session: RealtimeAsrSession,
     id: string,
-    remoteMeetingId: string | null,
   ) => {
     const audioDurationSec = pcmDurationSec(audioStatsRef.current?.byteCount ?? 0);
     const audioBars = audioSamplesToBars(audioRmsSamplesRef.current, 50);
     try {
       return await finalizeMeetingRecording({
         meetingId: id,
-        remoteMeetingId,
         storageScope: recordingStorageScope,
         transcriptLines: transcriptRef.current,
-        isGuest,
-        accessToken,
         audioDurationSec,
         audioBars,
         stopAudio: session.stop,
         getTranscriptLines: () => transcriptRef.current,
       }, {
         saveTranscript: saveCachedTranscript,
-        uploadAudio: (meetingIdToUpload, uri, token) => uploadMeetingAudio(
-          meetingIdToUpload,
-          uri,
-          token,
-          { fileName: `${meetingIdToUpload}.wav`, mimeType: 'audio/wav' },
-        ),
-        enqueuePersistentUpload: (pending, token) => enqueueNativeMeetingUpload({
-          scope: recordingStorageScope,
-          accessToken: token,
-          meetingId: pending.meetingId,
-          remoteMeetingId: pending.remoteMeetingId,
-          operationId: `meeting-audio:${pending.meetingId}:${pending.createdAt}`,
-          fileUri: pending.audioUri,
-          mimeType: pending.mimeType,
-          fileName: pending.fileName,
-        }),
         updateStatus: updateMeetingStatus,
         refreshMeetings,
         reconcileUploads: reconcileAudioUploads,
@@ -273,7 +249,7 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
     } finally {
       await restorePlaybackAudioMode();
     }
-  }, [accessToken, isGuest, reconcileAudioUploads, recordingStorageScope, refreshMeetings, restorePlaybackAudioMode, saveCachedTranscript, updateMeetingStatus]);
+  }, [reconcileAudioUploads, recordingStorageScope, refreshMeetings, restorePlaybackAudioMode, saveCachedTranscript, updateMeetingStatus]);
 
   const finalizeActiveRecording = useCallback((
     active: ActiveRecording,
@@ -293,9 +269,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
           syncWarnings.push(result.retryQueued
             ? '录音文件待上传，可在转写页重试'
             : '待上传记录写入失败，请勿清理本机数据');
-        }
-        if (result.statusSyncPending && !result.statusSyncInBackground) {
-          syncWarnings.push('会议状态将在网络恢复后自动同步');
         }
         if (syncWarnings.length > 0) setError(`会议已保存到本机；${syncWarnings.join('；')}`);
         setStatus('closed');
@@ -402,7 +375,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         clientRequestId: createRequestRef.current.id,
         entryPoint,
       });
-      const remoteMeetingId = null;
       startedMeetingId = meeting.id;
       ensureScreenActive();
       setMeetingId(meeting.id);
@@ -458,7 +430,6 @@ export function MeetingLiveScreen({ navigation, route }: Props) {
         finalize: createMeetingRecordingFinalizer(() => persistStoppedSession(
           session,
           meeting.id,
-          remoteMeetingId,
         )),
       };
       if (!mountedRef.current) {
@@ -938,7 +909,7 @@ const s = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     color: C.text,
-    fontFamily: 'monospace',
+    fontFamily: Appearance.fontFamily,
     textAlign: 'center',
     textAlignVertical: 'center',
   },

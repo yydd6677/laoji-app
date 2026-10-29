@@ -1,7 +1,4 @@
-import type {
-  MeetingListOrderEntry,
-  MeetingListProjectionItem,
-} from '../data/repositories';
+import type { MeetingListOrderEntry, MeetingListProjectionItem } from "../data/repositories/meetingNoteRepository";
 
 function recordedAtMs(item: MeetingListProjectionItem): number {
   return item.recordedAtMs ?? item.startedAtMs ?? item.createdAtMs;

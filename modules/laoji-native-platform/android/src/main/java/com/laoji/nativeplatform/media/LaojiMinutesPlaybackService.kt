@@ -84,6 +84,7 @@ class LaojiMinutesPlaybackService : MediaSessionService() {
             .add(MINUTES_SET_SOURCE_COMMAND)
             .add(MINUTES_CLEAR_SOURCE_COMMAND)
             .add(MINUTES_ACTIVATE_STORAGE_SCOPE_COMMAND)
+            .add(MINUTES_SEEK_TO_COMMAND)
             .build(),
         )
       }
@@ -115,6 +116,16 @@ class LaojiMinutesPlaybackService : MediaSessionService() {
         MINUTES_CLEAR_SOURCE_ACTION -> {
           adapter.setSource(null)
           sessionResult(SessionResult.RESULT_SUCCESS)
+        }
+
+        MINUTES_SEEK_TO_ACTION -> {
+          val request = args.toMinutesSeekRequest()
+            ?: return sessionResult(SessionResult.RESULT_ERROR_BAD_VALUE)
+          sessionResult(if (adapter.seekToChecked(request.sourceId, request.storageScope, request.positionMs)) {
+            SessionResult.RESULT_SUCCESS
+          } else {
+            SessionResult.RESULT_ERROR_BAD_VALUE
+          })
         }
 
         MINUTES_ACTIVATE_STORAGE_SCOPE_ACTION -> {

@@ -28,7 +28,6 @@ export interface MeetingSummaryTraceContext {
   inputCharCount: number;
   templateId: string;
   templateRevision: number;
-  authMode: 'guest' | 'authenticated';
   transcriptRevisionId?: string | null;
   deviceId: string;
   deviceName: string;
@@ -208,7 +207,6 @@ export async function createMeetingSummaryTrace(input: {
   carryForward?: MeetingSummaryCarryForwardAuthorization | null;
   attachmentAuthorization?: MeetingSummaryAttachmentAuthorization | null;
   source: MeetingSummaryCallSource;
-  authMode: 'guest' | 'authenticated';
   inputFingerprint?: string;
 }): Promise<MeetingSummaryTraceContext> {
   const serialized = traceInputPayload(input);
@@ -231,7 +229,6 @@ export async function createMeetingSummaryTrace(input: {
     inputCharCount,
     templateId: safeHeaderValue(input.template.id, 80),
     templateRevision: input.template.revision,
-    authMode: input.authMode,
     deviceId: await installationId(),
     deviceName: safeHeaderValue(Constants.deviceName || '未知设备', 120),
     platform: Platform.OS,
@@ -256,7 +253,6 @@ export function meetingSummaryTraceHeaders(
     'X-Laoji-Input-Chars': String(trace.inputCharCount),
     'X-Laoji-Template-Id': trace.templateId,
     'X-Laoji-Template-Revision': String(trace.templateRevision),
-    'X-Laoji-Auth-Mode': trace.authMode,
     'X-Laoji-Device-Id': trace.deviceId,
     'X-Laoji-Device-Name': trace.deviceName,
     'X-Laoji-Platform': trace.platform,

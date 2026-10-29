@@ -15,7 +15,11 @@ internal data class CredentialLease(
   val scope: String,
   val generation: Long,
   val apiBaseUrl: String,
-  val accessToken: String
+  val accessToken: String,
+  val deviceId: String? = null,
+  val deviceEpochId: String? = null,
+  val keyVersion: Int? = null,
+  val expiresAtMs: Long? = null,
 )
 
 /** MIN-UPLOAD-001: WorkManager input never contains a bearer token. */
@@ -32,6 +36,10 @@ internal class CredentialLeaseStore(context: Context) {
       .put("generation", lease.generation)
       .put("apiBaseUrl", lease.apiBaseUrl)
       .put("accessToken", lease.accessToken)
+      .put("deviceId", lease.deviceId)
+      .put("deviceEpochId", lease.deviceEpochId)
+      .put("keyVersion", lease.keyVersion)
+      .put("expiresAtMs", lease.expiresAtMs)
       .toString()
       .toByteArray(Charsets.UTF_8)
     val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -65,7 +73,11 @@ internal class CredentialLeaseStore(context: Context) {
         scope = payload.getString("scope"),
         generation = payload.getLong("generation"),
         apiBaseUrl = payload.getString("apiBaseUrl"),
-        accessToken = payload.getString("accessToken")
+        accessToken = payload.getString("accessToken"),
+        deviceId = payload.optString("deviceId").takeIf { it.isNotBlank() },
+        deviceEpochId = payload.optString("deviceEpochId").takeIf { it.isNotBlank() },
+        keyVersion = payload.optInt("keyVersion", -1).takeIf { it >= 1 },
+        expiresAtMs = payload.optLong("expiresAtMs", -1).takeIf { it >= 0 },
       )
     }.getOrNull()?.takeIf {
       // A token refresh replaces the encrypted lease for the same account.

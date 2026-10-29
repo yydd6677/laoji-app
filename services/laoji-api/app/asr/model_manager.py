@@ -10,9 +10,11 @@ CAM++ 声纹模型管理 - 用于说话人注册和声纹比对。
 CAM++ 的网络结构已收纳在本模块目录，不依赖其他语音识别框架。
 """
 
-import os
 import asyncio
 import copy
+import ctypes
+import hashlib
+import os
 import threading
 from typing import Optional
 from dataclasses import dataclass
@@ -23,6 +25,23 @@ import torch
 
 _CAMPPLUS_INFERENCE_LOCK = threading.Lock()
 _VAD_INSTANCE_LOCK = threading.Lock()
+
+
+def _trim_cpu_allocator() -> None:
+    """Return freed glibc arenas after a long CAM++ inference stream.
+
+    Python and libtorch can keep large temporary feature buffers in process
+    arenas after a long meeting.  Trimming is best-effort and Linux-only;
+    Windows and libc implementations without ``malloc_trim`` simply skip it.
+    """
+    if os.name != "posix":
+        return
+    try:
+        trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
+        if trim is not None:
+            trim(0)
+    except (AttributeError, OSError):
+        return
 
 
 def _resolve_model_path(path: str) -> str:
@@ -80,7 +99,8 @@ def _get_default_model_paths() -> ModelPaths:
 
     camp_dir = os.getenv("CAMPPLUS_MODEL_DIR", CAMPPLUS_MODEL_DIR)
     local_dir = os.getenv("LOCAL_MODEL_DIR", LOCAL_MODEL_DIR)
-    device = os.getenv("LOCAL_DEVICE", LOCAL_DEVICE or settings.LOCAL_DEVICE or "cuda")
+    device = os.getenv("LAOJI_CAMPPLUS_DEVICE", "").strip() or os.getenv(
+        "LOCAL_DEVICE", LOCAL_DEVICE or settings.LOCAL_DEVICE or "cuda")
 
     return ModelPaths(
         campplus_model=_resolve_model_path(camp_dir),
@@ -102,6 +122,7 @@ class ModelManager:
     _instance: Optional["ModelManager"] = None
     def __init__(self):
         self._lock = asyncio.Lock()
+        self._vad_init_lock = asyncio.Lock()
         self.camp_model = None
         self.vad_model = None
         self._vad_jit_file = None
@@ -110,6 +131,7 @@ class ModelManager:
         self._initialization_task: asyncio.Task | None = None
         self._paths = _get_default_model_paths()
         self._camp_device = self._paths.device
+        self._camp_model_revision = "campplus-zh-unavailable"
 
     @classmethod
     def get_instance(cls) -> "ModelManager":
@@ -140,6 +162,18 @@ class ModelManager:
                     self._initialization_task = None
             raise
 
+    async def initialize_vad(self) -> None:
+        """Make text segmentation ready without waiting for CAM++ weights."""
+        if self.vad_model is not None:
+            return
+        async with self._vad_init_lock:
+            if self.vad_model is not None:
+                return
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._load_vad)
+            if self.vad_model is None:
+                raise RuntimeError("Silero VAD 未能加载")
+
     async def _initialize_models(self) -> None:
         """Load the required Chinese support models exactly once."""
 
@@ -153,7 +187,7 @@ class ModelManager:
         print("[ModelManager] [1/2] Silero VAD (语音活动检测)...", flush=True)
         _vad_ok = False
         try:
-            await loop.run_in_executor(None, self._load_vad)
+            await self.initialize_vad()
             if self.vad_model is not None:
                 print("[ModelManager]       [PASS] Silero VAD 加载成功", flush=True)
                 _vad_ok = True
@@ -200,6 +234,9 @@ class ModelManager:
         """加载 CAM++ 中文声纹模型"""
         self.camp_model = None
         try:
+            # Small feature windows are slower with a large host's default
+            # thread pool. Keep support inference bounded beside ASR/LLM.
+            torch.set_num_threads(max(1, min(16, int(os.getenv("LAOJI_SUPPORT_MODEL_THREADS", "4")))))
             model_dir = self._paths.campplus_model
             print(f"[ModelManager] 加载 CAM++ 中文声纹模型 from: {model_dir}")
 
@@ -253,6 +290,11 @@ class ModelManager:
             model.eval()
             self._camp_device = str(target_device)
             self.camp_model = model
+            digest = hashlib.sha256()
+            with open(model_file, "rb") as weights:
+                for chunk in iter(lambda: weights.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            self._camp_model_revision = f"campplus-zh-{digest.hexdigest()[:24]}"
             print(f"[ModelManager] CAM++ 中文声纹模型加载成功")
 
         except Exception as e:
@@ -273,6 +315,8 @@ class ModelManager:
             )
             local_v1 = os.path.join(local_master_dir, "files", "silero-vad", "silero_vad.jit")
             local_v2 = os.path.join(local_master_dir, "src", "silero_vad", "data", "silero_vad.jit")
+            hub_master_dir = os.path.join(torch.hub.get_dir(), "snakers4_silero-vad_master")
+            hub_v2 = os.path.join(hub_master_dir, "src", "silero_vad", "data", "silero_vad.jit")
 
             model, utils = None, None
 
@@ -284,6 +328,16 @@ class ModelManager:
                 print(f"[ModelManager] 发现项目本地 Silero VAD: {local_v2}", flush=True)
                 self._vad_jit_file = local_v2
                 model, utils = self._load_silero_from_local(os.path.join(local_master_dir, "src", "silero_vad"))
+            elif os.path.exists(hub_v2):
+                # The streaming path only needs the JIT model. Loading the
+                # cached hub package imports optional torchaudio before the
+                # model is created, which makes the compact environment fail
+                # even though soundfile/scipy already provide the file helper.
+                print(f"[ModelManager] 发现 Torch Hub Silero VAD: {hub_v2}", flush=True)
+                self._vad_jit_file = hub_v2
+                model, utils = self._load_silero_from_local(
+                    os.path.join(hub_master_dir, "src", "silero_vad")
+                )
             else:
                 print(f"[ModelManager] 未找到本地 Silero VAD，尝试联网下载...", flush=True)
                 torch_hub_dir = os.path.join(_get_local_model_dir(), "silero-vad")
@@ -349,11 +403,16 @@ class ModelManager:
         model.eval()
 
         def read_audio(path):
-            import torchaudio
-            waveform, sr = torchaudio.load(path)
+            import math
+            import soundfile
+            from scipy import signal
+
+            waveform, sr = soundfile.read(path, dtype="float32", always_2d=True)
+            waveform = waveform.mean(axis=1)
             if sr != 16000:
-                waveform = torchaudio.functional.resample(waveform, sr, 16000)
-            return waveform.squeeze(0).numpy()
+                divisor = math.gcd(int(sr), 16000)
+                waveform = signal.resample_poly(waveform, 16000 // divisor, int(sr) // divisor)
+            return np.asarray(waveform, dtype=np.float32)
 
         utils = (lambda *a, **kw: [], lambda: None, read_audio, lambda: None, lambda: None)
         return model, utils
@@ -402,6 +461,10 @@ class ModelManager:
     def device(self) -> str:
         return self._camp_device
 
+    @property
+    def camp_model_revision(self) -> str:
+        return self._camp_model_revision
+
 
 class SpeakerEmbeddingExtractor:
     """说话人声纹特征提取器，使用 CAM++ 模型"""
@@ -436,20 +499,27 @@ class SpeakerEmbeddingExtractor:
             if audio_data.dtype != np.float32:
                 audio_data = audio_data.astype(np.float32)
 
-            audio_tensor = torch.from_numpy(audio_data).float()
-            features, _, _ = extract_feature([audio_tensor])
-            try:
-                features = features.to(device=self.device)
-            except AssertionError:
-                self.device = "cpu"
-                features = features.to(device="cpu")
+            # Speaker overlays are inference-only. Without this guard every
+            # long meeting builds autograd metadata for each CAM++ window;
+            # the tensors are short-lived but the CPU allocator retains the
+            # resulting anonymous pages, causing the API process RSS to grow
+            # across hundreds of segments.
+            with torch.inference_mode():
+                audio_tensor = torch.from_numpy(audio_data).float()
+                features, _, _ = extract_feature([audio_tensor])
+                try:
+                    features = features.to(device=self.device)
+                except AssertionError:
+                    self.device = "cpu"
+                    features = features.to(device="cpu")
 
-            embedding = self.model(features)
+                embedding = self.model(features)
 
-            if len(embedding.shape) > 2:
-                embedding = embedding.squeeze(0)
+                if len(embedding.shape) > 2:
+                    embedding = embedding.squeeze(0)
 
-            embedding_np = embedding.cpu().detach().numpy()
+                embedding_np = embedding.cpu().numpy().copy()
+                _trim_cpu_allocator()
 
             if embedding_np.ndim > 1:
                 embedding_np = embedding_np[0] if embedding_np.shape[0] == 1 else embedding_np.mean(axis=0)

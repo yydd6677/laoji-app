@@ -22,14 +22,6 @@ interface LaojiLocationModule {
 
 const nativeModule = requireOptionalNativeModule<LaojiLocationModule>('LaojiLocation');
 
-export async function getNativeCurrentLocation(
-  maxAgeMs: number,
-  requiredAccuracyMeters: number,
-  timeoutMs: number,
-): Promise<NativeCurrentLocation | null> {
-  return getNativeCurrentLocationAttempt(maxAgeMs, requiredAccuracyMeters, timeoutMs).result;
-}
-
 export function getNativeCurrentLocationAttempt(
   maxAgeMs: number,
   requiredAccuracyMeters: number,

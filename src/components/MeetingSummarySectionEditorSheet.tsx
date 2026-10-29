@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 
 const MOTION_MS = 300;
 
@@ -62,7 +62,8 @@ export function MeetingSummarySectionEditorSheet({
   onSave: (value: MeetingSummarySectionEditorSaveValue) => void;
   onRestore: () => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -302,28 +303,28 @@ export function MeetingSummarySectionEditorSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
   sheet: { flexShrink: 1, borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 52, height: 44, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '500' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '500' },
   formScroll: { flexShrink: 1 },
   form: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
-  input: { minHeight: 180, maxHeight: 320, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, fontSize: 16, lineHeight: 24 },
+  input: { minHeight: 180, maxHeight: 320, borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, fontFamily, fontSize: 16, lineHeight: 24 },
   citationBlock: { paddingTop: 6 },
-  citationLabel: { height: 22, fontSize: 14, lineHeight: 20 },
+  citationLabel: { height: 22, fontFamily, fontSize: 14, lineHeight: 20 },
   citationRow: { minHeight: 44, alignItems: 'center' },
   citationTarget: { height: 44, justifyContent: 'center', marginRight: 4 },
   citationChip: { height: 32, borderRadius: 6, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center' },
-  citationText: { fontSize: 14, lineHeight: 20, marginRight: 4 },
+  citationText: { fontFamily, fontSize: 14, lineHeight: 20, marginRight: 4 },
   restoreSlot: { height: 44, justifyContent: 'center', alignItems: 'flex-start' },
   restoreAction: { minWidth: 120, height: 40, paddingHorizontal: 8, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  restoreText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  restoreText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
   errorSlot: { height: 36, justifyContent: 'center' },
-  error: { fontSize: 13, lineHeight: 18 },
+  error: { fontFamily, fontSize: 13, lineHeight: 18 },
   save: { height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  saveText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  saveText: { fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
 });

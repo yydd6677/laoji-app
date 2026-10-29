@@ -1,5 +1,4 @@
-import { getFeatureFlags } from '../config/featureFlags';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { ScopeKey } from '../domain/meeting';
 import type { TranscriptLine } from '../types';
 import { transcriptProjectionToLegacyLines } from './meetingContentProjection';
@@ -12,25 +11,21 @@ export interface ActiveMeetingTranscriptState {
   completing: boolean;
 }
 
-/** Reads the local active revision without enabling the global canonical list cutover. */
+/** Reads the current local active transcript revision. */
 export async function loadActiveMeetingTranscriptState(
   scopeKey: ScopeKey,
   legacyMeetingId: string,
 ): Promise<ActiveMeetingTranscriptState | null> {
-  if (!getFeatureFlags().localMeetingDbV1) return null;
-  const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeetingId, scopeKey);
-  if (!aggregate || aggregate.note.lifecycle === 'deleted') return null;
-  const projection = await sqliteMeetingNoteRepository.getActiveTranscriptContent(
-    aggregate.note.id,
+  const state = await sqliteMeetingNoteRepository.getActiveTranscriptStateByNativeSessionId(
+    legacyMeetingId,
     scopeKey,
   );
-  if (!projection) return null;
-  const transcriptStage = aggregate.processingStages.find(stage => stage.stage === 'transcript');
+  if (!state) return null;
+  const projection = state.transcript;
   return {
-    canonicalMeetingId: aggregate.note.id,
+    canonicalMeetingId: projection.revision.meetingId,
     kind: projection.revision.kind,
     lines: transcriptProjectionToLegacyLines(projection, legacyMeetingId),
-    completing: transcriptStage?.status === 'finalizing'
-      || projection.revision.status === 'finalizing',
+    completing: state.completing,
   };
 }

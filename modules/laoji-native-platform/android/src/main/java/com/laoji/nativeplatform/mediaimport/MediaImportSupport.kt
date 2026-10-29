@@ -33,7 +33,7 @@ internal data class InspectedMeetingMediaSource(
   )
 }
 
-private val supportedMimeTypes = setOf(
+internal val supportedMeetingMediaMimeTypes = linkedSetOf(
   "audio/wav",
   "audio/wave",
   "audio/x-wav",
@@ -53,6 +53,9 @@ private val supportedMimeTypes = setOf(
   "video/quicktime",
   "video/x-matroska",
 )
+
+internal val supportedAudioMeetingMediaMimeTypes = supportedMeetingMediaMimeTypes
+  .filterNot { it.startsWith("video/") }
 
 private val supportedExtensions = mapOf(
   "wav" to "audio/wav",
@@ -80,7 +83,7 @@ internal fun mediaFileExtension(fileName: String): String? = fileName
 
 internal fun resolvedSupportedMimeType(fileName: String, hintedMimeType: String?): String? {
   val mimeType = normalizeMediaMimeType(hintedMimeType)
-  if (mimeType in supportedMimeTypes) return mimeType
+  if (mimeType in supportedMeetingMediaMimeTypes) return mimeType
   return mediaFileExtension(fileName)?.let(supportedExtensions::get)
 }
 

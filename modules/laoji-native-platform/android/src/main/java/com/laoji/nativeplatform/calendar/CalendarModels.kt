@@ -1,5 +1,7 @@
 package com.laoji.nativeplatform.calendar
 
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
+
 // CAL-ROOT-001: Bridge snapshots remain independent from Android rendering classes.
 
 enum class CalendarMode(val bridgeValue: String) {
@@ -22,7 +24,7 @@ data class CalendarSettings(
   )
 }
 
-// CAL-DAY-COMPOSE-001: mirrors Feishu's InstanceLayout payload. Percentages are
+// CAL-DAY-COMPOSE-001: stable timed-event layout payload. Percentages are
 // relative to the timed-event surface; a null value means the local fallback
 // allocator is used until the source supplies the rectangle.
 data class CalendarInstanceLayout(
@@ -62,6 +64,7 @@ data class CalendarEvent(
   val editable: Boolean,
   val revision: Int,
   val instanceLayout: CalendarInstanceLayout? = null,
+  val completed: Boolean = false,
 ) {
   val identity: String
     get() = "$sourceEventId@$occurrenceDate"
@@ -147,7 +150,9 @@ data class CalendarSnapshot(
   val selectedEpochDay: Int,
   val todayEpochDay: Int,
   val settings: CalendarSettings = CalendarSettings(),
-  val events: List<CalendarEvent> = emptyList()
+  val events: List<CalendarEvent> = emptyList(),
+  val projection: ProjectionEnvelope? = null,
+  val projectionInvalid: Boolean = false,
 ) {
   fun normalized(): CalendarSnapshot {
     val safeRangeEnd = maxOf(rangeStartEpochDay + 1, rangeEndEpochDayExclusive)
@@ -209,7 +214,7 @@ data class CalendarDraft(
   fun endAbsoluteMinute(): Long = CalendarDateMath.absoluteMinute(endEpochDay, endMinutes)
 }
 
-// CAL-PICKER-HOST-001: QuickChoose exposes the same four expansion states as Feishu's panel.
+// CAL-PICKER-HOST-001: QuickChoose exposes the panel's four expansion states.
 enum class CalendarPickerExpandState {
   CLOSING,
   OPENING,

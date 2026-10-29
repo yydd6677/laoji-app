@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEvents } from '../store/EventsStore';
 import { useAppDialog } from './AppDialog';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 import { getNativeBottomBarHeight } from '../navigation/nativeBottomBarGeometry';
 
-const tokens = getFeishuTokens('light');
-
 export function EventUndoBanner() {
+  const { tokens, appearance } = useTheme();
+  const typography = { fontFamily: appearance.fontFamily };
   const { lastDeleted, undoDelete } = useEvents();
   const { showDialog } = useAppDialog();
   const insets = useSafeAreaInsets();
@@ -23,7 +23,7 @@ export function EventUndoBanner() {
     try {
       await undoDelete();
     } catch {
-      showDialog({ title: '撤销失败', message: '日程未能恢复，请检查网络后重试。', tone: 'error' });
+      showDialog({ title: '撤销失败', message: '日程暂未恢复，请重试。', tone: 'error' });
     } finally {
       setBusy(false);
     }
@@ -35,13 +35,14 @@ export function EventUndoBanner() {
         s.banner,
         {
           bottom: getNativeBottomBarHeight(insets.bottom) + 12,
+          backgroundColor: tokens.colors.backgroundTips,
         },
       ]}
       accessibilityRole="alert"
       testID="event-undo-banner"
     >
       <Ionicons name="trash-outline" size={17} color="#fff" />
-      <Text style={s.text} numberOfLines={1}>已删除“{lastDeleted.title}”</Text>
+      <Text style={[s.text, typography, { color: tokens.colors.onTips }]} numberOfLines={1}>已删除“{lastDeleted.title}”</Text>
       <TouchableOpacity
         onPress={() => { void handleUndo(); }}
         disabled={busy}
@@ -49,7 +50,7 @@ export function EventUndoBanner() {
         accessibilityRole="button"
         accessibilityLabel="撤销删除日程"
       >
-        <Text style={s.undoText}>{busy ? '恢复中' : '撤销'}</Text>
+        <Text style={[s.undoText, typography, { color: tokens.colors.textLink }]}>{busy ? '恢复中' : '撤销'}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -68,13 +69,12 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: tokens.colors.backgroundTips,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.16,
     shadowRadius: 7,
   },
-  text: { flex: 1, color: tokens.colors.onTips, fontSize: 13, fontWeight: '500' },
+  text: { flex: 1, fontSize: 13, fontWeight: '500' },
   undoButton: { minWidth: 52, minHeight: 36, alignItems: 'center', justifyContent: 'center' },
-  undoText: { color: tokens.colors.primaryPressed, fontSize: 13, fontWeight: '600' },
+  undoText: { fontSize: 13, fontWeight: '600' },
 });

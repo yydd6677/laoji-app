@@ -4,39 +4,42 @@ import {
   type NativeUploadState,
 } from 'laoji-native-platform';
 import { getApiConfig } from '../services/config';
+import { ensureRemoteMeetingServiceBinding } from '../services/deviceAuthority';
+import { ensureDeviceV2Session, type DeviceV2Session } from '../services/deviceV2Api';
+import {
+  attachDeviceOperationExecutor,
+  bindDeviceUploadOperationToAsset,
+  ensureDeviceUploadOperation,
+} from '../services/deviceUploadOperations';
+import { diagnosticAudit } from '../services/diagnostics';
 
 export interface NativeTransferLease {
   scope: string;
   generation: number;
 }
 
-export interface NativeMeetingUploadRequest {
-  scope: string;
-  accessToken: string;
-  meetingId: string;
-  remoteMeetingId?: string;
-  operationId: string;
-  fileUri: string;
-  mimeType: string;
-  fileName: string;
-  protocol?: 'legacy' | 'recording-assets-v2';
-  recordingAssetId?: string;
-  recordingRole?: 'primary' | 'secondary';
-  recordingOrigin?: 'captured' | 'imported' | 'recovered';
-  expectedBytes?: number | null;
-  durationMs?: number | null;
-  checksumSha256?: string | null;
-}
-
 export interface NativeMeetingUploadRegistration extends NativeTransferLease {
   workId: string;
   operationId: string;
+  protocol: 'device-v2-r2';
 }
 
 interface LeaseRecord extends NativeTransferLease {
   apiBaseUrl: string;
   accessToken: string;
   ready: Promise<void>;
+}
+
+export interface NativeDeviceV2MeetingUploadRequest {
+  scope: string;
+  meetingId: string;
+  operationId: string;
+  fileUri: string;
+  mimeType: string;
+  recordingAssetId: string;
+  assetGeneration: string;
+  expectedBytes: number;
+  checksumSha256: string;
 }
 
 const leases = new Map<string, LeaseRecord>();
@@ -51,53 +54,48 @@ function transferAvailable(): boolean {
   return hasNativeTransfer() && nativeTransfer !== null;
 }
 
-/** MIN-UPLOAD-001: establish an encrypted, generation-bound native credential lease. */
-export async function ensureNativeTransferLease(
-  scope: string,
-  accessToken: string,
-  apiBaseUrl = getApiConfig().apiBase,
+export async function ensureNativeDeviceV2TransferLease(
+  session: DeviceV2Session,
 ): Promise<NativeTransferLease | null> {
-  const normalizedScope = scope.trim();
-  const normalizedBaseUrl = apiBaseUrl.trim().replace(/\/+$/, '');
+  diagnosticAudit('device_v2_lease_start', {});
   if (!transferAvailable()) return null;
-  if (!normalizedScope || !accessToken || !normalizedBaseUrl) {
-    throw new Error('Native transfer credentials are incomplete');
-  }
-
-  const existing = leases.get(normalizedScope);
+  const scope = `device-v2:${session.epochId}`;
+  const apiBaseUrl = getApiConfig().apiBase.trim().replace(/\/+$/, '');
+  const existing = leases.get(scope);
   if (
     existing
-    && existing.accessToken === accessToken
-    && existing.apiBaseUrl === normalizedBaseUrl
+    && existing.accessToken === session.token
+    && existing.apiBaseUrl === apiBaseUrl
   ) {
     await existing.ready;
-    return { scope: existing.scope, generation: existing.generation };
+    return { scope, generation: existing.generation };
   }
-
-  if (existing) {
-    await nativeTransfer!.clearCredentialLease(normalizedScope).catch(() => {});
-  }
-
   const generation = nextGeneration();
-  const ready = nativeTransfer!.setCredentialLease(
-    normalizedScope,
+  const ready = nativeTransfer!.setDeviceV2CredentialLease(
+    scope,
     generation,
-    normalizedBaseUrl,
-    accessToken,
+    apiBaseUrl,
+    session.token,
+    session.deviceId,
+    session.epochId,
+    session.keyVersion,
+    session.expiresAt,
   );
   const record: LeaseRecord = {
-    scope: normalizedScope,
+    scope,
     generation,
-    apiBaseUrl: normalizedBaseUrl,
-    accessToken,
+    apiBaseUrl,
+    accessToken: session.token,
     ready,
   };
-  leases.set(normalizedScope, record);
+  leases.set(scope, record);
   try {
     await ready;
-    return { scope: normalizedScope, generation };
+    diagnosticAudit('device_v2_lease_ready', { generation });
+    return { scope, generation };
   } catch (error) {
-    if (leases.get(normalizedScope) === record) leases.delete(normalizedScope);
+    diagnosticAudit('device_v2_lease_error', { error_code: error instanceof Error ? error.name : 'unknown' });
+    if (leases.get(scope) === record) leases.delete(scope);
     throw error;
   }
 }
@@ -109,30 +107,62 @@ export async function clearNativeTransferLease(scope: string): Promise<void> {
   if (transferAvailable()) await nativeTransfer!.clearCredentialLease(normalizedScope);
 }
 
-/** MIN-UPLOAD-001: enqueue durable audio transfer without putting the token in WorkManager input. */
-export async function enqueueNativeMeetingUpload(
-  request: NativeMeetingUploadRequest,
+/** Durable device-scoped upload; credentials never enter WorkManager input. */
+export async function enqueueNativeDeviceV2MeetingUpload(
+  request: NativeDeviceV2MeetingUploadRequest,
 ): Promise<NativeMeetingUploadRegistration | null> {
-  const lease = await ensureNativeTransferLease(request.scope, request.accessToken);
-  if (!lease || !nativeTransfer) return null;
-  const workId = await nativeTransfer.enqueueMeetingUpload({
-    scope: lease.scope,
-    generation: lease.generation,
-    meetingId: request.meetingId,
-    remoteMeetingId: request.remoteMeetingId?.trim() || request.meetingId,
+  if (!transferAvailable() || !nativeTransfer) return null;
+  const binding = await ensureRemoteMeetingServiceBinding(request.meetingId);
+  const session = await ensureDeviceV2Session();
+  if (session.epochId !== binding.deviceEpochId) {
+    throw new Error('设备上传 epoch 与会议连接不一致');
+  }
+  const lease = await ensureNativeDeviceV2TransferLease(session);
+  if (!lease) return null;
+  const operation = await ensureDeviceUploadOperation({
+    meetingId: binding.meetingId,
     operationId: request.operationId,
+    recordingAssetId: request.recordingAssetId,
+    assetGeneration: request.assetGeneration,
+    sourceSha256: request.checksumSha256,
+  });
+  const bound = await bindDeviceUploadOperationToAsset(
+    binding.meetingId,
+    request.recordingAssetId,
+    operation.operationId,
+  );
+  if (!bound) throw new Error('录音资产未能绑定上传 operation');
+  const workId = await nativeTransfer.enqueueMeetingUpload({
+    scope: request.scope,
+    credentialScope: lease.scope,
+    generation: lease.generation,
+    meetingId: binding.meetingId,
+    operationId: operation.operationId,
     fileUri: request.fileUri,
     mimeType: request.mimeType,
-    fileName: request.fileName,
-    protocol: request.protocol ?? 'legacy',
-    recordingAssetId: request.recordingAssetId?.trim() ?? '',
-    recordingRole: request.recordingRole ?? 'primary',
-    recordingOrigin: request.recordingOrigin ?? 'captured',
-    expectedBytes: request.expectedBytes ?? -1,
-    durationMs: request.durationMs ?? -1,
-    checksumSha256: request.checksumSha256?.trim() ?? '',
+    recordingAssetId: request.recordingAssetId,
+    expectedBytes: request.expectedBytes,
+    checksumSha256: request.checksumSha256,
+    deviceId: session.deviceId,
+    deviceEpochId: session.epochId,
+    bindingId: binding.bindingId,
+    bindingGeneration: binding.bindingGeneration,
+    bindingRevision: binding.bindingRevision,
+    cancelRevision: binding.cancelRevision,
+    assetGeneration: request.assetGeneration,
   });
-  return { ...lease, workId, operationId: request.operationId };
+  const attached = await attachDeviceOperationExecutor(
+    operation.operationId,
+    'workmanager',
+    workId,
+  );
+  if (!attached) throw new Error('上传 WorkManager 执行句柄未能持久化');
+  return {
+    ...lease,
+    workId,
+    operationId: operation.operationId,
+    protocol: 'device-v2-r2',
+  };
 }
 
 export async function getNativeMeetingUploadState(workId: string): Promise<NativeUploadState | null> {
@@ -145,8 +175,8 @@ export async function cancelNativeMeetingUpload(workId: string): Promise<void> {
   await nativeTransfer!.cancelUpload(workId);
 }
 
-export async function deleteNativeMeetingArtifacts(scope: string, meetingId: string): Promise<void> {
-  const normalizedScope = scope.trim();
+export async function deleteNativeMeetingArtifacts(scope: 'guest', meetingId: string): Promise<void> {
+  const normalizedScope = scope;
   const normalizedMeetingId = meetingId.trim();
   if (!normalizedScope || !normalizedMeetingId || !transferAvailable()) return;
   await nativeTransfer!.deleteMeetingArtifacts(normalizedScope, normalizedMeetingId);

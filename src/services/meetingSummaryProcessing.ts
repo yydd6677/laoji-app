@@ -1,12 +1,11 @@
 import { UpdateProcessingStageUseCase } from '../application/meeting';
-import { getFeatureFlags } from '../config/featureFlags';
 import type {
   ProcessingStage,
   ProcessingStageTransition,
   ScopeKey,
 } from '../domain/meeting';
 import { transitionProcessingStage } from '../domain/meeting';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import { HttpResponseError } from './errors';
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 
@@ -66,9 +65,10 @@ function normalizedRequired(value: string, label: string): string {
 export function meetingSummaryProcessingTransition(
   current: ProcessingStage,
   signal: MeetingSummaryProcessingSignal,
-  hasCurrentSummary: boolean,
+  currentSummaryStatus: 'ready' | 'stale' | null,
 ): ProcessingStageTransition {
   if (current.stage !== 'summary') throw new Error('meeting summary processing stage is invalid');
+  const hasCurrentSummary = currentSummaryStatus !== null;
   if (signal.type === 'prepare') {
     return {
       stage: 'summary',
@@ -182,8 +182,8 @@ export function meetingSummaryProcessingTransition(
   if (hasCurrentSummary) {
     return {
       stage: 'summary',
-      status: current.status === 'stale' ? 'stale' : 'ready',
-      progress: current.status === 'stale' ? null : 1,
+      status: currentSummaryStatus,
+      progress: currentSummaryStatus === 'ready' ? 1 : null,
       jobId: null,
     };
   }
@@ -215,7 +215,6 @@ function transitionChangesStage(
 async function writeProcessingState(
   input: RecordMeetingSummaryProcessingInput,
 ): Promise<MeetingSummaryProcessingWriteOutcome> {
-  if (!getFeatureFlags().localMeetingDbV1) return 'disabled';
   try {
     const legacyMeetingId = normalizedRequired(input.legacyMeetingId, 'legacy meeting ID');
     const direct = await sqliteMeetingNoteRepository.get(legacyMeetingId, input.scopeKey);
@@ -226,10 +225,16 @@ async function writeProcessingState(
     if (!aggregate || aggregate.note.lifecycle === 'deleted') return 'meeting_unavailable';
     const current = aggregate.processingStages.find(stage => stage.stage === 'summary');
     if (!current) throw new Error('meeting summary processing stage is missing');
+    const currentSummary = aggregate.note.currentSummaryVersionId
+      ? await sqliteMeetingNoteRepository.getCurrentSummaryVersion(aggregate.note.id, input.scopeKey)
+      : null;
+    const currentSummaryStatus = currentSummary?.status === 'ready' || currentSummary?.status === 'stale'
+      ? currentSummary.status
+      : null;
     const transition = meetingSummaryProcessingTransition(
       current,
       input.signal,
-      aggregate.note.currentSummaryVersionId !== null,
+      currentSummaryStatus,
     );
     if (!transitionChangesStage(current, transition)) return 'unchanged';
     await updateProcessingStage.execute({
@@ -258,7 +263,7 @@ export function recordMeetingSummaryProcessing(
       diagnosticAudit('meeting_summary_processing_stage', {
         signal: input.signal.type,
         outcome,
-        scope: input.scopeKey === 'guest' ? 'guest' : 'account',
+        scope: 'guest',
       });
     }
     if (pendingWrites.get(key) === operation) pendingWrites.delete(key);
@@ -274,10 +279,17 @@ export function meetingSummaryProcessingFailureCode(reason: unknown): string {
     if (reason.status === 404) return 'summary_task_missing';
     if (reason.status >= 500) return 'summary_service_unavailable';
   }
-  const name = reason instanceof Error ? reason.name : '';
-  const message = reason instanceof Error ? reason.message.toLowerCase() : '';
+  const name = reason && typeof reason === 'object' && typeof (reason as { name?: unknown }).name === 'string'
+    ? (reason as { name: string }).name
+    : '';
+  const message = reason && typeof reason === 'object' && typeof (reason as { message?: unknown }).message === 'string'
+    ? (reason as { message: string }).message.toLowerCase()
+    : '';
   if (name === 'DeviceMeetingUnavailableError') return 'summary_device_meeting_unavailable';
   if (name === 'MeetingSummaryTaskFailureError') return 'summary_worker_failed';
+  if (name === 'MeetingSummaryInputChangedError' || name === 'SummaryV3ActivationFenceError') {
+    return 'summary_input_changed';
+  }
   if (/timed out|timeout/.test(message)) return 'summary_task_timeout';
   if (/network|failed to fetch|connection refused/.test(message)) return 'summary_network_unavailable';
   return 'summary_generation_failed';

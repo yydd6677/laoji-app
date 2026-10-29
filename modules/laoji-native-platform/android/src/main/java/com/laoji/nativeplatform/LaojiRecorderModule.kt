@@ -4,6 +4,7 @@ package com.laoji.nativeplatform
 
 import android.content.Context
 import com.laoji.nativeplatform.audio.AudioRuntimeContract
+import com.laoji.nativeplatform.audio.AudioFileTranscriber
 import com.laoji.nativeplatform.audio.RecorderErrorCode
 import com.laoji.nativeplatform.audio.RecorderEventBus
 import com.laoji.nativeplatform.audio.RecorderEventListener
@@ -80,6 +81,48 @@ class RecorderStartOptions : Record {
       "stopTimeoutMs=$stopTimeoutMs, levelIntervalMs=$levelIntervalMs)"
 }
 
+class DeviceV2RecorderStartOptions : Record {
+  @Field var sessionId: String = ""
+  @Field var storageScope: String? = null
+  @Field var websocketUrl: String = ""
+  @Field var credentialScope: String = ""
+  @Field var credentialGeneration: Long = -1L
+  @Field var taskId: String = ""
+  @Field var clientOperationId: String = ""
+  @Field var bindingId: String = ""
+  @Field var bindingGeneration: String = ""
+  @Field var bindingRevision: Long = -1L
+  @Field var cancelRevision: Long = -1L
+  @Field var assetId: String = ""
+  @Field var assetGeneration: String = ""
+  @Field var expiresAtEpoch: Long = -1L
+  @Field var allowInsecureDevelopment: Boolean = false
+  @Field var connectionTimeoutMs: Double? = null
+  @Field var stopTimeoutMs: Double? = null
+  @Field var levelIntervalMs: Double? = null
+
+  fun toConfig(): RecorderStartConfig = RecorderStartConfig.createDeviceV2(
+    sessionId = sessionId,
+    storageScope = storageScope,
+    websocketUrl = websocketUrl,
+    allowInsecureDevelopment = allowInsecureDevelopment,
+    connectionTimeoutMs = connectionTimeoutMs,
+    stopTimeoutMs = stopTimeoutMs,
+    levelIntervalMs = levelIntervalMs,
+    credentialScope = credentialScope,
+    credentialGeneration = credentialGeneration,
+    taskId = taskId,
+    clientOperationId = clientOperationId,
+    bindingId = bindingId,
+    bindingGeneration = bindingGeneration,
+    bindingRevision = bindingRevision,
+    cancelRevision = cancelRevision,
+    assetId = assetId,
+    assetGeneration = assetGeneration,
+    expiresAtEpoch = expiresAtEpoch,
+  )
+}
+
 class LaojiRecorderModule : Module() {
   private val recorderEventListener = RecorderEventListener { name, body -> sendEvent(name, body) }
 
@@ -108,10 +151,36 @@ class LaojiRecorderModule : Module() {
       RecorderEventBus.removeListener(recorderEventListener)
     }
 
+    AsyncFunction("transcribeFile") { uri: String, options: RecorderStartOptions, promise: Promise ->
+      try { settle(AudioFileTranscriber.transcribe(requireContext(), uri, options.toConfig()), promise) { it } }
+      catch (error: Throwable) { promise.reject("audio_file_failed", "语音转写暂时不可用", error) }
+    }
     AsyncFunction("start") { options: RecorderStartOptions, promise: Promise ->
       try {
         settle(
           RecorderServiceClient.start(requireContext(), options.toConfig()),
+          promise,
+        ) { snapshot -> snapshot.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
+    AsyncFunction("startDeviceV2") { options: DeviceV2RecorderStartOptions, promise: Promise ->
+      try {
+        settle(
+          RecorderServiceClient.start(requireContext(), options.toConfig()),
+          promise,
+        ) { snapshot -> snapshot.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
+    AsyncFunction("attachDeviceV2") { options: DeviceV2RecorderStartOptions, promise: Promise ->
+      try {
+        settle(
+          RecorderServiceClient.attachRealtime(requireContext(), options.toConfig()),
           promise,
         ) { snapshot -> snapshot.toMap() }
       } catch (error: Exception) {
@@ -150,6 +219,46 @@ class LaojiRecorderModule : Module() {
       }
     }
 
+    AsyncFunction("startLocalMeeting") {
+        sessionId: String,
+        storageScope: String?,
+        levelIntervalMs: Double?,
+        promise: Promise ->
+      try {
+        settle(
+          RecorderServiceClient.start(
+            requireContext(),
+            RecorderStartConfig.createLocalMeeting(sessionId, storageScope, levelIntervalMs),
+          ),
+          promise,
+        ) { snapshot -> snapshot.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
+    AsyncFunction("startDeferredRealtimeMeeting") {
+        sessionId: String,
+        storageScope: String?,
+        levelIntervalMs: Double?,
+        promise: Promise ->
+      try {
+        settle(
+          RecorderServiceClient.start(
+            requireContext(),
+            RecorderStartConfig.createDeferredRealtimeMeeting(
+              sessionId,
+              storageScope,
+              levelIntervalMs,
+            ),
+          ),
+          promise,
+        ) { snapshot -> snapshot.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
     AsyncFunction("pause") { sessionId: String, promise: Promise ->
       try {
         settle(
@@ -178,6 +287,25 @@ class LaojiRecorderModule : Module() {
           RecorderServiceClient.stop(requireContext(), RecorderStartConfig.validateSessionId(sessionId)),
           promise,
         ) { result -> result.toMap() }
+      } catch (error: Exception) {
+        reject(promise, error)
+      }
+    }
+
+    AsyncFunction("acknowledgeDeviceV2Transcript") {
+        sessionId: String,
+        throughEventSequence: Long,
+        promise: Promise,
+      ->
+      try {
+        settle(
+          RecorderServiceClient.acknowledgeTranscript(
+            requireContext(),
+            RecorderStartConfig.validateSessionId(sessionId),
+            throughEventSequence,
+          ),
+          promise,
+        ) { acknowledged -> acknowledged }
       } catch (error: Exception) {
         reject(promise, error)
       }

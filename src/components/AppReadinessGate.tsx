@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
-import { useAuth } from '../store/AuthStore';
+import { useLocalProfile } from '../store/LocalProfileStore';
 import { useNavigationStateRestoration } from '../navigation/NavigationStateCoordinator';
 import {
   AppStartupStateView,
@@ -25,12 +25,11 @@ export function AppReadinessGate({
   timeoutMs = APP_READINESS_TIMEOUT_MS,
 }: {
   children: React.ReactNode;
-  feishuEvidence?: string;
   onRetry?: () => void;
   timeoutMs?: number;
 }) {
-  // UI-BOOT-READINESS-001 owns one deadline across auth and navigation restoration.
-  const { initializing } = useAuth();
+  // UI-BOOT-READINESS-001 owns one deadline across local profile and navigation restoration.
+  const { initializing } = useLocalProfile();
   const { ready: navigationReady } = useNavigationStateRestoration();
   const [timedOut, setTimedOut] = useState(false);
   const deadlineRef = useRef<number | null>(null);
@@ -55,9 +54,8 @@ export function AppReadinessGate({
   if (timedOut) {
     return (
       <AppStartupStateView
-        feishuEvidence="feishu:UI-BOOT-READINESS-001:timeout-error-surface"
         phase="error"
-        failureStage={initializing ? 'authentication' : 'navigation'}
+        failureStage={initializing ? 'storage' : 'navigation'}
         onRetry={onRetry}
       />
     );

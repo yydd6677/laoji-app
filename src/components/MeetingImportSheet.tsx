@@ -1,5 +1,5 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { CalEvent, Meeting } from '../types';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 import { eventRefKey, eventRefForEvent } from '../utils/eventIdentity';
 
 const MOTION_MS = 300;
@@ -123,7 +123,8 @@ export function MeetingImportSheet({
   onValidate: (draft: MeetingImportDraft) => Promise<string | null>;
   onImport: (draft: MeetingImportDraft) => void;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -342,8 +343,13 @@ export function MeetingImportSheet({
                   color={submitting ? colors.iconDisabled : colors.iconPrimary}
                 />
               </Pressable>
-              <Text style={[styles.title, { color: colors.textTitle }]}>
-                {page === 'events' ? '关联日程' : page === 'meetings' ? '保存到' : '导入会议录音'}
+              <Text
+                style={[styles.title, error && styles.error, { color: error ? colors.danger : colors.textTitle }]}
+                numberOfLines={2}
+                accessibilityLiveRegion={error ? 'polite' : 'none'}
+                testID="meeting-import-heading"
+              >
+                {error || (page === 'events' ? '关联日程' : page === 'meetings' ? '保存到' : '导入会议录音')}
               </Text>
               <View style={styles.titleAction} />
             </View>
@@ -485,7 +491,6 @@ export function MeetingImportSheet({
 
                 {allowExistingMeeting && meetingCandidates.length > 0 ? (
                   <>
-                    <Text style={[styles.label, { color: colors.textCaption }]}>保存到</Text>
                     <Pressable
                       style={({ pressed }) => [
                         styles.linkRow,
@@ -559,10 +564,10 @@ export function MeetingImportSheet({
                       </Pressable>
                     </View>
 
-                    <Text style={[styles.label, styles.sectionLabel, { color: colors.textCaption }]}>日程</Text>
                     <Pressable
                       style={({ pressed }) => [
                         styles.linkRow,
+                        styles.linkSection,
                         { borderColor: colors.divider },
                         pressed && { backgroundColor: colors.pressedFill },
                       ]}
@@ -585,9 +590,6 @@ export function MeetingImportSheet({
                 </ScrollView>
 
                 <View style={styles.footer}>
-                  <View style={styles.errorSlot}>
-                    <Text style={[styles.error, { color: colors.danger }]} numberOfLines={2}>{error}</Text>
-                  </View>
                   <Pressable
                     style={({ pressed }) => [
                       styles.submit,
@@ -631,36 +633,36 @@ export function MeetingImportSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 60, height: 44, alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '500' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '500' },
   content: { flex: 1 },
   form: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
   fileRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10 },
   fileBody: { flex: 1, minWidth: 0 },
-  fileName: { fontSize: 14, lineHeight: 20, fontWeight: '400' },
-  fileMeta: { marginTop: 1, fontSize: 12, lineHeight: 18 },
-  label: { marginTop: 10, marginBottom: 6, fontSize: 13, lineHeight: 20 },
+  fileName: { fontFamily, fontSize: 14, lineHeight: 20, fontWeight: '400' },
+  fileMeta: { marginTop: 1, fontFamily, fontSize: 12, lineHeight: 18 },
+  label: { marginTop: 10, marginBottom: 6, fontFamily, fontSize: 13, lineHeight: 20 },
   sectionLabel: { marginTop: 16 },
-  input: { height: 48, borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, paddingHorizontal: 12, fontSize: 16, lineHeight: 24 },
+  input: { height: 48, borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, paddingHorizontal: 12, fontFamily, fontSize: 16, lineHeight: 24 },
   rows: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, overflow: 'hidden' },
   valueRow: { height: 52, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center' },
-  valueLabel: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  value: { flex: 1, marginLeft: 16, fontSize: 15, lineHeight: 22, textAlign: 'right' },
+  valueLabel: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  value: { flex: 1, marginLeft: 16, fontFamily, fontSize: 15, lineHeight: 22, textAlign: 'right' },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: 12 },
   linkRow: { height: 52, paddingHorizontal: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
+  linkSection: { marginTop: 16 },
   footer: { paddingHorizontal: 16, paddingTop: 2 },
-  errorSlot: { height: 38, justifyContent: 'center' },
-  error: { fontSize: 13, lineHeight: 18 },
+  error: { fontFamily, fontSize: 13, lineHeight: 18 },
   submit: { height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  submitText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  submitText: { fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
   eventRow: { minHeight: 66, paddingLeft: 16, paddingRight: 18, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center' },
   eventBody: { flex: 1, minWidth: 0, paddingVertical: 10 },
-  eventTitle: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  eventMeta: { marginTop: 1, fontSize: 13, lineHeight: 20 },
+  eventTitle: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  eventMeta: { marginTop: 1, fontFamily, fontSize: 13, lineHeight: 20 },
 });

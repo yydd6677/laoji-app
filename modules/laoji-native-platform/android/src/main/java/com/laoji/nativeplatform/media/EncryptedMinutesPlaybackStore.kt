@@ -8,6 +8,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
 import android.util.Log
+import com.laoji.nativeplatform.minutes.traceMinutes
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -60,7 +61,9 @@ internal class EncryptedMinutesPlaybackStore(
       return false
     }
     val encrypted = try {
-      encrypt(MinutesPlaybackRecoveryCodec.encode(record))
+      traceMinutes("LaoJi/minutes.player.recovery.encrypt") {
+        encrypt(MinutesPlaybackRecoveryCodec.encode(record))
+      }
     } catch (error: Exception) {
       Log.w(LOG_TAG, "Unable to encrypt playback recovery", error)
       clear()
@@ -68,10 +71,12 @@ internal class EncryptedMinutesPlaybackStore(
     }
     var stream: FileOutputStream? = null
     return try {
-      val output = atomicFile.startWrite()
-      stream = output
-      output.write(encrypted)
-      atomicFile.finishWrite(output)
+      traceMinutes("LaoJi/minutes.player.recovery.write") {
+        val output = atomicFile.startWrite()
+        stream = output
+        output.write(encrypted)
+        atomicFile.finishWrite(output)
+      }
       stream = null
       true
     } catch (error: Exception) {

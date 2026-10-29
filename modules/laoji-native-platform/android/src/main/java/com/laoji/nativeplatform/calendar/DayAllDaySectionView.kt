@@ -17,12 +17,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import com.laoji.nativeplatform.ui.NativeUiTokens
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
-
 interface DayAllDaySectionListener {
   fun onAllDayEventOpened(event: CalendarEvent)
   fun onAllDayExpandedChanged(expanded: Boolean, overflow: Boolean)
@@ -117,13 +115,11 @@ internal data class DayAllDaySectionState(
     copy(expanded = value && (expanded || overflow))
 }
 
-@FeishuEvidence("CAL-ALLDAY-001")
 class DayAllDaySectionView(context: Context) : FrameLayout(context) {
   companion object {
     private const val MAX_SCROLL_OFFSET_ENTRIES = 32
   }
 
-  private val palette = CalendarUi.palette(context)
   private val density = resources.displayMetrics.density
   private val touchRouter = AssociatedDayPagerTouchRouter(context)
   private val rowHeightPx = DayAllDaySectionContract.rowHeightPx(density)
@@ -152,10 +148,9 @@ class DayAllDaySectionView(context: Context) : FrameLayout(context) {
   private var heightAnimationTargetPx: Int? = null
 
   init {
-    FeishuEvidenceRuntime.bind(this, "CAL-ALLDAY-001", "all-day-pager", "calendar-all-day-pager")
     clipChildren = true
     clipToPadding = true
-    setBackgroundColor(palette.surfaceMuted)
+    NativeUiTokens.bindTheme(this) { setBackgroundColor(CalendarUi.palette(context).surfaceMuted) }
     pages.forEach(track::addView)
     addView(trackViewport, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     updatePresentation()
@@ -368,9 +363,8 @@ class DayAllDaySectionView(context: Context) : FrameLayout(context) {
 
 // CAL-ALLDAY-001: one native drawable owner renders the source-shaped all-day
 // instance list and the overflow instance; the pager/height owner stays above it.
-@FeishuEvidence("CAL-ALLDAY-001")
 internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
-  private val palette = CalendarUi.palette(context)
+  private var palette = CalendarUi.palette(context)
   private val density = resources.displayMetrics.density
   private val rowHeightPx = DayAllDaySectionContract.rowHeightPx(density)
   private val horizontalGapPx = DayAllDaySectionContract.horizontalSpacePx(density)
@@ -406,6 +400,15 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
     isClickable = true
     isFocusable = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+    NativeUiTokens.bindTheme(this) {
+      palette = CalendarUi.palette(context)
+      CalendarUi.restyleTextPaint(context, textPaint, palette.eventText, true)
+      CalendarUi.restyleTextPaint(context, overflowTextPaint, palette.textSecondary, true)
+      overflowPaint.color = palette.surface
+      overflowStrokePaint.color = palette.divider
+      chevronPaint.color = palette.textSecondary
+      // Category fill/text and pressed colors are resolved per event in onDraw.
+    }
   }
 
   fun bind(
@@ -420,12 +423,6 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
     this.overflowCount = overflowCount.coerceAtLeast(0)
     this.onEventOpened = onEventOpened
     this.onExpandRequested = onExpandRequested
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-ALLDAY-001",
-      "all-day-instance-layer",
-      "calendar-all-day-instance-layer-$epochDay",
-    )
     contentDescription = buildString {
       append("全天日程")
       if (events.isNotEmpty()) append("，${events.size}项")
@@ -454,7 +451,7 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
       eventPaint.color = visual.fill
       textPaint.color = visual.text
       pressedPaint.color = visual.pressedOverlay
-      drawChip(canvas, index, rowWidth, CalendarUi.listEventTitle(event.title), eventPaint, textPaint, false)
+      drawChip(canvas, index, rowWidth, CalendarUi.eventDisplayTitle(event), eventPaint, textPaint, false)
     }
     if (overflowCount > 0) {
       pressedPaint.color = Color.argb(
@@ -550,9 +547,7 @@ internal class DayAllDayInstanceCanvasView(context: Context) : View(context) {
   }
 }
 
-@FeishuEvidence("CAL-ALLDAY-001")
 internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
-  private val palette = CalendarUi.palette(context)
   private val density = resources.displayMetrics.density
   private val rowHeightPx = DayAllDaySectionContract.rowHeightPx(density)
   private val rowHorizontalSpacePx = DayAllDaySectionContract.horizontalSpacePx(density)
@@ -577,7 +572,7 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
   var onExpandRequested: (() -> Unit)? = null
 
   init {
-    setBackgroundColor(palette.surfaceMuted)
+    NativeUiTokens.bindTheme(this) { setBackgroundColor(CalendarUi.palette(context).surfaceMuted) }
     scrollView.addView(
       contentColumn,
       FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
@@ -596,18 +591,6 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
     val restoreToken = ++bindGeneration
     boundEpochDay = epochDay
     boundGeneration = generation
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-ALLDAY-001",
-      "all-day-page",
-      "calendar-all-day-page-$epochDay",
-    )
-    FeishuEvidenceRuntime.bind(
-      scrollView,
-      "CAL-ALLDAY-001",
-      "all-day-scroll",
-      "calendar-all-day-scroll-$epochDay",
-    )
     this.events = events
     this.expanded = expanded
     this.reserveExpandSpace = reserveExpandSpace
@@ -639,7 +622,7 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
     val visibleEvents = if (expanded) events else events.take(collapsedContent.visibleEventCount)
     val remainingCount = if (!expanded && collapsedContent.hasMoreRow) collapsedContent.remainingCount else 0
     val rows = visibleEvents.size + if (remainingCount > 0) 1 else 0
-    // Feishu's AllDayInstanceLayout keeps its PositionedViewLayout owners alive
+    // Keep the positioned all-day view owners alive
     // while only rebinding the drawable list. Reusing this Canvas preserves the
     // pressed layer and accessibility owner across the 100ms height transition.
     val canvas = instanceCanvas ?: DayAllDayInstanceCanvasView(context).also { created ->
@@ -683,7 +666,6 @@ internal class DayAllDayPageView(context: Context) : FrameLayout(context) {
   internal fun instanceLayerForTest(): DayAllDayInstanceCanvasView? = instanceCanvas
 }
 
-@FeishuEvidence("CAL-ALLDAY-001")
 internal class DayAllDayScrollView(context: Context) : ScrollView(context) {
   var userScrollingEnabled = false
 

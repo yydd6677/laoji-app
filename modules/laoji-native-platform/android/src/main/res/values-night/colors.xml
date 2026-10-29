@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- CAL-REPEAT-RRULE-001: night aliases resolve through the same Feishu tokens. -->
+    <!-- CAL-REPEAT-RRULE-001: night aliases resolve through the same semantic tokens. -->
     <color name="laoji_ud_switch_on_thumb">#4C88FF</color>
     <color name="laoji_ud_switch_on_disabled_thumb">#2655B6</color>
     <color name="laoji_ud_switch_off_disabled_thumb">#5F5F5F</color>

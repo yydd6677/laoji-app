@@ -3,7 +3,7 @@ import {
   Animated, Modal, View, Text, TextInput, TouchableOpacity, Pressable,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -19,7 +19,7 @@ import {
   parseAudio,
   parseText,
   ParseResult,
-} from '../services/api';
+} from '../services/scheduleParsing';
 import { getLocalDeviceRealtimeAuth, type DeviceRealtimeAuth } from '../services/deviceApi';
 import {
   RealtimeAsrAudioStats,
@@ -44,11 +44,13 @@ import { reminderUnavailableMessage } from '../services/notifications';
 import { CalEvent, EventDraftParams, RootStackParamList } from '../types';
 import { validateEventDraft } from '../utils/eventDraftValidation';
 import { eventListTitle } from '../utils/eventTitle';
+import type { ScheduleInputJob } from '../services/scheduleInput';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   onSaved: () => void;
+  input?: ScheduleInputJob | null;
 }
 
 type Step = 'input' | 'connecting' | 'recording' | 'parsing' | 'confirm' | 'saving';
@@ -780,10 +782,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
     setStep('parsing'); setError('');
     try {
       const answer = clarifyAnswer.trim();
-      const result = await clarifyText(text, answer, draft);
+      const result = await clarifyText(draft.raw_text?.trim() || text, answer, draft);
       if (operationRunRef.current !== runId) return;
       setDraft(result);
-      setText(prev => prev ? `${prev}\n${answer}` : answer);
+      const mergedText = result.raw_text?.trim();
+      if (mergedText) setText(mergedText);
+      else setText(prev => prev ? `${prev}\n${answer}` : answer);
       setClarifyAnswer('');
       setStep('confirm');
     } catch {
@@ -817,6 +821,12 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       spanning:    source.spanning ?? Boolean(source.end_date && source.end_date !== source.start_date),
       reminderMinutes: hasStartTime ? source.reminder_minutes ?? null : null,
       color:       colorForEvent({ category }),
+      ...(source.schedule_graph ? {
+        eventRevision: source.schedule_graph.provenance.draft_revision,
+        draftSourceSha256: source.schedule_graph.source.content_sha256,
+        producerRevision: source.schedule_graph.provenance.producer_revision,
+        graphSchemaRevision: 'mention-graph-v1',
+      } : {}),
     };
   };
 
@@ -840,6 +850,10 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
       detail: payload.detail,
       status: payload.status,
       reminderMinutes: payload.reminderMinutes,
+      eventRevision: payload.eventRevision,
+      draftSourceSha256: payload.draftSourceSha256,
+      producerRevision: payload.producerRevision,
+      graphSchemaRevision: payload.graphSchemaRevision,
     };
   };
 
@@ -1014,8 +1028,8 @@ export function VoiceInputModal({ visible, onClose, onSaved }: Props) {
                         {micInteraction === 'holding'
                           ? '松开结束'
                           : recordingMode === 'realtime'
-                            ? '实时识别中，轻点结束'
-                            : '录音中，轻点结束'}
+                            ? '实时识别中'
+                            : '录音中'}
                       </Text>
                     )}
                   </View>

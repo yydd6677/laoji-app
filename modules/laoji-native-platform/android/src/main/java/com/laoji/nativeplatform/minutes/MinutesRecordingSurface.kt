@@ -28,6 +28,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.laoji.nativeplatform.audio.RecorderLevelFrame
 import com.laoji.nativeplatform.audio.RecorderLevelHub
 import com.laoji.nativeplatform.ui.installImeOverlapBottomPadding
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,7 +37,7 @@ import kotlinx.coroutines.launch
 
 internal class MinutesRecordingSurface(
   context: Context,
-  private val onAction: (Map<String, Any?>) -> Unit,
+  private val dispatchAction: (Map<String, Any?>) -> Unit,
 ) : ConstraintLayout(context) {
   private val topBar = FrameLayout(context)
   private val backButton = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_back, "返回")
@@ -45,10 +46,10 @@ internal class MinutesRecordingSurface(
   private val title = context.textView(textSizeSp = 24, weight = Typeface.BOLD)
   private val titleEditor = EditText(context)
   private val timeIcon = ImageView(context).apply { id = View.generateViewId() }
-  private val startedAt = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+  private val startedAt = context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
   private val locationRow = LinearLayout(context).apply { id = View.generateViewId() }
   private val locationIcon = ImageView(context)
-  private val locationText = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+  private val locationText = context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
   private val tabBar = FrameLayout(context)
   private val notesTab = context.textView("我的笔记", textSizeSp = 16)
   private val transcriptTab = context.textView("实时文字", textSizeSp = 16, weight = Typeface.BOLD)
@@ -56,16 +57,16 @@ internal class MinutesRecordingSurface(
   private val divider = View(context)
   private val content = FrameLayout(context)
   private val manualNoteRoot = LinearLayout(context)
-  private val manualNoteStatus = context.textView(textSizeSp = 13, color = MinutesPalette.secondary)
+  private val manualNoteStatus = context.textView(textSizeSp = 13, color = { MinutesPalette.secondary })
   private val manualNoteEditor = EditText(context)
   private val transcript = RecyclerView(context)
   private val transcriptAdapter = MinutesRecordingTranscriptAdapter()
   private val errorBanner = LinearLayout(context)
-  private val errorText = context.textView(textSizeSp = 13, color = MinutesPalette.danger)
-  private val retryText = context.textView("重试", textSizeSp = 14, color = MinutesPalette.danger, weight = Typeface.BOLD)
+  private val errorText = context.textView(textSizeSp = 13, color = { MinutesPalette.danger })
+  private val retryText = context.textView("重试", textSizeSp = 14, color = { MinutesPalette.danger }, weight = Typeface.BOLD)
   private val latestButton = context.iconButton(com.laoji.nativeplatform.R.drawable.laoji_ic_arrow_down_bottom, "回到最新转写")
   private val bottomPanel = ConstraintLayout(context).apply { id = View.generateViewId() }
-  private val timer = context.textView(textSizeSp = 14, color = MinutesPalette.secondary)
+  private val timer = context.textView(textSizeSp = 14, color = { MinutesPalette.secondary })
   private val waveContainer = FrameLayout(context)
   private val waveform = MinutesRecordingWaveformView(context)
   private val actionRow = ConstraintLayout(context)
@@ -84,7 +85,7 @@ internal class MinutesRecordingSurface(
   private var applyingManualNoteSnapshot = false
 
   init {
-    setBackgroundColor(MinutesPalette.surface)
+    minutesBackgroundColor { MinutesPalette.surface }
     clipChildren = false
     installImeOverlapBottomPadding()
     buildTopBar()
@@ -96,7 +97,7 @@ internal class MinutesRecordingSurface(
 
   private fun buildTopBar() {
     topBar.id = View.generateViewId()
-    topBar.setBackgroundColor(MinutesPalette.surface)
+    topBar.minutesBackgroundColor { MinutesPalette.surface }
     backButton.setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
     addView(
       topBar,
@@ -150,8 +151,8 @@ internal class MinutesRecordingSurface(
     )
     titleEditor.apply {
       setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 24f)
-      setTextColor(MinutesPalette.text)
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      minutesTextColor { MinutesPalette.text }
+      minutesTypeface(Typeface.BOLD)
       includeFontPadding = false
       background = null
       gravity = Gravity.CENTER_VERTICAL
@@ -184,7 +185,7 @@ internal class MinutesRecordingSurface(
     )
 
     timeIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_time_outline)
-    timeIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
+    timeIcon.minutesIconColors { ColorStateList.valueOf(MinutesPalette.secondary) }
     timeIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     titleSection.addView(
       timeIcon,
@@ -201,7 +202,7 @@ internal class MinutesRecordingSurface(
     locationRow.minimumHeight = context.dp(36)
     locationRow.setPadding(0, 0, 0, 0)
     locationIcon.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_location_outline)
-    locationIcon.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
+    locationIcon.minutesIconColors { ColorStateList.valueOf(MinutesPalette.secondary) }
     locationIcon.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     locationRow.addView(
       locationIcon,
@@ -252,7 +253,7 @@ internal class MinutesRecordingSurface(
         leftMargin = context.dp(82)
       },
     )
-    tabIndicator.backgroundShape(MinutesPalette.primary, radiusDp = 1)
+    tabIndicator.backgroundShape({ MinutesPalette.primary }, radiusDp = { 1 })
     tabBar.addView(
       tabIndicator,
       FrameLayout.LayoutParams(context.dp(45), context.dp(2), Gravity.START or Gravity.BOTTOM).apply {
@@ -261,7 +262,7 @@ internal class MinutesRecordingSurface(
     )
 
     divider.id = View.generateViewId()
-    divider.setBackgroundColor(MinutesPalette.divider)
+    divider.minutesBackgroundColor { MinutesPalette.divider }
     addView(
       divider,
       LayoutParams(0, 1).apply {
@@ -298,8 +299,9 @@ internal class MinutesRecordingSurface(
     )
     manualNoteEditor.apply {
       setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
-      setTextColor(MinutesPalette.text)
-      setHintTextColor(MinutesPalette.faint)
+      minutesTextColor { MinutesPalette.text }
+      minutesDrawing { setHintTextColor(MinutesPalette.faint) }
+      minutesTypeface(Typeface.NORMAL)
       hint = "记录想法"
       gravity = Gravity.TOP or Gravity.START
       background = null
@@ -317,7 +319,7 @@ internal class MinutesRecordingSurface(
         override fun onTextChanged(value: CharSequence?, start: Int, before: Int, count: Int) = Unit
         override fun afterTextChanged(value: Editable?) {
           if (!applyingManualNoteSnapshot) {
-            onAction(
+            emitAction(
               mapOf(
                 "type" to "updateManualNote",
                 "meetingId" to renderedState.meetingId,
@@ -363,7 +365,7 @@ internal class MinutesRecordingSurface(
     errorBanner.orientation = LinearLayout.HORIZONTAL
     errorBanner.gravity = Gravity.CENTER_VERTICAL
     errorBanner.setPadding(context.dp(12), 0, context.dp(8), 0)
-    errorBanner.backgroundShape(MinutesPalette.dangerSoft, radiusDp = 6)
+    errorBanner.backgroundShape({ MinutesPalette.dangerSoft }, radiusDp = { 6 })
     errorBanner.addView(errorText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     retryText.gravity = Gravity.CENTER
     errorBanner.addView(retryText, LinearLayout.LayoutParams(context.dp(52), context.dp(44)))
@@ -380,8 +382,8 @@ internal class MinutesRecordingSurface(
     latestButton.minimumWidth = 0
     latestButton.minimumHeight = 0
     latestButton.setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
-    latestButton.imageTintList = ColorStateList.valueOf(MinutesPalette.secondary)
-    latestButton.backgroundShape(MinutesPalette.surface, radiusDp = 22)
+    latestButton.minutesIconColors { ColorStateList.valueOf(MinutesPalette.secondary) }
+    latestButton.backgroundShape({ MinutesPalette.surface }, radiusDp = { 22 })
     latestButton.elevation = context.dp(4).toFloat()
     latestButton.visibility = View.GONE
     content.addView(
@@ -397,7 +399,7 @@ internal class MinutesRecordingSurface(
     markerButton.id = View.generateViewId()
     pauseButton.id = View.generateViewId()
     stopButton.id = View.generateViewId()
-    bottomPanel.setBackgroundColor(MinutesPalette.surface)
+    bottomPanel.minutesBackgroundColor { MinutesPalette.surface }
     addView(
       bottomPanel,
       LayoutParams(0, context.dp(MinutesRecordingV3Contract.BOTTOM_PANEL_HEIGHT_DP)).apply {
@@ -410,8 +412,8 @@ internal class MinutesRecordingSurface(
     timer.id = View.generateViewId()
     timer.gravity = Gravity.CENTER
     timer.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
-    timer.setTextColor(MinutesPalette.secondary)
-    timer.typeface = Typeface.MONOSPACE
+    timer.minutesTextColor { MinutesPalette.secondary }
+    timer.minutesTypeface(Typeface.NORMAL)
     bottomPanel.addView(
       timer,
       LayoutParams(0, context.dp(MinutesRecordingV3Contract.DURATION_HEIGHT_DP)).apply {
@@ -507,7 +509,7 @@ internal class MinutesRecordingSurface(
         commitTitleEdit()
         return@setOnClickListener
       }
-      onAction(mapOf("type" to "back", "meetingId" to renderedState.meetingId))
+      emitAction(mapOf("type" to "back", "meetingId" to renderedState.meetingId))
     }
     title.setOnClickListener { beginTitleEdit() }
     titleEditor.setOnEditorActionListener { _, actionId, _ ->
@@ -522,20 +524,16 @@ internal class MinutesRecordingSurface(
     transcriptTab.setOnClickListener { selectRecordingContent(MinutesRecordingContent.TRANSCRIPT, emit = true) }
     manualNoteStatus.setOnClickListener {
       if (manualNoteStatus.isEnabled) {
-        onAction(
+        emitAction(
           mapOf(
-            "type" to if (renderedState.manualNoteConflict) {
-              "openManualNoteConflict"
-            } else {
-              "retryManualNote"
-            },
+            "type" to "retryManualNote",
             "meetingId" to renderedState.meetingId,
           ),
         )
       }
     }
     pauseButton.setOnClickListener {
-      onAction(
+      emitAction(
         mapOf(
           "type" to "toggleRecordingPause",
           "meetingId" to renderedState.meetingId,
@@ -546,7 +544,7 @@ internal class MinutesRecordingSurface(
     markerButton.setOnClickListener {
       if (!renderedState.canCreateMarker) return@setOnClickListener
       markerButton.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-      onAction(
+      emitAction(
         mapOf(
           "type" to "createMarker",
           "meetingId" to renderedState.meetingId,
@@ -556,7 +554,7 @@ internal class MinutesRecordingSurface(
     }
     stopButton.setOnClickListener { emitStopOrStart() }
     retryText.setOnClickListener {
-      onAction(mapOf("type" to "retryRecording", "meetingId" to renderedState.meetingId))
+      emitAction(mapOf("type" to "retryRecording", "meetingId" to renderedState.meetingId))
     }
     latestButton.setOnClickListener {
       setFollowingLatest(true, emit = true)
@@ -564,7 +562,7 @@ internal class MinutesRecordingSurface(
     }
     locationRow.setOnClickListener {
       if (!renderedState.canEditLocation || renderedState.locationLoading) return@setOnClickListener
-      onAction(
+      emitAction(
         mapOf(
           "type" to "requestMeetingLocation",
           "meetingId" to renderedState.meetingId,
@@ -592,7 +590,7 @@ internal class MinutesRecordingSurface(
       else -> "添加地点"
     }
     locationText.text = locationLabel
-    locationText.setTextColor(if (state.location.isBlank()) MinutesPalette.faint else MinutesPalette.secondary)
+    locationText.minutesTextColor { if (state.location.isBlank()) MinutesPalette.faint else MinutesPalette.secondary }
     locationRow.isEnabled = state.canEditLocation && !state.locationLoading
     locationRow.isClickable = locationRow.isEnabled
     locationRow.isFocusable = locationRow.isEnabled
@@ -638,25 +636,17 @@ internal class MinutesRecordingSurface(
     manualNoteEditor.isEnabled = enabled
     manualNoteEditor.isFocusableInTouchMode = enabled
     manualNoteEditor.alpha = if (enabled) 1f else 0.72f
-    val statusText = when {
-      state.manualNoteConflict -> "笔记同步冲突，点击处理"
-      state.manualNoteError.isNotBlank() -> state.manualNoteError +
-        if (state.manualNoteRetryable) " 点击重试" else ""
-      state.manualNoteLoading -> "正在读取我的笔记"
-      state.manualNoteSaving -> "正在保存"
-      else -> ""
-    }
+    val statusText = state.manualNoteError
     manualNoteStatus.text = statusText
-    manualNoteStatus.visibility = if (statusText.isBlank()) View.INVISIBLE else View.VISIBLE
-    manualNoteStatus.isEnabled = state.manualNoteConflict ||
-      (state.manualNoteError.isNotBlank() && state.manualNoteRetryable)
-    manualNoteStatus.setTextColor(
-      if (state.manualNoteConflict || state.manualNoteError.isNotBlank()) {
+    manualNoteStatus.visibility = if (statusText.isBlank()) View.GONE else View.VISIBLE
+    manualNoteStatus.isEnabled = state.manualNoteError.isNotBlank() && state.manualNoteRetryable
+    manualNoteStatus.minutesTextColor {
+      if (state.manualNoteError.isNotBlank()) {
         MinutesPalette.danger
       } else {
         MinutesPalette.secondary
-      },
-    )
+      }
+    }
     manualNoteStatus.contentDescription = statusText.takeIf(String::isNotBlank)
   }
 
@@ -666,10 +656,10 @@ internal class MinutesRecordingSurface(
     val showNotes = target == MinutesRecordingContent.NOTES
     manualNoteRoot.visibility = if (showNotes) View.VISIBLE else View.INVISIBLE
     transcript.visibility = if (showNotes) View.INVISIBLE else View.VISIBLE
-    notesTab.setTextColor(if (showNotes) MinutesPalette.primary else MinutesPalette.secondary)
-    notesTab.typeface = Typeface.create(Typeface.DEFAULT, if (showNotes) Typeface.BOLD else Typeface.NORMAL)
-    transcriptTab.setTextColor(if (showNotes) MinutesPalette.secondary else MinutesPalette.primary)
-    transcriptTab.typeface = Typeface.create(Typeface.DEFAULT, if (showNotes) Typeface.NORMAL else Typeface.BOLD)
+    notesTab.minutesTextColor { if (showNotes) MinutesPalette.primary else MinutesPalette.secondary }
+    notesTab.minutesTypeface(if (showNotes) Typeface.BOLD else Typeface.NORMAL)
+    transcriptTab.minutesTextColor { if (showNotes) MinutesPalette.secondary else MinutesPalette.primary }
+    transcriptTab.minutesTypeface(if (showNotes) Typeface.NORMAL else Typeface.BOLD)
     latestButton.visibility = if (
       !showNotes && !followingLatest && transcriptAdapter.itemCount > 0
     ) View.VISIBLE else View.GONE
@@ -687,7 +677,7 @@ internal class MinutesRecordingSurface(
         ?.hideSoftInputFromWindow(manualNoteEditor.windowToken, 0)
     }
     if (emit && changed) {
-      onAction(
+      emitAction(
         mapOf(
           "type" to "selectRecordingContent",
           "meetingId" to renderedState.meetingId,
@@ -775,9 +765,9 @@ internal class MinutesRecordingSurface(
     val enabled = state.canPause
     pauseButton.isEnabled = enabled
     pauseButton.alpha = if (enabled) 1f else 0.5f
-    pauseButton.backgroundShape(if (enabled) MinutesPalette.primarySoft else MinutesPalette.page, radiusDp = 100)
+    pauseButton.backgroundShape({ if (enabled) MinutesPalette.primarySoft else MinutesPalette.page }, radiusDp = { 100 })
     pauseButton.setPadding(context.dp(27), context.dp(16), context.dp(27), context.dp(16))
-    pauseButton.imageTintList = ColorStateList.valueOf(if (enabled) MinutesPalette.primary else MinutesPalette.disabled)
+    pauseButton.minutesIconColors { ColorStateList.valueOf(if (enabled) MinutesPalette.primary else MinutesPalette.disabled) }
     pauseButton.setImageResource(
       if (state.phase == MinutesRecordingPhase.PAUSED) com.laoji.nativeplatform.R.drawable.laoji_ic_play_filled
       else com.laoji.nativeplatform.R.drawable.laoji_ic_pause_filled,
@@ -790,21 +780,21 @@ internal class MinutesRecordingSurface(
     stopButton.isEnabled = enabled
     stopButton.alpha = if (enabled) 1f else 0.5f
     stopButton.backgroundShape(
-      when {
+      { when {
         state.canStop -> MinutesPalette.page
         enabled -> MinutesPalette.primarySoft
         else -> MinutesPalette.page
-      },
-      radiusDp = 100,
+      } },
+      radiusDp = { 100 },
     )
     stopButton.setPadding(context.dp(27), context.dp(16), context.dp(27), context.dp(16))
-    stopButton.imageTintList = ColorStateList.valueOf(
+    stopButton.minutesIconColors { ColorStateList.valueOf(
       when {
         !enabled -> MinutesPalette.disabled
         state.canStop -> MinutesPalette.text
         else -> MinutesPalette.primary
       },
-    )
+    ) }
     when {
       state.canStop -> stopButton.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_stop_filled)
       state.phase == MinutesRecordingPhase.FAILED -> stopButton.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ic_refresh)
@@ -821,23 +811,27 @@ internal class MinutesRecordingSurface(
     markerButton.isEnabled = state.canCreateMarker
     markerButton.setImageResource(com.laoji.nativeplatform.R.drawable.laoji_ud_icon_flag_outlined)
     markerButton.setPadding(context.dp(10), context.dp(10), context.dp(10), context.dp(10))
-    markerButton.background = context.roundedStateBackground(
+    markerButton.minutesBackground { context.roundedStateBackground(
       defaultColor = MinutesPalette.primarySoft,
       pressedColor = MinutesPalette.primaryTransparent,
       disabledColor = MinutesPalette.page,
       radiusDp = MinutesRecordingV3Contract.MARKER_SIZE_DP / 2,
-    )
-    markerButton.imageTintList = statefulIconTint(
+    ) }
+    markerButton.minutesIconColors { statefulIconTint(
       defaultColor = MinutesPalette.primary,
       pressedColor = MinutesPalette.primary,
       disabledColor = MinutesPalette.disabled,
-    )
+    ) }
     markerButton.contentDescription = if (state.canCreateMarker) "标记当前时刻" else "当前无法添加标记"
+  }
+
+  private fun emitAction(action: Map<String, Any?>) {
+    dispatchAction(action + mapOf("recordingControl" to renderedState.control?.toMap()))
   }
 
   private fun emitStopOrStart() {
     val type = if (renderedState.canStop) "stopRecording" else "startRecording"
-    onAction(mapOf("type" to type, "meetingId" to renderedState.meetingId))
+    emitAction(mapOf("type" to type, "meetingId" to renderedState.meetingId))
   }
 
   private fun beginTitleEdit() {
@@ -865,7 +859,7 @@ internal class MinutesRecordingSurface(
     title.visibility = View.VISIBLE
     title.text = next.ifBlank { "新录音" }
     if (next != previous) {
-      onAction(
+      emitAction(
         mapOf(
           "type" to "saveTitle",
           "meetingId" to renderedState.meetingId,
@@ -889,7 +883,7 @@ internal class MinutesRecordingSurface(
       transcriptAdapter.itemCount > 0
     ) View.VISIBLE else View.GONE
     if (emit) {
-      onAction(
+      emitAction(
         mapOf(
           "type" to "setFollowLatest",
           "meetingId" to renderedState.meetingId,

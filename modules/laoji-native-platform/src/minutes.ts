@@ -12,6 +12,7 @@ import {
   requireOptionalNativeModule,
 } from 'expo-modules-core';
 import type { NativeModule } from 'expo-modules-core';
+import type { NativeProjectionEnvelope } from './contracts';
 
 export const MINUTES_SNAPSHOT_SCHEMA_VERSION = 19 as const;
 export const MINUTES_PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
@@ -49,7 +50,7 @@ export interface MinutesMeetingSnapshot {
   statusLabel?: string;
   statusTone?: MinutesStatusTone;
   canResume?: boolean;
-  /** [INFERENCE] LaoJi derives a Feishu-shaped cover from locally available content. */
+  /** LaoJi derives a content-shaped cover from locally available meeting data. */
   coverType?: 'default' | 'summary' | 'speakerSummary';
   coverTitle?: string;
   coverText?: string;
@@ -151,7 +152,6 @@ export interface MinutesActionItemSnapshot {
   sourceStartMs?: number;
   updatedAtMs?: number;
   updating?: boolean;
-  syncConflict?: boolean;
   canShare?: boolean;
 }
 
@@ -189,7 +189,7 @@ export interface MinutesPlayerSourceSnapshot {
   title?: string;
   durationMsHint?: number;
   retainForBackground?: boolean;
-  storageScope: 'guest' | `user:${string}`;
+  storageScope: 'guest';
   expiresAt?: number;
 }
 
@@ -198,17 +198,27 @@ export interface MinutesListSnapshot {
   searching?: boolean;
   query?: string;
   mediaImporting?: boolean;
+  mediaImportStatusLabel?: string;
   phase?: MinutesContentPhase;
   message?: string;
   showingCachedData?: boolean;
   mode?: 'meetings' | 'recycleBin';
   canOpenRecycleBin?: boolean;
+  canEmptyRecycleBin?: boolean;
+  recycleBinEmptying?: boolean;
   canReorder?: boolean;
   meetings: readonly MinutesMeetingSnapshot[];
 }
 
+/** Immutable command owner; unrelated transcript/timer revisions are not part of it. */
+export interface MinutesRecordingControlIdentity {
+  surfaceId: string;
+  sessionStartedAtMs: number;
+}
+
 export interface MinutesRecordingSnapshot {
   meetingId: string;
+  control?: MinutesRecordingControlIdentity;
   title: string;
   startedAtLabel?: string;
   location?: string;
@@ -230,7 +240,6 @@ export interface MinutesRecordingSnapshot {
   manualNoteEnabled?: boolean;
   manualNoteError?: string;
   manualNoteRetryable?: boolean;
-  manualNoteConflict?: boolean;
   transcript: readonly MinutesTranscriptLineSnapshot[];
 }
 
@@ -251,10 +260,7 @@ export interface MinutesDetailSnapshot {
   canShare?: boolean;
   canManageSpeakers?: boolean;
   canGenerateSummary?: boolean;
-  canSelectSummaryTemplate?: boolean;
-  summaryTemplateLabel?: string;
   canCreateAction?: boolean;
-  canCreateClip?: boolean;
   summaryGenerating?: boolean;
   summaryActionLabel?: string;
   titleEditRequestId?: number;
@@ -269,7 +275,6 @@ export interface MinutesDetailSnapshot {
   manualNoteEnabled?: boolean;
   manualNoteError?: string;
   manualNoteRetryable?: boolean;
-  manualNoteConflict?: boolean;
   transcript: readonly MinutesTranscriptLineSnapshot[];
   markers?: readonly MinutesMarkerSnapshot[];
   summary: readonly MinutesSummarySectionSnapshot[];
@@ -281,8 +286,6 @@ export interface MinutesDetailSnapshot {
   audioErrorMessage?: string;
   processingStatusLabel?: string;
   processingStatusTone?: MinutesStatusTone;
-  rootSyncConflict?: boolean;
-  summarySyncConflict?: boolean;
   processingRetryStage?: MinutesProcessingStage;
   processingRetrying?: boolean;
   recordingMergeStatusLabel?: string;
@@ -296,11 +299,12 @@ export interface MinutesViewSnapshot {
   list?: MinutesListSnapshot;
   recording?: MinutesRecordingSnapshot;
   detail?: MinutesDetailSnapshot;
+  projection?: NativeProjectionEnvelope | null;
 }
 
-export type MinutesSemanticAction =
+export type MinutesSemanticAction = (
   | { type: 'back' | 'search' | 'more' | 'share' | 'refreshMeetings'; surface: MinutesSurface; meetingId?: string }
-  | { type: 'openSpeakers' | 'openSettings' | 'openMeetingTags' | 'openMeetingOrganization' | 'openRecycleBin' | 'closeRecycleBin'; surface: 'list' }
+  | { type: 'openSpeakers' | 'openSettings' | 'openMeetingTags' | 'openMeetingOrganization' | 'openRecycleBin' | 'closeRecycleBin' | 'emptyRecycleBin'; surface: 'list' }
   | { type: 'importMedia'; surface: 'list' }
   | {
       type: 'openMeeting' | 'openRecording' | 'stopRecording' | 'retryRecording';
@@ -323,9 +327,6 @@ export type MinutesSemanticAction =
   | { type: 'selectRecordingContent'; surface: 'recording'; meetingId: string; content: MinutesRecordingContent }
   | { type: 'updateManualNote'; surface: 'detail' | 'recording'; meetingId: string; content: string }
   | { type: 'retryManualNote'; surface: 'detail' | 'recording'; meetingId: string }
-  | { type: 'openManualNoteConflict'; surface: 'detail' | 'recording'; meetingId: string }
-  | { type: 'openMeetingRootConflict'; surface: 'detail'; meetingId: string }
-  | { type: 'openSummarySyncConflict'; surface: 'detail'; meetingId: string }
   | { type: 'selectDetailTab'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab; selectionGeneration: number }
   | { type: 'retryDetailContent'; surface: MinutesSurface; meetingId: string; tab: MinutesDetailTab }
   | { type: 'retryProcessingStage'; surface: 'detail'; meetingId: string; stage: MinutesProcessingStage }
@@ -341,15 +342,6 @@ export type MinutesSemanticAction =
     }
   | { type: 'openMarker'; surface: 'detail'; meetingId: string; markerId: string; segmentId?: string; positionMs: number }
   | { type: 'openMarkerActions'; surface: 'detail'; meetingId: string; markerId: string }
-  | {
-      type: 'createClipFromTranscript';
-      surface: 'detail';
-      meetingId: string;
-      lineId: string;
-      positionMs: number;
-      endMs: number;
-      selectedText: string;
-    }
   | { type: 'deleteMarker'; surface: 'detail'; meetingId: string; markerId: string }
   | { type: 'seekSummaryCitation'; surface: 'detail'; meetingId: string; segmentId: string; positionMs: number }
   | { type: 'editSummarySection'; surface: 'detail'; meetingId: string; sectionId: string }
@@ -372,9 +364,11 @@ export type MinutesSemanticAction =
     }
   | { type: 'manageSpeaker'; surface: MinutesSurface; meetingId: string; speakerId: string }
   | { type: 'generateSummary'; surface: 'detail'; meetingId: string }
-  | { type: 'selectSummaryTemplate'; surface: 'detail'; meetingId: string }
+  | { type: 'openSummaryBlocks'; surface: 'detail'; meetingId: string }
+  | { type: 'openSummaryEvidence'; surface: 'detail'; meetingId: string; sectionId: string }
   | { type: 'beginSearch' | 'endSearch'; surface: 'list' }
-  | { type: 'updateSearchQuery'; surface: 'list'; query: string };
+  | { type: 'updateSearchQuery'; surface: 'list'; query: string }
+) & { projection?: NativeProjectionEnvelope | null; recordingControl?: MinutesRecordingControlIdentity | null };
 
 export interface MinutesPlaybackState {
   sourceId: string | null;
@@ -420,7 +414,7 @@ interface NativeMinutesModule extends NativeModule<MinutesModuleEvents> {
   seekTo(positionMs: number): Promise<void>;
   seekBy(deltaMs: number): Promise<void>;
   setPlaybackRate(rate: MinutesPlaybackRate): Promise<void>;
-  activatePlaybackStorageScope(scope: 'guest' | `user:${string}` | 'signed_out'): Promise<void>;
+  activatePlaybackStorageScope(scope: 'guest' | 'signed_out'): Promise<void>;
   addListener(
     eventName: 'onPlaybackStateChanged',
     listener: MinutesModuleEvents['onPlaybackStateChanged'],
@@ -464,7 +458,7 @@ export async function setMinutesPlaybackRate(rate: MinutesPlaybackRate): Promise
   await nativeModule?.setPlaybackRate(rate);
 }
 
-export type MinutesPlaybackStorageScope = 'guest' | `user:${string}` | 'signed_out';
+export type MinutesPlaybackStorageScope = 'guest' | 'signed_out';
 
 export async function activateMinutesPlaybackStorageScope(
   scope: MinutesPlaybackStorageScope,

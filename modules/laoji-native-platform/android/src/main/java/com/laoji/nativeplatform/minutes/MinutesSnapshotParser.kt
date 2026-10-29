@@ -4,16 +4,21 @@ package com.laoji.nativeplatform.minutes
 // defensive structured snapshot parsing drives native state.
 
 import com.laoji.nativeplatform.ui.NativeUserMessages
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
 
 object MinutesSnapshotParser {
   fun parse(raw: Map<String, Any?>, surfaceOverride: String? = null): MinutesUiState {
     val surface = MinutesSurface.fromWireName(surfaceOverride ?: raw.string("surface"))
+    val projectionRaw = raw.mapOrNull("projection")
+    val projection = ProjectionEnvelope.fromMap(projectionRaw)
     val state = MinutesUiState(
       schemaVersion = raw.int("schemaVersion", MINUTES_SNAPSHOT_SCHEMA_VERSION),
       surface = surface,
       list = parseList(raw.map("list")),
       recording = parseRecording(raw.map("recording")),
       detail = parseDetail(raw.map("detail")),
+      projection = projection,
+      projectionInvalid = raw.containsKey("projection") && projectionRaw != null && projection == null,
     )
     return MinutesStateReducer.normalize(state)
   }
@@ -25,6 +30,7 @@ object MinutesSnapshotParser {
     searching = raw.boolean("searching"),
     query = raw.string("query").orEmpty(),
     mediaImporting = raw.boolean("mediaImporting"),
+    mediaImportStatusLabel = raw.string("mediaImportStatusLabel").orEmpty(),
     phase = phase,
     message = raw.string("message")?.takeIf { it.isNotBlank() }?.let {
       NativeUserMessages.readable(it, listFallback(phase))
@@ -32,6 +38,8 @@ object MinutesSnapshotParser {
     showingCachedData = raw.boolean("showingCachedData"),
     mode = MinutesListMode.fromWireName(raw.string("mode")),
     canOpenRecycleBin = raw.boolean("canOpenRecycleBin"),
+    canEmptyRecycleBin = raw.boolean("canEmptyRecycleBin"),
+    recycleBinEmptying = raw.boolean("recycleBinEmptying"),
     canReorder = raw.boolean("canReorder"),
     meetings = raw.maps("meetings").mapIndexed { index, item ->
       MinutesMeeting(
@@ -61,6 +69,11 @@ object MinutesSnapshotParser {
     val phase = MinutesRecordingPhase.fromWireName(raw.string("phase"))
     return MinutesRecordingState(
     meetingId = raw.string("meetingId").orEmpty(),
+    control = raw.map("control").let {
+      val surfaceId = it.string("surfaceId").orEmpty()
+      val startedAt = it.long("sessionStartedAtMs")
+      if (surfaceId.isBlank() || startedAt < 0L) null else MinutesRecordingControlIdentity(surfaceId, startedAt)
+    },
     title = raw.string("title").orDefault("会议记录"),
     startedAtLabel = raw.string("startedAtLabel").orEmpty(),
     location = raw.string("location").orEmpty(),
@@ -88,7 +101,6 @@ object MinutesSnapshotParser {
       NativeUserMessages.readable(it, "笔记暂时未保存，请稍后重试。")
     }.orEmpty(),
     manualNoteRetryable = raw.boolean("manualNoteRetryable", true),
-    manualNoteConflict = raw.boolean("manualNoteConflict"),
     transcript = parseTranscript(raw.maps("transcript")),
     )
   }
@@ -167,7 +179,6 @@ object MinutesSnapshotParser {
           sourceStartMs = item.long("sourceStartMs").coerceAtLeast(0L),
           updatedAtMs = item.long("updatedAtMs").coerceAtLeast(0L),
           updating = item.boolean("updating"),
-          syncConflict = item.boolean("syncConflict"),
           canShare = item.boolean("canShare"),
         )
       }
@@ -208,10 +219,7 @@ object MinutesSnapshotParser {
       canShare = raw.boolean("canShare"),
       canManageSpeakers = raw.boolean("canManageSpeakers"),
       canGenerateSummary = raw.boolean("canGenerateSummary"),
-      canSelectSummaryTemplate = raw.boolean("canSelectSummaryTemplate"),
-      summaryTemplateLabel = raw.string("summaryTemplateLabel").orEmpty(),
       canCreateAction = raw.boolean("canCreateAction"),
-      canCreateClip = raw.boolean("canCreateClip"),
       summaryGenerating = raw.boolean("summaryGenerating"),
       summaryActionLabel = raw.string("summaryActionLabel").orDefault("生成整理结果"),
       titleEditRequestId = raw.int("titleEditRequestId"),
@@ -228,7 +236,6 @@ object MinutesSnapshotParser {
         NativeUserMessages.readable(it, "笔记暂时未保存，请稍后重试。")
       }.orEmpty(),
       manualNoteRetryable = raw.boolean("manualNoteRetryable", true),
-      manualNoteConflict = raw.boolean("manualNoteConflict"),
       transcript = transcript,
       markers = markers,
       summary = summary,
@@ -248,8 +255,6 @@ object MinutesSnapshotParser {
       processingStatusTone = raw.string("processingStatusTone")
         ?.takeIf { it == "neutral" || it == "primary" || it == "success" || it == "warning" || it == "danger" }
         ?: "neutral",
-      rootSyncConflict = raw.boolean("rootSyncConflict"),
-      summarySyncConflict = raw.boolean("summarySyncConflict"),
       processingRetryStage = MinutesProcessingStage.fromWireName(raw.string("processingRetryStage")),
       processingRetrying = raw.boolean("processingRetrying"),
       recordingMergeStatusLabel = raw.string("recordingMergeStatusLabel")?.takeIf { it.isNotBlank() }?.let {

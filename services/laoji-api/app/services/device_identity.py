@@ -2,14 +2,15 @@
 
 The mobile application has no account session.  A device credential scopes
 service jobs and a rotating data epoch scopes the user's local data lifetime.
-This module deliberately uses a small SQLite control table instead of the
-legacy account tables; the public API never exposes ``user_id`` semantics.
+This module deliberately uses a small SQLite control table; the public API
+never exposes ``user_id`` semantics.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import wraps
 import base64
 import hashlib
 import hmac
@@ -19,8 +20,9 @@ from pathlib import Path
 import re
 import secrets
 import sqlite3
+import threading
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy.engine import make_url
 
@@ -33,6 +35,18 @@ _UUID_RE = re.compile(
 _SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{43,64}$")
 _SCHEMA_LOCK = __import__("threading").Lock()
 _SCHEMA_READY: set[Path] = set()
+_SCHEMA_FILES: dict[Path, tuple[int, int]] = {}
+_SCHEMA_GENERATIONS: dict[Path, int] = {}
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback like sqlite3's context manager, then release its FDs."""
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> bool:
+        try:
+            return bool(super().__exit__(exc_type, exc_value, traceback))
+        finally:
+            self.close()
 
 
 class DeviceIdentityError(RuntimeError):
@@ -64,7 +78,7 @@ def _database_path() -> Path:
 def _connect() -> sqlite3.Connection:
     path = _database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path, timeout=30)
+    connection = sqlite3.connect(path, timeout=30, factory=_ClosingConnection)
     connection.row_factory = sqlite3.Row
     # WAL is enabled once by ensure_device_schema.  Reissuing the pragma on
     # every authenticated request can itself take a SQLite write lock.
@@ -88,11 +102,45 @@ def utc_now() -> str:
     return _now()
 
 
+def control_schema_once(initialize: Callable[[], None]) -> Callable[[], None]:
+    """Run additive DDL once per database incarnation and process.
+
+    This caches schema initialization only, never authentication, a binding,
+    a task fence or a query result. A replaced DB, a reset base initializer or
+    a new process invalidates it; a failed initializer is never remembered.
+    """
+    lock = threading.RLock()
+    ready: dict[Path, tuple[int, int, int, int]] = {}
+
+    @wraps(initialize)
+    def ensure() -> None:
+        ensure_device_schema()
+        path = _database_path()
+        with lock:
+            stat = path.stat()
+            identity = (os.getpid(), stat.st_dev, stat.st_ino, _SCHEMA_GENERATIONS.get(path, 0))
+            if ready.get(path) == identity:
+                return
+            initialize()
+            # Bound test/isolated-database bookkeeping without evicting the
+            # active production database on ordinary requests.
+            if len(ready) >= 32:
+                ready.pop(next(iter(ready)))
+            ready[path] = identity
+
+    return ensure
+
+
 def ensure_device_schema() -> None:
     """Create the additive device control schema and the meeting epoch column."""
     path = _database_path()
     with _SCHEMA_LOCK:
-        if path in _SCHEMA_READY:
+        try:
+            stat = path.stat()
+            identity = (stat.st_dev, stat.st_ino)
+        except FileNotFoundError:
+            identity = None
+        if path in _SCHEMA_READY and identity is not None and _SCHEMA_FILES.get(path) == identity:
             return
         with _connect() as connection:
             connection.execute("PRAGMA journal_mode=WAL")
@@ -192,18 +240,28 @@ def ensure_device_schema() -> None:
                     ON device_speaker_cleanup_outbox(status, updated_at, id);
                 """
             )
-            columns = {
-                str(row[1])
-                for row in connection.execute("PRAGMA table_info(meetings)").fetchall()
-            }
-            if "data_epoch_id" not in columns:
+            # The control store is also used by isolated capability/identity
+            # probes before the domain ORM has created its tables. Do not
+            # manufacture a partial meetings table here, and do not make the
+            # device schema unusable just because the optional domain table is
+            # absent. The normal API lifespan creates meetings first, so the
+            # additive epoch column/index is applied on that path.
+            meetings_exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meetings'"
+            ).fetchone() is not None
+            if meetings_exists:
+                columns = {
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(meetings)").fetchall()
+                }
+                if "data_epoch_id" not in columns:
+                    connection.execute(
+                        "ALTER TABLE meetings ADD COLUMN data_epoch_id TEXT"
+                    )
                 connection.execute(
-                    "ALTER TABLE meetings ADD COLUMN data_epoch_id TEXT"
+                    "CREATE INDEX IF NOT EXISTS idx_meetings_device_epoch "
+                    "ON meetings(user_id, data_epoch_id, updated_at)"
                 )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_meetings_device_epoch "
-                "ON meetings(user_id, data_epoch_id, updated_at)"
-            )
             # Existing compact-production tables predate device epochs.  Add
             # nullable columns so old rows remain readable while every new
             # device-owned object can be filtered by its epoch.  SQLite has
@@ -213,7 +271,6 @@ def ensure_device_schema() -> None:
                 "meeting_recording_assets_v2": "idx_recording_assets_v2_epoch",
                 "meeting_recording_asset_operations_v2": "idx_recording_asset_ops_v2_epoch",
                 "meeting_recording_transcription_jobs_v2": "idx_recording_jobs_v2_epoch",
-                "meeting_media_clip_jobs_v1": "idx_media_clip_jobs_v1_epoch",
                 "meeting_question_threads": "idx_question_threads_epoch",
                 "meeting_summary_versions_v1": "idx_summary_versions_v1_epoch",
                 "meeting_summary_section_states_v1": "idx_summary_sections_v1_epoch",
@@ -257,6 +314,9 @@ def ensure_device_schema() -> None:
             )
             connection.commit()
         _SCHEMA_READY.add(path)
+        stat = path.stat()
+        _SCHEMA_FILES[path] = (stat.st_dev, stat.st_ino)
+        _SCHEMA_GENERATIONS[path] = _SCHEMA_GENERATIONS.get(path, 0) + 1
 
 
 def _pepper() -> bytes:
@@ -292,10 +352,10 @@ def valid_secret(value: str) -> bool:
 def bootstrap_allowed(value: str | None) -> bool:
     presented = (value or "").strip()
     configured = os.getenv("LAOJI_DEVICE_BOOTSTRAP_KEY", "").strip()
-    # During the first cutover a dedicated key may not yet be present in the
-    # running systemd environment. The existing private action-share secret
-    # is a temporary compatibility fallback; a dedicated key takes precedence
-    # as soon as the service is restarted with the updated env file.
+    # Legacy deployment fallback only. The client admission value is embedded
+    # in the APK and therefore extractable; using a secret that protects any
+    # other capability here is unsafe. Remove this fallback with the v1 caller
+    # migration rather than treating admission as device authentication.
     if not configured:
         configured = os.getenv("LAOJI_ACTION_SHARE_SECRET", "").strip()
     if not configured and settings.ENV.strip().lower() != "production":
@@ -406,9 +466,6 @@ def close_epoch(context: DeviceContext, epoch_id: str) -> dict[str, Any]:
     if not valid_uuid(target):
         raise DeviceIdentityError("EPOCH_INVALID", "本机数据域无效", 422)
     now = _now()
-    summary_tasks_deleted = 0
-    summary_v3_payloads_deleted = 0
-    summary_v3_documents_deleted = 0
     with _connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
         epoch = connection.execute(
@@ -478,39 +535,6 @@ def close_epoch(context: DeviceContext, epoch_id: str) -> dict[str, Any]:
             "DELETE FROM device_quality_candidates WHERE principal_id = ? AND epoch_id = ?",
             (context.principal_id, target),
         )
-        # summary_tasks_v2 is an independent SQLite task store and therefore
-        # is not removed by the meetings foreign-key cascade. Device result
-        # bodies, checkpoints and request references must disappear when the
-        # user clears this epoch, including results marked for retention.
-        summary_table = connection.execute(
-            """SELECT 1 FROM sqlite_master
-               WHERE type = 'table' AND name = 'summary_tasks_v2'"""
-        ).fetchone()
-        if summary_table is not None:
-            cursor = connection.execute(
-                "DELETE FROM summary_tasks_v2 WHERE task_scope = ?",
-                (f"device:{context.principal_id}:{target}",),
-            )
-            summary_tasks_deleted = max(0, int(cursor.rowcount))
-        task_scope = f"device:{context.principal_id}:{target}"
-        for table, counter_name in (
-            ("summary_v3_source_payloads", "payloads"),
-            ("summary_v3_documents", "documents"),
-        ):
-            exists = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-                (table,),
-            ).fetchone()
-            if exists is None:
-                continue
-            cursor = connection.execute(
-                f"DELETE FROM {table} WHERE task_scope = ?",
-                (task_scope,),
-            )
-            if counter_name == "payloads":
-                summary_v3_payloads_deleted = max(0, int(cursor.rowcount))
-            else:
-                summary_v3_documents_deleted = max(0, int(cursor.rowcount))
         connection.execute(
             "UPDATE device_epochs SET status = 'deleted', closed_at = ? WHERE epoch_id = ?",
             (now, target),
@@ -534,9 +558,6 @@ def close_epoch(context: DeviceContext, epoch_id: str) -> dict[str, Any]:
         "meeting_count": int(meeting_count),
         "speaker_count": int(speaker_count),
         "speaker_cleanup_pending": bool(speaker_cleanup_pending),
-        "summary_tasks_deleted": int(summary_tasks_deleted),
-        "summary_v3_payloads_deleted": int(summary_v3_payloads_deleted),
-        "summary_v3_documents_deleted": int(summary_v3_documents_deleted),
     }
 
 
@@ -778,44 +799,6 @@ def purge_expired_device_data(now: str | None = None) -> int:
             "DELETE FROM device_quality_candidates WHERE expires_at < ?",
             (cutoff,),
         )
-        summary_cursor = None
-        summary_v3_cursors: list[sqlite3.Cursor] = []
-        summary_table = connection.execute(
-            """SELECT 1 FROM sqlite_master
-               WHERE type = 'table' AND name = 'summary_tasks_v2'"""
-        ).fetchone()
-        if summary_table is not None:
-            # Older close_epoch implementations did not remove the separate
-            # summary task store. Keep only tasks belonging to an active
-            # device epoch; deleted/unknown epochs must not retain generated
-            # bodies or checkpoints indefinitely.
-            summary_cursor = connection.execute(
-                """DELETE FROM summary_tasks_v2
-                   WHERE task_scope LIKE 'device:%'
-                     AND NOT EXISTS (
-                       SELECT 1 FROM device_epochs epoch
-                       WHERE summary_tasks_v2.task_scope =
-                             'device:' || epoch.principal_id || ':' || epoch.epoch_id
-                         AND epoch.status = 'active'
-                     )"""
-            )
-        for table in ("summary_v3_source_payloads", "summary_v3_documents"):
-            exists = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-                (table,),
-            ).fetchone()
-            if exists is None:
-                continue
-            summary_v3_cursors.append(connection.execute(
-                f"""DELETE FROM {table}
-                    WHERE task_scope LIKE 'device:%'
-                      AND NOT EXISTS (
-                        SELECT 1 FROM device_epochs epoch
-                        WHERE {table}.task_scope =
-                              'device:' || epoch.principal_id || ':' || epoch.epoch_id
-                          AND epoch.status = 'active'
-                      )"""
-            ))
         connection.execute(
             "DELETE FROM device_delete_outbox WHERE status = 'completed' AND completed_at < ?",
             (cutoff,),
@@ -826,13 +809,9 @@ def purge_expired_device_data(now: str | None = None) -> int:
             (cutoff,),
         )
         connection.commit()
-        summary_count = int(summary_cursor.rowcount) if summary_cursor is not None else 0
-        summary_v3_count = sum(max(0, int(item.rowcount)) for item in summary_v3_cursors)
         deleted_count = (
             int(cursor.rowcount)
             + int(quality_cursor.rowcount)
-            + summary_count
-            + summary_v3_count
         )
     speaker_cleaned, _speaker_failed = drain_speaker_cleanup_outbox()
     return deleted_count + speaker_cleaned

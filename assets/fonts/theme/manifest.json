@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "selection": "GB2312 common Chinese plus LaoJi-authored UI text and common symbols",
+  "requested_codepoint_count": 14039,
+  "fonts": [
+    {
+      "theme_id": "neutral",
+      "family": "LaojiThemeNeutral",
+      "source_name": "Noto Sans CJK SC Regular",
+      "source_url": "https://github.com/notofonts/noto-cjk",
+      "source_sha256": "b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a",
+      "output_file": "laoji_theme_neutral.ttf",
+      "output_sha256": "83eb9f77ceeea51449a827cc7fdd597c9e6167e79f11c33ccea9025e1a678f6f",
+      "byte_size": 6464764,
+      "codepoint_count": 12497
+    },
+    {
+      "theme_id": "vivid",
+      "family": "LaojiThemeVivid",
+      "source_name": "ChillRoundF v3.0",
+      "source_url": "https://github.com/Warren2060/ChillRound/blob/main/ChillRoundF%20v3.0.ttf",
+      "source_sha256": "7dae804b344f7bc1a1c8426b9515e9b54d7baac3e123263d0bae94d0a305a732",
+      "output_file": "laoji_theme_vivid.ttf",
+      "output_sha256": "1aff2b3eb117b80cb5ff43bf624cc6c1278de5858be18b0c9bcb75c73ba98a1b",
+      "byte_size": 4641396,
+      "codepoint_count": 10795
+    },
+    {
+      "theme_id": "paper",
+      "family": "LaojiThemePaper",
+      "source_name": "LXGW WenKai Regular v1.522",
+      "source_url": "https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Regular.ttf",
+      "source_sha256": "39ad71264b588165b469e35e6afb162a378dacd1f95348160240ba9038ac3009",
+      "output_file": "laoji_theme_paper.ttf",
+      "output_sha256": "34214ab5ec90c77db45f4d33df5302348ec484c5c0d2a49f8fcf96e531abcde7",
+      "byte_size": 6872008,
+      "codepoint_count": 12767
+    },
+    {
+      "theme_id": "midnight",
+      "family": "LaojiThemeMidnight",
+      "source_name": "LXGW Neo ZhiSong Screen 26.08.21",
+      "source_url": "https://github.com/lxgw/LxgwNeoXiZhi-Screen/releases/download/26.08.21/LXGWNeoZhiSongScreen.ttf",
+      "source_sha256": "4e071b63ee221e72309ec720259f264024336991d1ee0bce42e80d1fb3855a1c",
+      "output_file": "laoji_theme_midnight.ttf",
+      "output_sha256": "c2bf784ac3d2f2a1e5e2cae8ca7c9597855a219ba0fa36d05c125e26064bea2d",
+      "byte_size": 5540616,
+      "codepoint_count": 12429
+    }
+  ]
+}

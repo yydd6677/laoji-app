@@ -10,22 +10,17 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
-import android.util.Log
-import android.view.View
-import android.view.ViewGroup
+import com.laoji.nativeplatform.ui.LaojiSystemBars
+import com.laoji.nativeplatform.ui.NativeUiTokens
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.UUID
 
-private const val THEME_TAG = "LaojiTheme"
-
 class LaojiNativePlatformModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("LaojiNativePlatform")
-
-    Constant("evidenceSchemaVersion") { 1 }
-    Constant("implementation") { "android-classic-view" }
 
     // THEME-001: keep the selected skin available synchronously to module-level
     // React Native styles and to the Android calendar/minutes surfaces.
@@ -35,22 +30,10 @@ class LaojiNativePlatformModule : Module() {
 
     Function("setThemePreference") { themeId: String ->
       NativeThemePreference.write(appContext.reactContext?.applicationContext, themeId)
-    }
-
-    Function("restartActivity") {
-      val activity = appContext.currentActivity
-      if (activity != null) {
+      appContext.currentActivity?.let { activity ->
         activity.runOnUiThread {
-          // React Native 0.81's bridgeless reload owns the complete JS/module
-          // lifecycle, which is required for module-level theme tokens. Its
-          // surface restart has a race where it may reset the root View id from
-          // a background executor; clear that id on the main thread first.
-          if (reloadReactRuntime(activity)) return@runOnUiThread
-
-          // Keep a lifecycle-safe fallback for builds where the ReactHost
-          // boundary is unavailable after shrinking. This preserves the
-          // process and lets Expo recreate the surface normally.
-          activity.recreate()
+          LaojiThemeTypography.applyActivityTheme(activity)
+          LaojiSystemBars.apply(activity)
         }
       }
     }
@@ -83,13 +66,6 @@ class LaojiNativePlatformModule : Module() {
     // Android keeps the final installation confirmation in the system
     // installer. LaoJi only exposes the verified cache file through a
     // FileProvider; it never performs a silent install.
-    Function("canInstallApk") {
-      val context = appContext.reactContext?.applicationContext
-        ?: throw IllegalStateException("应用环境不可用")
-      Build.VERSION.SDK_INT < Build.VERSION_CODES.O
-        || context.packageManager.canRequestPackageInstalls()
-    }
-
     Function("openApkInstallSettings") {
       val context = appContext.reactContext?.applicationContext
         ?: throw IllegalStateException("应用环境不可用")
@@ -143,49 +119,6 @@ class LaojiNativePlatformModule : Module() {
       true
     }
 
-    AsyncFunction("getCapabilities") {
-      mapOf(
-        "calendarSurface" to true,
-        "minutesSurface" to true,
-        "nativeAudioRuntime" to true,
-        "mediaPlayer" to true
-      )
-    }
-  }
-
-  private fun reloadReactRuntime(activity: android.app.Activity): Boolean {
-    return try {
-      val application = activity.application
-      val reactHost = application.javaClass.methods
-        .firstOrNull { it.name == "getReactHost" }
-        ?.invoke(application)
-      val reloadHostMethod = reactHost?.javaClass?.methods
-        ?.firstOrNull { it.name == "reload" && it.parameterTypes.size == 1 }
-      if (reactHost == null || reloadHostMethod == null) {
-        Log.w(THEME_TAG, "ReactHost reload unavailable")
-        return false
-      }
-
-      resetReactSurfaceRootIds(activity.window.decorView)
-      reloadHostMethod.isAccessible = true
-      Log.i(THEME_TAG, "using ReactHost reload: ${reactHost.javaClass.name}")
-      reloadHostMethod.invoke(reactHost, "主题偏好已更新")
-      true
-    } catch (error: Throwable) {
-      Log.e(THEME_TAG, "React runtime reload failed", error)
-      false
-    }
-  }
-
-  private fun resetReactSurfaceRootIds(view: View) {
-    if (view.javaClass.name.contains("ReactSurfaceView") && view.id != View.NO_ID) {
-      view.id = View.NO_ID
-    }
-    if (view is ViewGroup) {
-      for (index in 0 until view.childCount) {
-        resetReactSurfaceRootIds(view.getChildAt(index))
-      }
-    }
   }
 
 }
@@ -198,16 +131,22 @@ internal object NativeThemePreference {
   fun read(context: Context?): String {
     val prefs = context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     val value = prefs?.getString(KEY_THEME, DEFAULT_THEME)
-    return if (value == "vivid") "vivid" else DEFAULT_THEME
+    return value?.takeIf { it in supportedThemes } ?: DEFAULT_THEME
   }
 
   fun write(context: Context?, themeId: String) {
-    val normalized = if (themeId == "vivid") "vivid" else DEFAULT_THEME
+    val normalized = themeId.takeIf { it in supportedThemes } ?: DEFAULT_THEME
+    val previous = read(context)
     context?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       ?.edit()
       ?.putString(KEY_THEME, normalized)
       ?.commit()
+    if (previous != read(context)) NativeUiTokens.onThemePreferenceChanged()
   }
 
   fun isVivid(context: Context?): Boolean = read(context) == "vivid"
+  fun isPaper(context: Context?): Boolean = read(context) == "paper"
+  fun isMidnight(context: Context?): Boolean = read(context) == "midnight"
+
+  private val supportedThemes = setOf("neutral", "vivid", "paper", "midnight")
 }

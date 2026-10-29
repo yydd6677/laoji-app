@@ -1,5 +1,5 @@
 import type { ScopeKey } from '../domain/meeting';
-import type { MeetingNoteRepository } from '../data/repositories';
+import type { MeetingNoteRepository } from "../data/repositories/meetingNoteRepository";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
@@ -10,8 +10,6 @@ export interface MeetingRecycleBinEntry {
   deletedAtMs: number;
   expiresAtMs: number;
   remainingDays: number;
-  syncState: 'pending' | 'synced' | 'conflicted' | 'deleted';
-  canRestore: boolean;
 }
 
 export async function listMeetingRecycleBin(
@@ -45,7 +43,6 @@ export async function listMeetingRecycleBin(
         item.lifecycle !== 'deleted'
         || !item.deletedFromLifecycle
         || item.deletedAtMs === null
-        || (scopeKey !== 'guest' && (!item.remoteId || item.remoteRevision === null))
       ) return [];
       const expiresAtMs = item.deletedAtMs + retentionDays * DAY_MS;
       if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= nowMs) return [];
@@ -56,8 +53,6 @@ export async function listMeetingRecycleBin(
         deletedAtMs: item.deletedAtMs,
         expiresAtMs,
         remainingDays: Math.max(1, Math.ceil((expiresAtMs - nowMs) / DAY_MS)),
-        syncState: item.syncState as MeetingRecycleBinEntry['syncState'],
-        canRestore: item.syncState !== 'conflicted',
       }];
     })
     .sort((left, right) => right.deletedAtMs - left.deletedAtMs || left.meetingId.localeCompare(right.meetingId));

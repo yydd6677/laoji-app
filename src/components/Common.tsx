@@ -1,13 +1,20 @@
 import React from 'react';
 import { Image, View, Text, StyleSheet, TouchableOpacity, type LayoutChangeEvent } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import Svg, { Circle, Path } from 'react-native-svg';
-import { Colors as C } from '../theme/colors';
+import type { ColorPalette } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 import { UserProfile } from '../services/profile';
 
 // ─── Waveform ─────────────────────────────────────────────────────────────────
 const WAVEFORM_BAR_WIDTH = 3;
 const WAVEFORM_BAR_GAP = 2;
+
+function useCommonStyles() {
+  const { colors: C, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(C, appearance.fontFamily), [C, appearance.fontFamily]);
+  return { C, styles };
+}
 
 export function waveformBarCapacity(availableWidth: number): number {
   if (availableWidth <= 0) return 0;
@@ -34,6 +41,7 @@ export function resampleWaveformBars(bars: number[], targetCount: number): numbe
 export function Waveform({ bars, color, height = 28, splitAt }: {
   bars: number[]; color: string; height?: number; splitAt?: number;
 }) {
+  const { C, styles } = useCommonStyles();
   const [availableWidth, setAvailableWidth] = React.useState<number | null>(null);
   const visibleBars = React.useMemo(() => {
     if (availableWidth === null) return bars;
@@ -80,6 +88,7 @@ export function Avatar({ size = 36, profile, initial, colors }: {
   initial?: string;
   colors?: [string, string];
 }) {
+  const { styles } = useCommonStyles();
   void initial;
   void colors;
   const imageUri = profile?.avatarUrl || profile?.avatarLocalUri;
@@ -98,6 +107,7 @@ export function Avatar({ size = 36, profile, initial, colors }: {
 }
 
 function NeutralAvatar({ size }: { size: number }) {
+  const { C, styles } = useCommonStyles();
   return (
     <View style={[styles.neutralAvatar, { width: size, height: size, borderRadius: size / 2 }]}>
       <Svg width={size * 0.72} height={size * 0.72} viewBox="0 0 100 100">
@@ -113,6 +123,7 @@ function NeutralAvatar({ size }: { size: number }) {
 
 // ─── Tag ──────────────────────────────────────────────────────────────────────
 export function Tag({ label, color }: { label: string; color: string }) {
+  const { styles } = useCommonStyles();
   return (
     <View style={[styles.tag, { backgroundColor: color + '1A' }]}>
       <Text style={[styles.tagText, { color }]}>{label}</Text>
@@ -133,6 +144,7 @@ export const BACK_HEADER_GEOMETRY = {
 export function BackHeader({ title, onBack, right }: {
   title: string; onBack: () => void; right?: React.ReactNode;
 }) {
+  const { C, styles } = useCommonStyles();
   return (
     <View style={styles.backHeader} testID="app-back-header">
       <TouchableOpacity
@@ -155,7 +167,7 @@ export function BackHeader({ title, onBack, right }: {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (C: ColorPalette, fontFamily: string) => StyleSheet.create({
   waveform: {
     width: '100%',
     maxWidth: '100%',
@@ -183,7 +195,7 @@ const styles = StyleSheet.create({
     backgroundColor: C.primaryLight,
   },
   tag: { borderRadius: 6, paddingHorizontal: 9, paddingVertical: 3 },
-  tagText: { fontSize: 12, fontWeight: '600' },
+  tagText: { fontFamily, fontSize: 12, fontWeight: '600' },
   backHeader: {
     height: BACK_HEADER_GEOMETRY.height,
     flexDirection: 'row',
@@ -197,6 +209,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   backTitle: {
+    fontFamily,
     position: 'absolute',
     left: BACK_HEADER_GEOMETRY.titleInset,
     right: BACK_HEADER_GEOMETRY.titleInset,

@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
+import { deleteDeviceKey, hasDeviceKey } from 'laoji-native-platform';
 
 const DEVICE_ID_KEY = 'laoji.device.v1.id';
 const DEVICE_SECRET_KEY = 'laoji.device.v1.secret';
@@ -10,6 +11,9 @@ export interface DeviceIdentity {
   deviceSecret: string;
   epochId: string;
 }
+
+let cachedIdentity: DeviceIdentity | null = null;
+let identityRevision = 0;
 
 function uuid(): string {
   const value = Crypto.randomUUID();
@@ -36,8 +40,12 @@ async function readStored(): Promise<DeviceIdentity | null> {
 }
 
 export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
+  if (cachedIdentity) return cachedIdentity;
   const current = await readStored();
-  if (current) return current;
+  if (current) {
+    cachedIdentity = current;
+    return current;
+  }
   const next: DeviceIdentity = {
     deviceId: uuid(),
     deviceSecret: await secret(),
@@ -48,6 +56,8 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
     SecureStore.setItemAsync(DEVICE_SECRET_KEY, next.deviceSecret),
     SecureStore.setItemAsync(DATA_EPOCH_KEY, next.epochId),
   ]);
+  cachedIdentity = next;
+  identityRevision += 1;
   return next;
 }
 
@@ -56,15 +66,36 @@ export async function replaceDataEpoch(epochId = uuid()): Promise<DeviceIdentity
   if (!/^[0-9a-f-]{36}$/i.test(epochId)) throw new Error('本机数据域无效');
   const next = { ...current, epochId: epochId.toLowerCase() };
   await SecureStore.setItemAsync(DATA_EPOCH_KEY, next.epochId);
+  cachedIdentity = next;
+  identityRevision += 1;
   return next;
 }
 
 export async function clearDeviceIdentity(): Promise<void> {
+  // SecureStore does not own the Android Keystore aliases used by the v2
+  // device-auth bridge. Remove every supported revision so a local erase
+  // cannot leave a signing identity behind. Non-Android platforms expose a
+  // no-op/false capability and continue with the portable stores.
+  for (let keyVersion = 1; keyVersion <= 100; keyVersion += 1) {
+    try {
+      if (hasDeviceKey(keyVersion)) deleteDeviceKey(keyVersion);
+    } catch {
+      // Keystore cleanup is best-effort; the coordinator reports the owner
+      // failure if the surrounding SecureStore/database steps also fail.
+    }
+  }
   await Promise.all([
     SecureStore.deleteItemAsync(DEVICE_ID_KEY),
     SecureStore.deleteItemAsync(DEVICE_SECRET_KEY),
     SecureStore.deleteItemAsync(DATA_EPOCH_KEY),
   ]);
+  cachedIdentity = null;
+  identityRevision += 1;
+}
+
+/** Synchronous generation used to invalidate short-lived authenticated caches. */
+export function getDeviceIdentityRevision(): number {
+  return identityRevision;
 }
 
 /** Backward-compatible test alias; production cleanup uses the explicit name. */

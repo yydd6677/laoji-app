@@ -2,7 +2,7 @@ import {
   LinkMeetingActionFollowupEventUseCase,
   type LinkMeetingActionFollowupEventResult,
 } from '../application/meeting';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { MeetingSummaryActionCandidate, ScopeKey } from '../domain/meeting';
 import type { EventDraftParams, MeetingActionFollowupParams } from '../types';
 

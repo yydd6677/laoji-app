@@ -4,15 +4,14 @@ import { DEFAULT_THEME_ID, isThemeId, type ThemeId } from './themeIds';
 type NativeThemeModule = {
   getThemePreference?: () => string;
   setThemePreference?: (themeId: string) => void;
-  restartActivity?: () => void;
 };
 
 const nativeModule = requireOptionalNativeModule<NativeThemeModule>('LaojiNativePlatform');
 
 /**
- * This value is read synchronously so module-level React Native StyleSheet
- * declarations can start with the persisted palette after an Android activity
- * recreation. AsyncStorage remains the portable JS source of record.
+ * Seeds the first render from the persisted native preference. Live consumers
+ * use ThemeProvider or their existing native appearance binding afterwards.
+ * AsyncStorage remains the portable JS source of record.
  */
 export function getSynchronousThemeId(): ThemeId {
   try {
@@ -28,16 +27,6 @@ export function setSynchronousThemeId(themeId: ThemeId): void {
     nativeModule?.setThemePreference?.(themeId);
   } catch {
     // The JS preference still persists when an optional native module is absent.
-  }
-}
-
-export function restartNativeActivity(): boolean {
-  try {
-    if (!nativeModule?.restartActivity) return false;
-    nativeModule.restartActivity();
-    return true;
-  } catch {
-    return false;
   }
 }
 

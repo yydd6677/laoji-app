@@ -10,7 +10,7 @@ import {
   type NativeDialogSnapshot,
   type NativeWindowOverlayEvent,
 } from 'laoji-native-platform';
-import type { Ionicons } from '@expo/vector-icons';
+import type Ionicons from '@expo/vector-icons/Ionicons';
 
 // UI-OVERLAY-001 / UI-MOTION-001: Android dialog geometry and motion are owned by one native host.
 type IconName = keyof typeof Ionicons.glyphMap;

@@ -29,7 +29,7 @@ from app.database import async_session
 from app.models.meeting import Meeting
 from app.models.transcript import TranscriptLine
 from app.api.ws_auth import authorize_app_meeting_ws_context
-from app.services.guest_meeting_session_service import append_guest_transcript
+from app.privacy_logging import privacy_log
 
 router = APIRouter()
 
@@ -45,6 +45,18 @@ QWEN_ASR_REQUEST_TIMEOUT_SECONDS = float(
 QWEN_ASR_SEGMENT_QUEUE_SIZE = max(
     1,
     int(os.getenv("QWEN_ASR_SEGMENT_QUEUE_SIZE", "16")),
+)
+QWEN_SCHEDULE_PREVIEW_INITIAL_MS = max(
+    480,
+    int(os.getenv("QWEN_SCHEDULE_PREVIEW_INITIAL_MS", "480")),
+)
+QWEN_SCHEDULE_PREVIEW_INTERVAL_MS = max(
+    800,
+    int(os.getenv("QWEN_SCHEDULE_PREVIEW_INTERVAL_MS", "1600")),
+)
+QWEN_SCHEDULE_PREVIEW_MAX = max(
+    1,
+    min(8, int(os.getenv("QWEN_SCHEDULE_PREVIEW_MAX", "4"))),
 )
 _CLUSTER_THRESHOLD = 0.5
 _SPK_COS_THRESHOLD = 0.70
@@ -143,8 +155,6 @@ def _qwen_transcribe(
 
 
 def _speaker_profiles_for_context(speaker_db, auth_context):
-    if auth_context.mode == "user" and auth_context.user_id is not None:
-        return speaker_db.load_for_owner(auth_context.user_id, active_only=True)
     if (
         auth_context.mode == "device"
         and auth_context.user_id is not None
@@ -155,27 +165,7 @@ def _speaker_profiles_for_context(speaker_db, auth_context):
             auth_context.epoch_id,
             active_only=True,
         )
-    if auth_context.mode == "prototype":
-        return speaker_db.load_all(active_only=True)
     return []
-
-
-def _cache_guest_transcript(auth_context, session_id: str, message: dict) -> dict:
-    """Cache a final guest line and expose its stable identity to the client."""
-    if auth_context.mode != "guest" or message.get("type") != "transcript.completed":
-        return message
-    stored = append_guest_transcript(
-        session_id,
-        speaker_id=message.get("speaker_id"),
-        speaker_label=message.get("speaker_name"),
-        text=str(message.get("text") or ""),
-        start_time=message.get("start_time"),
-        end_time=message.get("end_time"),
-        confidence=message.get("speaker_confidence"),
-    )
-    if stored is None:
-        return message
-    return {**message, "id": stored["id"]}
 
 
 def _build_speaker_engine(model_manager, speaker_profiles):
@@ -205,10 +195,11 @@ def _build_speaker_engine(model_manager, speaker_profiles):
             )
         return engine
     except Exception as exc:
-        print(
-            "[Qwen3-ASR] speaker engine unavailable; transcription continues: %s"
-            % exc,
-            flush=True,
+        privacy_log(
+            "asr_speaker_engine_unavailable",
+            capability="transcript.realtime",
+            error_type=type(exc).__name__,
+            status="degraded",
         )
         return None
 
@@ -230,7 +221,11 @@ def _identify(engine, audio_f32):
                 "gap": float(top.cosine_score) - second,
             }
     except Exception as exc:
-        print("[Qwen3-ASR] speaker identification failed: %s" % exc, flush=True)
+        privacy_log(
+            "asr_speaker_identification_failed",
+            capability="transcript.realtime",
+            error_type=type(exc).__name__,
+        )
     return None
 
 
@@ -352,6 +347,7 @@ async def _serve_qwen(
                 "purpose": purpose,
                 "source": "qwen3-asr",
                 "model": model_name,
+                "transcript_revision_protocol": "replace_by_revision_key_v1",
             }
         )
     except Exception:
@@ -388,28 +384,27 @@ async def _serve_qwen(
     vad = StreamingVAD(vad_model)
     vad_settings = _configure_vad(vad, purpose)
 
-    print(
-        "[Qwen3-ASR] session ready purpose=%s model=%s speaker=%s profiles=%d "
-        "silence=%.0fms pre-roll=%.0fms max-speech=%.0fms session=%s"
-        % (
-            purpose,
-            model_name,
-            bool(speaker_engine),
-            len(speaker_profiles),
-            vad_settings["silence_ms"],
-            vad_settings["pre_roll_ms"],
-            vad_settings["max_speech_ms"],
-            session_id,
-        ),
-        flush=True,
+    privacy_log(
+        "asr_session_ready",
+        capability="transcript.realtime",
+        purpose=purpose,
+        model_revision=model_name,
+        count=len(speaker_profiles),
+        status="ready",
     )
 
     segment_queue = asyncio.Queue(maxsize=QWEN_ASR_SEGMENT_QUEUE_SIZE)
 
-    async def process_segment(segment):
+    async def process_segment(
+        segment,
+        *,
+        is_final: bool,
+        revision_key: str | None,
+    ):
         audio = segment.audio_data
         if audio is None or len(audio) < 1600:
             return
+        request_started = asyncio.get_running_loop().time()
         pcm16 = (
             np.clip(audio, -1.0, 1.0) * 32767.0
         ).astype(np.int16).tobytes()
@@ -421,19 +416,39 @@ async def _serve_qwen(
                 "realtime" if purpose == "meeting" else "schedule",
             )
         except Exception as exc:
-            print("[Qwen3-ASR] transcription failed: %s" % exc, flush=True)
-            with contextlib.suppress(Exception):
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "message": "Qwen3-ASR 转写失败，请重试",
-                    }
-                )
+            privacy_log(
+                "asr_transcription_failed",
+                capability="transcript.realtime",
+                error_type=type(exc).__name__,
+                status="failure",
+            )
+            if is_final:
+                with contextlib.suppress(Exception):
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "Qwen3-ASR 转写失败，请重试",
+                        }
+                    )
             return
 
         text = str(result.get("text") or "").strip()
         if not text:
             return
+
+        privacy_log(
+            "asr_transcript_emitted",
+            capability="transcript.realtime",
+            purpose=purpose,
+            stage="final" if is_final else "preview",
+            status="ready",
+            duration_ms=int(len(audio) * 1000 / 16000),
+            wall_ms=round(
+                (asyncio.get_running_loop().time() - request_started) * 1000,
+                3,
+            ),
+            infer_ms=result.get("infer_ms"),
+        )
 
         speaker_label = "unknown" if purpose == "schedule" else "speaker_1"
         identified = False
@@ -470,23 +485,15 @@ async def _serve_qwen(
                     vote["count"] += 1
                     vote["score_sum"] += float(identification["cos"])
                     vote["name"] = best_name
-                print(
-                    "[Qwen3-ASR] speaker score session=%s cluster=%s "
-                    "candidate=%s cos=%.4f gap=%.4f accepted=%s duration=%dms"
-                    % (
-                        session_id,
-                        speaker_label,
-                        identification["speaker_id"],
-                        identification["cos"],
-                        identification["gap"],
-                        bool(
-                            identification["cos"] >= _SPK_COS_THRESHOLD
-                            and identification["gap"] >= _SPK_GAP_MIN
-                            and segment_duration_ms >= _SPK_MIN_AUDIO_MS
-                        ),
-                        segment_duration_ms,
-                    ),
-                    flush=True,
+                privacy_log(
+                    "asr_speaker_score",
+                    capability="transcript.realtime",
+                    status=("accepted" if (
+                        identification["cos"] >= _SPK_COS_THRESHOLD
+                        and identification["gap"] >= _SPK_GAP_MIN
+                        and segment_duration_ms >= _SPK_MIN_AUDIO_MS
+                    ) else "rejected"),
+                    duration_ms=segment_duration_ms,
                 )
             votes = cluster_identity_votes.get(speaker_label)
             if votes:
@@ -504,7 +511,7 @@ async def _serve_qwen(
         display_name = identity_name if identified else speaker_label
         output_speaker_id = str(identity_id) if identified else speaker_label
         message = {
-            "type": "transcript.completed",
+            "type": "transcript.completed" if is_final else "transcript.partial",
             "source": "qwen3-asr",
             "model": str(result.get("model") or model_name),
             "purpose": purpose,
@@ -515,7 +522,8 @@ async def _serve_qwen(
             "end_ms": int(segment.end_ms),
             "start_time": segment.start_ms / 1000.0,
             "end_time": segment.end_ms / 1000.0,
-            "is_final": True,
+            "is_final": is_final,
+            "revision_key": revision_key,
             "speaker_confidence": confidence,
             "identified": identified,
             "best_guess_name": best_name,
@@ -523,13 +531,11 @@ async def _serve_qwen(
             "segment_reason": getattr(segment, "segment_reason", None),
             "infer_ms": result.get("infer_ms"),
         }
-        if persist_transcript:
-            message = _cache_guest_transcript(auth_context, session_id, message)
         try:
             await websocket.send_json(message)
         except Exception:
             return
-        if persist_transcript and auth_context.mode != "guest":
+        if persist_transcript and is_final:
             asyncio.create_task(
                 _persist_transcript(
                     meeting_id=session_id,
@@ -542,19 +548,35 @@ async def _serve_qwen(
                 )
             )
 
+    preview_in_flight = False
+    preview_effective_ms_by_start: dict[int, int] = {}
+
     async def segment_worker():
+        nonlocal preview_in_flight
         while True:
-            segment = await segment_queue.get()
+            job = await segment_queue.get()
             try:
-                if segment is None:
+                if job is None:
                     return
-                await process_segment(segment)
+                segment, is_final, revision_key = job
+                await process_segment(
+                    segment,
+                    is_final=is_final,
+                    revision_key=revision_key,
+                )
             finally:
+                if job is not None and not job[1]:
+                    preview_in_flight = False
                 segment_queue.task_done()
 
     worker_task = asyncio.create_task(segment_worker())
     clean_stop = False
     disconnected = False
+    received_frame_count = 0
+    received_pcm_bytes = 0
+    active_speech_observation_count = 0
+    preview_enqueued_count = 0
+    final_enqueued_count = 0
     try:
         while True:
             frame = await websocket.receive_bytes()
@@ -562,27 +584,83 @@ async def _serve_qwen(
                 clean_stop = True
                 tail_segments = await asyncio.to_thread(_flush_vad, vad)
                 for segment in tail_segments:
-                    await segment_queue.put(segment)
+                    revision_key = (
+                        "schedule:%d" % int(segment.start_ms)
+                        if purpose == "schedule"
+                        else None
+                    )
+                    final_enqueued_count += 1
+                    await segment_queue.put((segment, True, revision_key))
                 break
             if len(frame) % 2 != 0:
                 await websocket.send_json(
                     {"type": "error", "message": "语音帧格式无效"}
                 )
                 continue
+            received_frame_count += 1
+            received_pcm_bytes += len(frame)
             pcm = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
             segment = await asyncio.to_thread(vad.feed, pcm)
             if segment is not None:
-                await segment_queue.put(segment)
+                revision_key = (
+                    "schedule:%d" % int(segment.start_ms)
+                    if purpose == "schedule"
+                    else None
+                )
+                preview_effective_ms_by_start.pop(int(segment.start_ms), None)
+                final_enqueued_count += 1
+                await segment_queue.put((segment, True, revision_key))
+            elif (
+                purpose == "schedule"
+                and not preview_in_flight
+                and preview_enqueued_count < QWEN_SCHEDULE_PREVIEW_MAX
+            ):
+                active_window = vad.active_speech_window()
+                if active_window is None:
+                    continue
+                active_speech_observation_count += 1
+                start_ms, effective_ms = active_window
+                previous_ms = preview_effective_ms_by_start.get(start_ms)
+                preview_due = (
+                    effective_ms >= QWEN_SCHEDULE_PREVIEW_INITIAL_MS
+                    if previous_ms is None
+                    else effective_ms - previous_ms >= QWEN_SCHEDULE_PREVIEW_INTERVAL_MS
+                )
+                if not preview_due:
+                    continue
+                preview = vad.snapshot_active_speech()
+                if preview is None:
+                    continue
+                preview_in_flight = True
+                preview_effective_ms_by_start[start_ms] = effective_ms
+                preview_enqueued_count += 1
+                privacy_log(
+                    "asr_preview_enqueued",
+                    capability="transcript.realtime",
+                    purpose=purpose,
+                    status="queued",
+                    duration_ms=int(len(preview.audio_data) * 1000 / 16000),
+                    audio_ms=effective_ms,
+                )
+                await segment_queue.put(
+                    (preview, False, "schedule:%d" % start_ms)
+                )
     except WebSocketDisconnect:
         disconnected = True
-        print(
-            "[Qwen3-ASR] client disconnected purpose=%s session=%s"
-            % (purpose, session_id),
-            flush=True,
+        privacy_log(
+            "asr_client_disconnected",
+            capability="transcript.realtime",
+            purpose=purpose,
+            status="disconnected",
         )
     except Exception as exc:
-        print("[Qwen3-ASR] websocket loop failed: %s" % exc, flush=True)
-        traceback.print_exc()
+        privacy_log(
+            "asr_websocket_failed",
+            capability="transcript.realtime",
+            purpose=purpose,
+            error_type=type(exc).__name__,
+            status="failure",
+        )
     finally:
         await segment_queue.put(None)
         with contextlib.suppress(Exception):
@@ -590,8 +668,26 @@ async def _serve_qwen(
         if clean_stop and not disconnected:
             with contextlib.suppress(Exception):
                 await websocket.send_json({"type": "ready_to_stop"})
-        print(
-            "[Qwen3-ASR] session cleaned purpose=%s session=%s"
-            % (purpose, session_id),
-            flush=True,
+        privacy_log(
+            "asr_session_cleaned",
+            capability="transcript.realtime",
+            purpose=purpose,
+            status="closed",
+            count=received_frame_count,
+            bytes=received_pcm_bytes,
+        )
+        privacy_log(
+            "asr_session_active_speech_observations",
+            capability="transcript.realtime",
+            purpose=purpose,
+            status="closed",
+            count=active_speech_observation_count,
+        )
+        privacy_log(
+            "asr_session_enqueued_segments",
+            capability="transcript.realtime",
+            purpose=purpose,
+            status="closed",
+            count=preview_enqueued_count,
+            segments=final_enqueued_count,
         )

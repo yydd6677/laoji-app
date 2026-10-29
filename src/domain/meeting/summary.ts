@@ -9,13 +9,7 @@ export type MeetingSummarySectionKind =
   | 'comparison'
   | 'risk_card'
   | 'stat'
-  | 'bullets'
-  | 'numbered'
-  | 'decisions'
-  | 'topics'
-  | 'risks'
-  | 'action_items'
-  | 'legacy';
+  | 'action_items';
 
 export interface MeetingSummaryCitation {
   id: string;
@@ -25,6 +19,11 @@ export interface MeetingSummaryCitation {
   quoteHash: string | null;
   sourceType?: 'transcript' | 'manual_note' | 'attachment';
   sourceLabel?: string | null;
+  /**
+   * A short, verbatim source excerpt for the collapsed evidence sheet.
+   * It is presentation-only and never becomes a second fact body.
+   */
+  excerpt?: string | null;
 }
 
 export interface MeetingSummaryRichItem {
@@ -214,6 +213,28 @@ export interface MeetingSummaryAttachmentAuthorization {
 }
 
 /**
+ * Ephemeral, content-free identity captured from the source-stream task.
+ *
+ * It is carried to the canonical SQLite write so a result that finishes after
+ * a device epoch, binding or explicitly authorized attachment changed cannot
+ * become current.  The fence deliberately contains hashes and revisions only;
+ * meeting source text remains in the encrypted remote task payload.
+ */
+export interface MeetingSummaryActivationFenceV3 {
+  deviceEpochId: string;
+  bindingId: string;
+  bindingGeneration: string;
+  bindingRevision: number;
+  bindingCancelRevision: number;
+  attachments: readonly {
+    attachmentId: string;
+    positionMs: number;
+    updatedAtMs: number;
+    contentSha256: string;
+  }[];
+}
+
+/**
  * Client-normalized v2 document. It is safe to serialize in the legacy cache while SQLite becomes
  * the canonical source; generated content remains immutable after it is mirrored as a version.
  */
@@ -224,6 +245,8 @@ export interface MeetingSummaryDocument {
   templateId: string;
   templateRevision: number;
   transcriptRevisionId: string | null;
+  /** Server-owned transcript revision used for generation; distinct from the local SQLite revision ID. */
+  remoteTranscriptRevisionId?: string | null;
   manualNoteRevision: number;
   scheduleSnapshotHash: string | null;
   status: MeetingSummaryVersionStatus;

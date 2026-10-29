@@ -3,9 +3,8 @@ import {
   recoverNativeRecordings,
 } from 'laoji-native-platform';
 import { RecordingReconciler, type RecordingReconciliationResult } from '../application';
-import { scopeTelemetry, type ScopeKey } from '../domain/meeting';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
-import { getFeatureFlags } from '../config/featureFlags';
+import type { ScopeKey } from '../domain/meeting';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import { diagnosticAudit, diagnosticWarn } from './diagnostics';
 
 const reconciler = new RecordingReconciler({ repository: sqliteMeetingNoteRepository });
@@ -21,7 +20,7 @@ export function reconcileNativeMeetingRecordings(
   scopeKey: ScopeKey,
   options: ReconcileNativeMeetingRecordingsOptions = {},
 ): Promise<RecordingReconciliationResult | null> {
-  if (!getFeatureFlags().localMeetingDbV1 || !hasNativeRecorder()) return Promise.resolve(null);
+  if (!hasNativeRecorder()) return Promise.resolve(null);
   const existing = inFlightByScope.get(scopeKey);
   if (existing) return existing;
   const nowMs = Date.now();
@@ -36,7 +35,8 @@ export function reconcileNativeMeetingRecordings(
     .then(result => {
       diagnosticAudit('meeting_recording_reconciled', {
         status: 'completed',
-        ...scopeTelemetry(scopeKey, 'none'),
+        owner: 'device-local',
+        network_path: 'none',
         reconciliation_kind: 'native-journal-local-sqlite',
         matched: result.matched,
         recovered_meetings: result.recoveredMeetingsCreated,
@@ -52,7 +52,8 @@ export function reconcileNativeMeetingRecordings(
       diagnosticWarn('[meeting-db] recording reconciliation failed', error);
       diagnosticAudit('meeting_recording_reconciled', {
         status: 'failed',
-        ...scopeTelemetry(scopeKey, 'none'),
+        owner: 'device-local',
+        network_path: 'none',
         reconciliation_kind: 'native-journal-local-sqlite',
         error_code: error instanceof Error ? error.name : 'UnknownError',
       });

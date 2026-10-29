@@ -1,14 +1,25 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
+from pathlib import Path
+import sys
 import threading
 import time
+from http.client import HTTPConnection
 
 import numpy as np
 import pytest
 
-from qwen_asr_service import server
+from app.schemas.vnext_contracts import AsrBatchResponseV2, TranscriptStreamEventV2
+
+SERVER_PATH = Path(__file__).resolve().parents[2] / "laoji-asr" / "server.py"
+SPEC = importlib.util.spec_from_file_location("laoji_asr_server", SERVER_PATH)
+assert SPEC is not None and SPEC.loader is not None
+server = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = server
+SPEC.loader.exec_module(server)
 
 
 def _pcm(value: int, samples: int = 1600) -> bytes:
@@ -24,6 +35,81 @@ def _item(item_id: str, value: int) -> server.InferenceItem:
         source_start_ms=100,
         source_end_ms=200,
     )
+
+
+def test_admission_limit_does_not_block_microbatch_requeue(monkeypatch):
+    """Reproduce producer filling the slot while the sole consumer requeues."""
+    monkeypatch.setattr(server, "MODEL_REVISION", "test-revision")
+    coordinator = server.InferenceCoordinator(lambda: None, max_queued_requests=1)
+    # The physical queue is deliberately unbounded; admission is bounded under
+    # the metrics lock. This requeue must never wait for its own consumer.
+    assert coordinator._queue.maxsize == 0
+    with coordinator._metrics_lock:
+        coordinator._pending['offline'] = 1
+    with pytest.raises(server.AsrServiceError, match='queue_full'):
+        coordinator.submit('realtime', [_item('overflow', 320)])
+    with coordinator._metrics_lock:
+        coordinator._pending['offline'] = 0
+    coordinator.close()
+
+
+def test_stalled_worker_stops_reporting_ready_and_requests_process_recovery(monkeypatch):
+    started, release, restart = threading.Event(), threading.Event(), threading.Event()
+    class Model:
+        def transcribe(self, **_kwargs):
+            started.set()
+            release.wait(3)
+            return []
+    monkeypatch.setattr(server, 'MODEL_REVISION', 'test-revision')
+    coordinator = server.InferenceCoordinator(lambda: Model(), stall_seconds=.08,
+        on_stall=lambda code: restart.set() if code == 70 else None)
+    def submit():
+        with pytest.raises(server.AsrServiceError):
+            coordinator.submit('realtime', [_item('stalled', 320)])
+    caller = threading.Thread(target=submit)
+    caller.start()
+    try:
+        assert started.wait(2)
+        assert restart.wait(2)
+        assert not coordinator.snapshot()['worker_alive']
+        with pytest.raises(server.AsrServiceError, match='service_stopping'):
+            coordinator.submit('realtime', [_item('new', 320)])
+    finally:
+        release.set()
+        caller.join(3)
+        coordinator.close()
+
+
+def test_expired_queued_request_does_not_consume_model_inference(monkeypatch):
+    first_started, release = threading.Event(), threading.Event()
+    calls = []
+    class Result:
+        text = '有效语音'
+        language = 'Chinese'
+    class Model:
+        def transcribe(self, *, audio, **_kwargs):
+            calls.append(len(audio))
+            first_started.set()
+            release.wait(3)
+            return [Result() for _ in audio]
+    monkeypatch.setattr(server, 'MODEL_REVISION', 'test-revision')
+    monkeypatch.setattr(server, 'REQUEST_WAIT_SECONDS', .15)
+    coordinator = server.InferenceCoordinator(lambda: Model())
+    errors = []
+    def submit(name):
+        try: coordinator.submit('offline', [_item(name, 320)])
+        except server.AsrServiceError as error: errors.append(error.code)
+    first = threading.Thread(target=submit, args=('first',))
+    first.start()
+    assert first_started.wait(2)
+    second = threading.Thread(target=submit, args=('expired',))
+    second.start()
+    second.join(2)
+    release.set()
+    first.join(2)
+    coordinator.close()
+    assert calls == [1]
+    assert 'inference_timeout' in errors
 
 
 def test_batch_contract_keeps_stable_ids_and_source_ranges():
@@ -87,7 +173,7 @@ def test_pending_realtime_precedes_pending_offline_batch(monkeypatch):
         def transcribe(self, *, audio, language):
             value = round(float(audio[0][0][0]) * 32768)
             observed.append(value)
-            if value == 1:
+            if value == 320:
                 first_started.set()
                 assert release_first.wait(5)
             return [Result(round(float(item[0][0]) * 32768)) for item in audio]
@@ -99,11 +185,13 @@ def test_pending_realtime_precedes_pending_offline_batch(monkeypatch):
     def submit(name: str, priority: str, value: int) -> None:
         responses[name] = coordinator.submit(priority, [_item(name, value)])
 
-    first = threading.Thread(target=submit, args=("first", "offline", 1))
+    # Use a realistic non-silent amplitude; one int16 LSB is intentionally
+    # treated as silence by the ASR coordinator.
+    first = threading.Thread(target=submit, args=("first", "offline", 320))
     first.start()
     assert first_started.wait(5)
-    second = threading.Thread(target=submit, args=("second", "offline", 2))
-    realtime = threading.Thread(target=submit, args=("live", "realtime", 3))
+    second = threading.Thread(target=submit, args=("second", "offline", 640))
+    realtime = threading.Thread(target=submit, args=("live", "realtime", 960))
     second.start()
     realtime.start()
     deadline = time.monotonic() + 5
@@ -115,7 +203,7 @@ def test_pending_realtime_precedes_pending_offline_batch(monkeypatch):
         assert not thread.is_alive()
     coordinator.close()
 
-    assert observed == [1, 3, 2]
+    assert observed == [320, 960, 640]
     assert responses["live"]["priority"] == "realtime"
     assert responses["live"]["items"][0]["id"] == "live"
     assert responses["live"]["items"][0]["model_revision"] == "test-revision"
@@ -146,3 +234,249 @@ def test_empty_pcm_is_a_valid_no_speech_result(monkeypatch):
 
     assert response["items"][0]["text"] == ""
     assert response["items"][0]["infer_ms"] == 0
+
+
+def test_low_energy_pcm_is_a_valid_no_speech_result_without_model(monkeypatch):
+    class Model:
+        def transcribe(self, **_kwargs):
+            raise AssertionError("low-energy silence must not reach the model")
+
+    monkeypatch.setattr(server, "MODEL_REVISION", "test-revision")
+    coordinator = server.InferenceCoordinator(lambda: Model())
+    response = coordinator.submit(
+        "offline",
+        [server.InferenceItem(
+            item_id="quiet",
+            pcm=np.full(16_000, 1 / 32768, dtype=np.float32),
+            language="Chinese",
+            source_start_ms=0,
+            source_end_ms=1_000,
+        )],
+    )
+    coordinator.close()
+
+    assert response["items"][0]["text"] == ""
+    assert response["items"][0]["infer_ms"] == 0
+
+
+def test_quiet_non_silent_pcm_still_reaches_model(monkeypatch):
+    class Result:
+        text = "低声内容"
+        language = "Chinese"
+
+    class Model:
+        def transcribe(self, *, audio, language):
+            assert len(audio) == 1
+            assert language == ["Chinese"]
+            return [Result()]
+
+    monkeypatch.setattr(server, "MODEL_REVISION", "test-revision")
+    coordinator = server.InferenceCoordinator(lambda: Model())
+    response = coordinator.submit(
+        "offline",
+        [server.InferenceItem(
+            item_id="quiet-speech",
+            pcm=np.full(16_000, 160, dtype=np.float32) / 32768,
+            language="Chinese",
+            source_start_ms=0,
+            source_end_ms=1_000,
+        )],
+    )
+    coordinator.close()
+
+    assert response["items"][0]["text"] == "低声内容"
+    assert response["items"][0]["infer_ms"] >= 0
+
+
+def test_v2_batch_marks_stable_text_and_no_speech(monkeypatch):
+    request = {
+        "schema_version": 2,
+        "contract_revision": "asr.batch.v2",
+        "priority": "offline",
+        "items": [
+            {
+                "id": "asset-a:segment-1",
+                "pcm_base64": base64.b64encode(_pcm(1)).decode("ascii"),
+                "sample_rate": 16000,
+                "source_start_ms": 200,
+                "source_end_ms": 300,
+            },
+            {
+                "id": "asset-a:segment-2",
+                "pcm_base64": base64.b64encode(_pcm(0)).decode("ascii"),
+                "sample_rate": 16000,
+                "source_start_ms": 300,
+                "source_end_ms": 300,
+            },
+        ],
+    }
+    priority, items = server._parse_v2_batch_request(json.dumps(request).encode())
+    assert priority == "offline"
+    batch = {
+        "schema_version": 1,
+        "model": "Qwen/Qwen3-ASR-1.7B",
+        "model_revision": "revision-a",
+        "priority": priority,
+        "queue_ms": 4,
+        "infer_ms": 8,
+        "items": [
+            {
+                "id": items[0].item_id,
+                "text": " 项目进度正常 ",
+                "language": "Chinese",
+                "source_start_ms": 200,
+                "source_end_ms": 300,
+                "audio_ms": 100,
+                "model_revision": "revision-a",
+                "queue_ms": 4,
+                "infer_ms": 8,
+            },
+            {
+                "id": items[1].item_id,
+                "text": "",
+                "language": None,
+                "source_start_ms": 300,
+                "source_end_ms": 300,
+                "audio_ms": 100,
+                "model_revision": "revision-a",
+                "queue_ms": 4,
+                "infer_ms": 8,
+            },
+        ],
+    }
+    response = server._v2_batch_response(batch)
+    validated = AsrBatchResponseV2.model_validate(response)
+
+    assert validated.schema_version == 2
+    assert validated.contract_revision == "asr.batch.v2"
+    assert validated.items[0].stable_segment_key == "asset-a:segment-1"
+    assert validated.items[0].text == "项目进度正常"
+    assert validated.items[0].outcome == "text"
+    assert validated.items[1].outcome == "no_speech"
+    assert validated.items[1].text_state == "stable"
+
+
+def test_v2_batch_requires_explicit_contract_revision():
+    request = {
+        "schema_version": 2,
+        "priority": "offline",
+        "items": [{"id": "item-1", "pcm_base64": base64.b64encode(_pcm(1)).decode("ascii")}],
+    }
+    with pytest.raises(server.AsrServiceError, match="contract_revision_invalid"):
+        server._parse_v2_batch_request(json.dumps(request).encode())
+
+    request["contract_revision"] = "asr.batch.v2"
+    request["items"][0]["source_start_ms"] = 0
+    request["items"][0]["source_end_ms"] = 100
+    request["unexpected"] = True
+    with pytest.raises(server.AsrServiceError, match="request_fields_invalid"):
+        server._parse_v2_batch_request(json.dumps(request).encode())
+
+
+def test_v2_batch_http_handler_returns_contract(monkeypatch):
+    class Result:
+        text = ""
+        language = None
+
+    class Model:
+        def transcribe(self, *, audio, language):
+            del language
+            return [Result() for _ in audio]
+
+    monkeypatch.setattr(server, "MODEL", Model())
+    monkeypatch.setattr(server, "MODEL_ID", "test-model")
+    monkeypatch.setattr(server, "MODEL_REVISION", "revision-http")
+    coordinator = server.InferenceCoordinator(lambda: server.MODEL)
+    monkeypatch.setattr(server, "COORDINATOR", coordinator)
+    httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        payload = {
+            "schema_version": 2,
+            "contract_revision": "asr.batch.v2",
+            "priority": "offline",
+            "items": [{
+                "id": "http-item-1",
+                "pcm_base64": base64.b64encode(_pcm(0, samples=1)).decode("ascii"),
+                "sample_rate": 16000,
+                "source_start_ms": 100,
+                "source_end_ms": 100,
+            }],
+        }
+        connection = HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/v2/asr/batch",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        body = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        assert response.status == 200
+        validated = AsrBatchResponseV2.model_validate(body)
+        assert validated.items[0].stable_segment_key == "http-item-1"
+        assert validated.items[0].outcome == "no_speech"
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+        httpd.server_close()
+        coordinator.close()
+
+
+def test_ready_is_false_when_model_revision_is_not_pinned(monkeypatch):
+    class Coordinator:
+        def snapshot(self):
+            return {
+                "depth": 0,
+                "by_priority": {name: 0 for name in server.PRIORITY_ORDER},
+                "active_priority": None,
+                "last_inference": None,
+            }
+
+    monkeypatch.setattr(server, "MODEL", object())
+    monkeypatch.setattr(server, "COORDINATOR", Coordinator())
+    monkeypatch.setattr(server, "MODEL_ID", "/tmp/qwen3-asr")
+    monkeypatch.setattr(server, "MODEL_REVISION", "")
+
+    payload = server._ready_payload()
+
+    assert payload["model_revision"] == "unresolved"
+    assert payload["ready"] is False
+    assert payload["status"] == "not_ready"
+
+
+def test_stream_contract_separates_transient_partial_from_durable_final():
+    partial = TranscriptStreamEventV2.model_validate({
+        "schema_version": 2,
+        "contract_revision": "transcript.stream.v2",
+        "session_id": "realtime-session-1",
+        "event_sequence": 0,
+        "event_kind": "partial",
+        "stable_segment_key": "segment-1",
+        "segment_revision": 1,
+        "text_state": "partial",
+        "outcome": "text",
+        "text": "项目进",
+        "source_start_ms": 0,
+        "source_end_ms": 500,
+        "model_revision": "revision-a",
+    })
+    final = TranscriptStreamEventV2.model_validate({
+        "schema_version": 2,
+        "contract_revision": "transcript.stream.v2",
+        "session_id": "realtime-session-1",
+        "event_sequence": 2,
+        "event_kind": "final",
+        "stable_segment_key": None,
+        "segment_revision": 1,
+        "text_state": "final",
+        "outcome": "no_speech",
+        "text": "",
+        "source_start_ms": 0,
+        "source_end_ms": 500,
+        "model_revision": "revision-a",
+    })
+    assert partial.event_sequence == 0
+    assert final.outcome == "no_speech"

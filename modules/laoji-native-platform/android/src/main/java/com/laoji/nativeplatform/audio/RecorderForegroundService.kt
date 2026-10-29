@@ -37,6 +37,12 @@ internal sealed class RecorderServiceCommand(open val requestId: String) {
     val future: CompletableFuture<RecorderSnapshot>,
   ) : RecorderServiceCommand(requestId)
 
+  data class AttachRealtime(
+    override val requestId: String,
+    val config: RecorderStartConfig,
+    val future: CompletableFuture<RecorderSnapshot>,
+  ) : RecorderServiceCommand(requestId)
+
   data class Resume(
     override val requestId: String,
     val sessionId: String,
@@ -47,6 +53,13 @@ internal sealed class RecorderServiceCommand(open val requestId: String) {
     override val requestId: String,
     val sessionId: String,
     val future: CompletableFuture<RecorderStopResult>,
+  ) : RecorderServiceCommand(requestId)
+
+  data class AckTranscript(
+    override val requestId: String,
+    val sessionId: String,
+    val throughEventSequence: Long,
+    val future: CompletableFuture<Boolean>,
   ) : RecorderServiceCommand(requestId)
 }
 
@@ -99,6 +112,22 @@ object RecorderServiceClient {
     return future
   }
 
+  fun attachRealtime(
+    context: Context,
+    config: RecorderStartConfig,
+  ): CompletableFuture<RecorderSnapshot> {
+    val future = CompletableFuture<RecorderSnapshot>()
+    if (!owns(config.sessionId, future)) return future
+    val requestId = requestId()
+    val command = RecorderServiceCommand.AttachRealtime(requestId, config, future)
+    if (!dispatch(context, command, foreground = false)) {
+      future.completeExceptionally(
+        RecorderRuntimeException(RecorderErrorCode.SERVICE_UNAVAILABLE, "unable to contact recording service"),
+      )
+    }
+    return future
+  }
+
   fun resume(context: Context, sessionId: String): CompletableFuture<RecorderSnapshot> {
     val future = CompletableFuture<RecorderSnapshot>()
     if (!owns(sessionId, future)) return future
@@ -117,6 +146,34 @@ object RecorderServiceClient {
     if (!owns(sessionId, future)) return future
     val requestId = requestId()
     val command = RecorderServiceCommand.Stop(requestId, sessionId, future)
+    if (!dispatch(context, command, foreground = false)) {
+      future.completeExceptionally(
+        RecorderRuntimeException(RecorderErrorCode.SERVICE_UNAVAILABLE, "unable to contact recording service"),
+      )
+    }
+    return future
+  }
+
+  fun acknowledgeTranscript(
+    context: Context,
+    sessionId: String,
+    throughEventSequence: Long,
+  ): CompletableFuture<Boolean> {
+    val future = CompletableFuture<Boolean>()
+    if (!owns(sessionId, future)) return future
+    if (throughEventSequence < 1L) {
+      future.completeExceptionally(
+        RecorderRuntimeException(RecorderErrorCode.INVALID_OPTIONS, "event sequence is invalid"),
+      )
+      return future
+    }
+    val requestId = requestId()
+    val command = RecorderServiceCommand.AckTranscript(
+      requestId,
+      sessionId,
+      throughEventSequence,
+      future,
+    )
     if (!dispatch(context, command, foreground = false)) {
       future.completeExceptionally(
         RecorderRuntimeException(RecorderErrorCode.SERVICE_UNAVAILABLE, "unable to contact recording service"),
@@ -201,9 +258,11 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
     }
     when (command) {
       is RecorderServiceCommand.Start -> handleStart(command, startId)
+      is RecorderServiceCommand.AttachRealtime -> handleAttachRealtime(command)
       is RecorderServiceCommand.Pause -> handlePause(command)
       is RecorderServiceCommand.Resume -> handleResume(command)
       is RecorderServiceCommand.Stop -> handleStop(command)
+      is RecorderServiceCommand.AckTranscript -> handleAckTranscript(command)
     }
     return START_NOT_STICKY
   }
@@ -287,6 +346,14 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
     }
   }
 
+  private fun handleAttachRealtime(command: RecorderServiceCommand.AttachRealtime) {
+    val current = matchingEngine(command.config.sessionId, command.future) ?: return
+    current.attachRealtime(command.config).whenComplete { snapshot, error ->
+      if (error != null) command.future.completeExceptionally(publicFailure(error))
+      else command.future.complete(snapshot)
+    }
+  }
+
   private fun handleResume(command: RecorderServiceCommand.Resume) {
     val current = matchingEngine(command.sessionId, command.future) ?: return
     current.resume().whenComplete { snapshot, error ->
@@ -306,6 +373,13 @@ class LaojiRecordingService : Service(), RecorderEngineHost {
       stopForeground(STOP_FOREGROUND_REMOVE)
       stopSelf()
     }
+  }
+
+  private fun handleAckTranscript(command: RecorderServiceCommand.AckTranscript) {
+    val current = matchingEngine(command.sessionId, command.future) ?: return
+    command.future.complete(
+      current.acknowledgePersistedTranscript(command.throughEventSequence),
+    )
   }
 
   private fun <T> matchingEngine(sessionId: String, future: CompletableFuture<T>): RecorderEngine? {

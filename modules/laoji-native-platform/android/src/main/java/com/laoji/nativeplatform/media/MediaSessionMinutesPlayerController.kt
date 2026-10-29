@@ -15,6 +15,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionToken
 import com.laoji.nativeplatform.minutes.MinutesPlayerSource
+import com.laoji.nativeplatform.minutes.traceMinutes
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.Executor
 
@@ -229,7 +230,9 @@ internal class MediaSessionMinutesPlayerController(context: Context) :
     activeSourceGeneration = generation
     sourceCommandInFlight = true
     val command = if (source == null) MINUTES_CLEAR_SOURCE_COMMAND else MINUTES_SET_SOURCE_COMMAND
-    val resultFuture = controller.sendCustomCommand(command, source?.toSessionArguments() ?: Bundle.EMPTY)
+    val resultFuture = traceMinutes("LaoJi/minutes.player.sourceCommand") {
+      controller.sendCustomCommand(command, source?.toSessionArguments() ?: Bundle.EMPTY)
+    }
     resultFuture.addListener(
       {
         if (released || !isCurrentMinutesSourceCommandResult(
@@ -283,7 +286,7 @@ internal class MediaSessionMinutesPlayerController(context: Context) :
           publish(force = true)
         } else {
           failureCode = "media_scope_rejected"
-          failureMessage = "播放器账号状态无法确认，请重新登录"
+          failureMessage = "播放器无法确认当前设备状态，请重新打开老记"
           publish(force = true)
         }
       },
@@ -298,7 +301,22 @@ internal class MediaSessionMinutesPlayerController(context: Context) :
       pendingRate = null
     }
     pendingSeekMs?.let {
-      controller.seekTo(clampMinutesSeek(it, effectiveDurationMs(controller)))
+      // An unprepared source intentionally has no system seek command yet. Route app seeks to
+      // the source-checked owner rather than moving only the toolbar's optimistic thumb.
+      val mediaItem = controller.currentMediaItem
+      val sourceId = desiredSource?.sourceId ?: mediaItem?.mediaId
+      val storageScope = desiredSource?.storageScope ?: mediaItem?.mediaMetadata?.extras?.toMinutesStorageScope()
+      if (!sourceId.isNullOrBlank() && storageScope != null) {
+        val generation = sourceGeneration
+        val future = controller.sendCustomCommand(MINUTES_SEEK_TO_COMMAND,
+          minutesSeekArguments(sourceId, storageScope, clampMinutesSeek(it, effectiveDurationMs(controller))))
+        future.addListener({
+          if (!released && generation == sourceGeneration
+            && runCatching { future.get().resultCode }.getOrNull() != SessionResult.RESULT_SUCCESS) {
+            publish(force = true)
+          }
+        }, mainExecutor)
+      }
       pendingSeekMs = null
     }
     pendingPlayWhenReady?.let { shouldPlay ->

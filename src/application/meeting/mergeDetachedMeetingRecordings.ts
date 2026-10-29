@@ -4,12 +4,9 @@ import {
   ingestMeetingMedia,
   type IngestedMeetingMedia,
 } from 'laoji-native-platform';
-import type {
-  MeetingNoteRepository,
-  MeetingRecordingMergeTaskRecord,
-  RecordingAssetRecord,
-} from '../../data/repositories';
-import { sqliteMeetingNoteRepository } from '../../data/repositories';
+import type { MeetingNoteRepository, MeetingRecordingMergeTaskRecord, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../../data/repositories/sqliteMeetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 import type { ScopeKey } from '../../domain/meeting';
 import { assertScopeKey } from '../../domain/meeting';
 
@@ -110,6 +107,7 @@ async function completePreparedMerge(
     recordingAsset: {
       id: task.targetRecordingAssetId,
       meetingId: task.targetMeetingId,
+      assetGeneration: task.targetAssetGeneration,
       role: 'secondary',
       origin: 'recovered',
       nativeSessionId: null,
@@ -120,8 +118,11 @@ async function completePreparedMerge(
       byteSize: media.byteSize,
       durationMs: media.durationMs,
       checksumSha256: media.checksumSha256,
+      sourceSha256: canonicalRecordingSourceSha256(media.checksumSha256),
       waveformJson: source.waveformJson,
       localState: 'local_ready',
+      uploadOperationId: null,
+      remoteObjectRevision: null,
       createdAtMs: completedAtMs,
       updatedAtMs: completedAtMs,
       lastVerifiedAtMs: completedAtMs,

@@ -11,6 +11,8 @@ export interface MeetingMediaImportDraft {
   recordedAtMs: number;
   calendarContext: CalendarMeetingContext | null;
   targetMeetingId: string | null;
+  /** Source file retained by LaojiHardware until canonical meeting persistence succeeds. */
+  hardwareRecordingId?: string | null;
 }
 
 type StoredDrafts = Record<string, MeetingMediaImportDraft>;
@@ -83,6 +85,7 @@ function parseDraft(value: unknown): MeetingMediaImportDraft | null {
     recordedAtMs,
     calendarContext: parseCalendarContext(value.calendarContext),
     targetMeetingId: optionalString(value.targetMeetingId),
+    hardwareRecordingId: optionalString(value.hardwareRecordingId),
   };
 }
 

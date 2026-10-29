@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import hmac
 import json
 import os
@@ -12,23 +13,25 @@ from threading import Lock
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import settings
-from app.laoji.auth_router import security
-from app.services import laoji_auth_service as auth
 from app.services import device_identity
 from app.services.device_identity import DeviceIdentityError
 
 
 router = APIRouter()
+security = HTTPBearer(auto_error=False)
 MAX_RESPONSE_BYTES = 128 * 1024
 CACHE_TTL_SECONDS = 15 * 60
 CACHE_MAX_ROWS = 2_048
 _CACHE: OrderedDict[str, tuple[int, dict[str, Any]]] = OrderedDict()
 _CACHE_LOCK = Lock()
+_QUOTA: OrderedDict[tuple[str, str], tuple[int, int]] = OrderedDict()
+_QUOTA_LOCK = Lock()
+_QUOTA_MAX_ROWS = 4_096
 
 
 class ReverseLocationRequest(BaseModel):
@@ -120,14 +123,32 @@ def _normalize_amap(payload: Any) -> dict[str, Any]:
 async def _fetch_amap(latitude: float, longitude: float, key: str) -> dict[str, Any]:
     timeout = httpx.Timeout(5.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+        # Android/iOS system fixes are WGS84, whereas regeo expects AMap GCJ02.
+        # Use the provider's conversion, not an approximate local transform.
+        converted = await client.get(
+            "https://restapi.amap.com/v3/assistant/coordinate/convert",
+            params={"key": key, "locations": f"{longitude:.6f},{latitude:.6f}",
+                    "coordsys": "gps", "output": "JSON"},
+        )
+        if converted.status_code != 200 or len(converted.content) > MAX_RESPONSE_BYTES:
+            raise RuntimeError("amap_coordinate_conversion_failed")
+        conversion = converted.json()
+        if str(conversion.get("status")) != "1":
+            raise RuntimeError("amap_coordinate_conversion_failed")
+        coordinates = str(conversion.get("locations") or "").split(",")
+        if len(coordinates) != 2:
+            raise RuntimeError("amap_coordinate_conversion_invalid")
+        lng, lat = map(float, coordinates)
+        if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+            raise RuntimeError("amap_coordinate_conversion_invalid")
         async with client.stream(
             "GET",
             "https://restapi.amap.com/v3/geocode/regeo",
             params={
                 "key": key,
-                "location": f"{longitude:.7f},{latitude:.7f}",
+                "location": f"{lng:.7f},{lat:.7f}",
                 "extensions": "all",
-                "radius": "1000",
+                "radius": "100",
                 "output": "JSON",
             },
             headers={"Accept": "application/json"},
@@ -151,7 +172,7 @@ def _optional_principal(
     credentials: HTTPAuthorizationCredentials | None,
     request: Request,
 ) -> tuple[str, str]:
-    """Resolve account, device, or anonymous location quota identity.
+    """Resolve a device or anonymous location quota identity.
 
     Device-primary clients intentionally do not have an account token.  Keep
     the device credential on the same Bearer header as the rest of the device
@@ -176,30 +197,30 @@ def _optional_principal(
                 detail={"code": error.code, "message": error.message},
             ) from error
         return "device", f"{context.device_id}:{context.epoch_id}"
-    user = auth.get_user_by_token(presented)
-    if user is None:
-        raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
-    return "user", str(user["id"])
+    raise HTTPException(status_code=401, detail="设备凭据无效")
 
 
 def _enforce_quota(principal: tuple[str, str]) -> None:
     principal_type, identity = principal
-    if principal_type == "user":
-        scope = "location-reverse-user"
-        limit, window = 1_000, 24 * 60 * 60
-    elif principal_type == "device":
+    if principal_type == "device":
         scope = "location-reverse-device"
         limit, window = 1_000, 24 * 60 * 60
     else:
         scope = "location-reverse-guest"
         limit, window = 60, 60 * 60
-    allowed, retry_after = auth.consume_auth_rate_limit(
-        scope,
-        identity,
-        limit=limit,
-        window_seconds=window,
-    )
-    if not allowed:
+    now = int(time.time())
+    quota_key = (scope, identity)
+    with _QUOTA_LOCK:
+        started_at, count = _QUOTA.get(quota_key, (now, 0))
+        if now - started_at >= window:
+            started_at, count = now, 0
+        count += 1
+        _QUOTA[quota_key] = (started_at, count)
+        _QUOTA.move_to_end(quota_key)
+        while len(_QUOTA) > _QUOTA_MAX_ROWS:
+            _QUOTA.popitem(last=False)
+        retry_after = max(1, window - (now - started_at))
+    if count > limit:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="地址查询过于频繁，请稍后重试",
@@ -223,7 +244,8 @@ async def reverse_location(
     if not amap_key:
         raise HTTPException(status_code=503, detail="地址服务尚未配置")
     try:
-        upstream = await _fetch_amap(payload.latitude, payload.longitude, amap_key)
+        async with asyncio.timeout(4.5):
+            upstream = await _fetch_amap(payload.latitude, payload.longitude, amap_key)
         normalized = _normalize_amap(upstream)
     except Exception as exc:
         raise HTTPException(status_code=502, detail="地址服务暂时不可用") from exc

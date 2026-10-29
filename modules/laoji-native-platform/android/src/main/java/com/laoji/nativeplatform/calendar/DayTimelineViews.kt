@@ -22,8 +22,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
 import android.widget.FrameLayout
 import android.widget.OverScroller
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
+import com.laoji.nativeplatform.ui.NativeUiTokens
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.abs
@@ -72,7 +71,6 @@ internal interface DayTimelinePageListener {
   fun onTimelineScrollChanged(binding: DayPageBinding, scrollOffset: Float)
 }
 
-@FeishuEvidence("CAL-DAY-COMPOSE-001", "CAL-DRAG-OWNER-001")
 internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
   val timelineCanvas = DayTimelineCanvasView(context)
   val gestureLayer = DayTimelineGestureLayer(context)
@@ -178,9 +176,8 @@ internal class DayTimelinePageView(context: Context) : FrameLayout(context) {
   private fun accepts(callbackBinding: DayPageBinding): Boolean = binding == callbackBinding
 }
 
-@FeishuEvidence("CAL-DAY-COMPOSE-001")
 internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
-  private val palette = CalendarUi.palette(context)
+  private var palette = CalendarUi.palette(context)
   private val hourHeight = CalendarUi.dp(context, DayPagerContract.HOUR_HEIGHT_DP)
   private val rulerWidth = CalendarUi.dp(context, DayPagerContract.RULER_WIDTH_DP)
   private val timelinePaddingTop = CalendarUi.dp(context, DayPagerContract.TIMELINE_PADDING_TOP_DP)
@@ -256,20 +253,23 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
 
   init {
     setWillNotDraw(false)
-    setBackgroundColor(palette.surface)
     clipChildren = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     isFocusable = true
     contentDescription = "日程时间轴"
+    NativeUiTokens.bindTheme(this) {
+      palette = CalendarUi.palette(context)
+      setBackgroundColor(palette.surface)
+      backgroundPaint.color = palette.surface
+      gridPaint.color = palette.divider
+      currentTimePaint.color = palette.destructive
+      CalendarUi.restyleTextPaint(context, timePaint, palette.textPlaceholder)
+      CalendarUi.restyleTextPaint(context, eventTitlePaint, palette.eventText)
+      CalendarUi.restyleTextPaint(context, eventTimePaint, palette.eventText)
+    }
   }
 
   fun bind(binding: DayPageBinding, snapshot: CalendarSnapshot?) {
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-DAY-COMPOSE-001",
-      "day-timed-event-layer",
-      "calendar-day-timed-event-layer-${binding.epochDay}",
-    )
     val changedOwner = this.binding != binding
     this.binding = binding
     this.snapshot = snapshot
@@ -364,7 +364,6 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     canvas.restoreToCount(save)
   }
 
-  @FeishuEvidence("CAL-RULER-001")
   private fun drawHourRuler(canvas: Canvas) {
     DayPagerContract.hourLines().forEach { hour ->
       val y = timelinePaddingTop + hour * hourHeight
@@ -421,7 +420,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     )
     if (textRect.width <= 0f || textRect.height <= 0f) return
     val title = CalendarUi.ellipsize(
-      CalendarUi.listEventTitle(geometry.segment.event.title),
+      CalendarUi.eventDisplayTitle(geometry.segment.event),
       eventTitlePaint,
       textRect.width,
     )
@@ -525,7 +524,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     val dateText = date?.let { "${it.year}年${it.month}月${it.day}日" }.orEmpty()
     val mutability = if (geometry.segment.event.canMutateInDayView()) "可调整" else "只读"
     return listOf(
-      CalendarUi.listEventTitle(geometry.segment.event.title),
+      CalendarUi.eventDisplayTitle(geometry.segment.event),
       dateText,
       formatTimeRange(geometry.segment.startMinute, geometry.segment.endMinute),
       mutability,
@@ -619,7 +618,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
     val event = AccessibilityEvent.obtain(eventType).apply {
       packageName = context.packageName
       className = "android.widget.Button"
-      text.add(CalendarUi.listEventTitle(geometry.segment.event.title))
+      text.add(CalendarUi.eventDisplayTitle(geometry.segment.event))
       contentDescription = eventAccessibilityDescription(binding, geometry)
       isEnabled = this@DayTimelineCanvasView.isEnabled
       setSource(this@DayTimelineCanvasView, virtualId)
@@ -672,7 +671,7 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
         setParent(this@DayTimelineCanvasView)
         packageName = context.packageName
         className = "android.widget.Button"
-        text = CalendarUi.listEventTitle(geometry.segment.event.title)
+        text = CalendarUi.eventDisplayTitle(geometry.segment.event)
         contentDescription = eventAccessibilityDescription(binding, geometry)
         setBoundsInParent(parentBounds)
         setBoundsInScreen(screenBounds)
@@ -768,9 +767,8 @@ internal class DayTimelineCanvasView(context: Context) : FrameLayout(context) {
   }
 }
 
-@FeishuEvidence("CAL-DRAG-OWNER-001", "CAL-DRAG-HANDLES-001")
 internal class DayTimelineGestureLayer(context: Context) : View(context) {
-  private val palette = CalendarUi.palette(context)
+  private var palette = CalendarUi.palette(context)
   private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
   private val minimumFlingVelocity = ViewConfiguration.get(context).scaledMinimumFlingVelocity
   private val maximumFlingVelocity = ViewConfiguration.get(context).scaledMaximumFlingVelocity
@@ -853,6 +851,14 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
     isClickable = true
     isFocusable = false
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    NativeUiTokens.bindTheme(this) {
+      palette = CalendarUi.palette(context)
+      selectedPaint.color = palette.accent
+      selectedSoftPaint.color = palette.accentSoft
+      draftStrokePaint.color = palette.accent
+      CalendarUi.restyleTextPaint(context, draftTitlePaint, palette.textPrimary, true)
+      CalendarUi.restyleTextPaint(context, draftTimePaint, palette.textSecondary)
+    }
   }
 
   fun attachTimelineCanvas(canvas: DayTimelineCanvasView) {
@@ -864,12 +870,6 @@ internal class DayTimelineGestureLayer(context: Context) : View(context) {
   }
 
   fun bind(binding: DayPageBinding, snapshot: CalendarSnapshot?) {
-    FeishuEvidenceRuntime.bind(
-      this,
-      "CAL-DRAG-OWNER-001",
-      "day-gesture-owner",
-      "calendar-day-gesture-owner-${binding.epochDay}",
-    )
     val changedOwner = this.binding != binding
     if (changedOwner) clearTransientState("page-rebound", emitDraft = false)
     this.binding = binding

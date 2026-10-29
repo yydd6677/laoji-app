@@ -7,7 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors as C, Motion, withAlpha } from '../theme/colors';
 
 type CreateTarget = 'voice' | 'manual';

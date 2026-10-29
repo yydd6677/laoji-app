@@ -115,10 +115,7 @@ object SystemEntryProjectionStore {
     val schemaVersion = root.getInt("schemaVersion")
     require(schemaVersion == SCHEMA_VERSION) { "unsupported projection schema" }
     val scopeKey = root.getString("scopeKey")
-    require(
-      scopeKey == "guest" ||
-        scopeKey.startsWith("user:") && scopeKey.length in 6..256 && !controlCharacterPattern.containsMatchIn(scopeKey),
-    ) { "invalid projection scope" }
+    require(scopeKey == "guest") { "invalid projection scope" }
     val updatedAtMs = root.getLong("updatedAtMs")
     val expiresAtMs = root.getLong("expiresAtMs")
     require(updatedAtMs >= 0L && expiresAtMs >= updatedAtMs) { "invalid projection lifetime" }

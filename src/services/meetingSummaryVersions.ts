@@ -1,8 +1,7 @@
-import type { SummaryVersionRecord } from '../data/repositories';
-import { sqliteMeetingNoteRepository } from '../data/repositories';
+import type { SummaryVersionRecord } from "../data/repositories/meetingNoteRepository";
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
 import type { ScopeKey } from '../domain/meeting';
-import { summaryProjectionToDocument } from './meetingContentProjection';
-import { meetingSummaryDocumentToText } from './meetingSummaryDocument';
+import { loadMeetingFactsRecordV3ForVersion } from '../data/repositories/meetingSummaryV3Repository';
 import { loadCurrentMeetingSummaryState } from './meetingSummaryState';
 
 export interface MeetingSummaryVersionsState {
@@ -16,81 +15,8 @@ function summaryVersionSortKey(version: SummaryVersionRecord): number {
 }
 
 function compareSummaryVersions(left: SummaryVersionRecord, right: SummaryVersionRecord): number {
-  const leftTime = summaryVersionSortKey(left);
-  const rightTime = summaryVersionSortKey(right);
-  // Legacy and structured projections can share the same minute while being
-  // created a few milliseconds apart. Keep the structured record first so a
-  // freshly generated version is the first item users see.
-  const leftMinute = Math.floor(leftTime / 60_000);
-  const rightMinute = Math.floor(rightTime / 60_000);
-  if (leftMinute !== rightMinute) return rightTime - leftTime;
-  if (left.templateId === 'legacy' && right.templateId !== 'legacy') return 1;
-  if (left.templateId !== 'legacy' && right.templateId === 'legacy') return -1;
-  return rightTime - leftTime || right.id.localeCompare(left.id);
-}
-
-function comparableSummaryText(value: string): string {
-  return value
-    .replace(/^#{1,6}\s+[^\n]*$/gm, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function hideExactLegacyProjectionDuplicates(
-  scopeKey: ScopeKey,
-  legacyMeetingId: string,
-  currentVersionId: string,
-  versions: readonly SummaryVersionRecord[],
-): Promise<SummaryVersionRecord[]> {
-  const structuredVersions = versions.filter(version => (
-    version.templateId !== 'legacy' && !version.userEdited
-  ));
-  const textByVersionId = new Map<string, Promise<string | null>>();
-  const loadText = (version: SummaryVersionRecord): Promise<string | null> => {
-    const cached = textByVersionId.get(version.id);
-    if (cached) return cached;
-    const pending = sqliteMeetingNoteRepository.getSummaryVersionContent(version.id, scopeKey)
-      .then(projection => summaryProjectionToDocument(projection, legacyMeetingId))
-      .then(document => document
-        ? comparableSummaryText(meetingSummaryDocumentToText(document))
-        : null);
-    textByVersionId.set(version.id, pending);
-    return pending;
-  };
-
-  const visible: SummaryVersionRecord[] = [];
-  for (const version of versions) {
-    if (
-      version.templateId !== 'legacy'
-      || version.id === currentVersionId
-      || version.userEdited
-    ) {
-      visible.push(version);
-      continue;
-    }
-    const completedAt = summaryVersionSortKey(version);
-    const structuredCandidates = structuredVersions.filter(candidate => (
-      Math.abs(summaryVersionSortKey(candidate) - completedAt) <= 5_000
-    ));
-    if (structuredCandidates.length === 0) {
-      visible.push(version);
-      continue;
-    }
-    const legacyText = await loadText(version);
-    if (!legacyText) {
-      visible.push(version);
-      continue;
-    }
-    let duplicate = false;
-    for (const candidate of structuredCandidates) {
-      if (await loadText(candidate) === legacyText) {
-        duplicate = true;
-        break;
-      }
-    }
-    if (!duplicate) visible.push(version);
-  }
-  return visible;
+  return summaryVersionSortKey(right) - summaryVersionSortKey(left)
+    || right.id.localeCompare(left.id);
 }
 
 export async function loadMeetingSummaryVersions(
@@ -106,23 +32,19 @@ export async function loadMeetingSummaryVersions(
   if (!currentVersion || (currentVersion.status !== 'ready' && currentVersion.status !== 'stale')) {
     return null;
   }
-  const versions = [...await sqliteMeetingNoteRepository.listReadableSummaryVersions(
+  const candidates = await sqliteMeetingNoteRepository.listReadableSummaryVersions(
     current.canonicalMeetingId,
     scopeKey,
-  )];
-  if (!versions.some(version => version.id === currentVersion.id)) {
-    versions.push(currentVersion);
-  }
-  const visibleVersions = await hideExactLegacyProjectionDuplicates(
-    scopeKey,
-    legacyMeetingId,
-    currentVersion.id,
-    versions,
   );
-  visibleVersions.sort(compareSummaryVersions);
+  const versions = (await Promise.all(candidates.map(async version => {
+    const facts = await loadMeetingFactsRecordV3ForVersion(version.id);
+    return facts?.canonicalMeetingId === current.canonicalMeetingId ? version : null;
+  }))).filter((version): version is SummaryVersionRecord => version !== null);
+  if (!versions.some(version => version.id === currentVersion.id)) return null;
+  versions.sort(compareSummaryVersions);
   return {
     canonicalMeetingId: current.canonicalMeetingId,
     currentVersionId: currentVersion.id,
-    versions: visibleVersions,
+    versions,
   };
 }

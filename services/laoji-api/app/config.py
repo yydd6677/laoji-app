@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     PERIOD_SUMMARY_INTERVAL_SECONDS: float = 60.0
 
     AUDIO_STORAGE_PATH: str = "./audio_files"
+    VNEXT_REALTIME_SPOOL_PATH: str = "./data/vnext-realtime-spool"
+    VNEXT_SPEAKER_SPOOL_PATH: str = "./data/vnext-speaker-spool"
     MEETING_AUDIO_MAX_BYTES: int = Field(default=1024 * 1024 * 1024, ge=1024 * 1024)
     MEETING_AUDIO_CHUNK_BYTES: int = Field(
         default=4 * 1024 * 1024,
@@ -42,9 +44,34 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
     R2_ENDPOINT_URL: str = ""
+    # Deployment-scoped prefix prevents separate environments from colliding
+    # when they share one R2 bucket.
+    R2_OBJECT_PREFIX: str = "vnext-staging"
     R2_PRESIGN_TTL_SECONDS: int = Field(default=3600, ge=60, le=604800)
     R2_PART_SIZE: int = Field(default=8 * 1024 * 1024, ge=5 * 1024 * 1024, le=128 * 1024 * 1024)
     R2_UPLOAD_SESSION_TTL_HOURS: int = Field(default=24, ge=1, le=168)
+
+    # The upload verifier already reads the complete sealed R2 object. Mirror
+    # that same compressed byte stream into a private, bounded transient file
+    # so ASR does not repeat a slow public Range download. R2 remains the
+    # recoverable source and files are removed when the Task becomes terminal.
+    VNEXT_VERIFIED_MEDIA_CACHE_ENABLED: bool = True
+    VNEXT_VERIFIED_MEDIA_CACHE_PATH: str = "./data/vnext-verified-media-cache"
+    VNEXT_VERIFIED_MEDIA_CACHE_MAX_SOURCE_BYTES: int = Field(
+        default=512 * 1024 * 1024,
+        ge=1024 * 1024,
+        le=512 * 1024 * 1024,
+    )
+    VNEXT_VERIFIED_MEDIA_CACHE_MAX_TOTAL_BYTES: int = Field(
+        default=4 * 1024 * 1024 * 1024,
+        ge=512 * 1024 * 1024,
+        le=4 * 1024 * 1024 * 1024,
+    )
+    VNEXT_VERIFIED_MEDIA_CACHE_PARTIAL_TTL_SECONDS: int = Field(
+        default=60 * 60,
+        ge=60,
+        le=24 * 60 * 60,
+    )
 
     SECRET_KEY: str = "change-me-in-production"
     CORS_ORIGINS: str = '["http://localhost","http://localhost:5179"]'
@@ -57,6 +84,24 @@ class Settings(BaseSettings):
         return os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             self.AUDIO_STORAGE_PATH
+        )
+
+    @property
+    def vnext_realtime_spool_abs_path(self) -> str:
+        if os.path.isabs(self.VNEXT_REALTIME_SPOOL_PATH):
+            return self.VNEXT_REALTIME_SPOOL_PATH
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            self.VNEXT_REALTIME_SPOOL_PATH,
+        )
+
+    @property
+    def vnext_speaker_spool_abs_path(self) -> str:
+        if os.path.isabs(self.VNEXT_SPEAKER_SPOOL_PATH):
+            return self.VNEXT_SPEAKER_SPOOL_PATH
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            self.VNEXT_SPEAKER_SPOOL_PATH,
         )
 
     @model_validator(mode="after")

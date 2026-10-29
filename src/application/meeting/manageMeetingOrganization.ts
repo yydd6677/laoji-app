@@ -9,7 +9,6 @@ import type {
   MeetingTagRecord,
   RenameMeetingTagResult,
 } from '../../data/repositories/meetingNoteRepository';
-import { requestMeetingTagCatalogSync } from './tagCatalogSyncTrigger';
 
 export interface NormalizedMeetingTagName {
   name: string;
@@ -63,7 +62,6 @@ export class ManageMeetingOrganizationUseCase {
       createdAtMs: nowMs,
       updatedAtMs: nowMs,
     });
-    requestMeetingTagCatalogSync(scopeKey);
     return tag;
   }
 
@@ -80,13 +78,11 @@ export class ManageMeetingOrganizationUseCase {
       normalized.normalizedName,
       Date.now(),
     );
-    requestMeetingTagCatalogSync(scopeKey);
     return result;
   }
 
   async deleteTag(tagId: string, scopeKey: ScopeKey): Promise<readonly string[]> {
     const result = await this.repository.deleteMeetingTag(tagId, scopeKey);
-    requestMeetingTagCatalogSync(scopeKey);
     return result;
   }
 
@@ -97,7 +93,6 @@ export class ManageMeetingOrganizationUseCase {
   ): Promise<readonly MeetingTagRecord[]> {
     const meetingId = await this.requireCanonicalMeetingId(navigationMeetingId, scopeKey);
     const tags = await this.repository.replaceMeetingTags(meetingId, scopeKey, tagIds, Date.now());
-    requestMeetingTagCatalogSync(scopeKey);
     return tags;
   }
 

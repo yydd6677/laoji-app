@@ -1,4 +1,5 @@
 import * as LocalAuthentication from 'expo-local-authentication';
+import { Linking, Platform } from 'react-native';
 import { getAppStorageItem, setAppStorageItem } from './appStorage';
 
 export const PRIVACY_KEY = '@laoji_privacy';
@@ -76,4 +77,12 @@ export async function authenticateWithSystem(promptMessage = '验证身份'): Pr
     disableDeviceFallback: false,
   });
   return result.success;
+}
+
+export async function openSystemSecuritySettings(): Promise<void> {
+  if (Platform.OS === 'android') {
+    await Linking.sendIntent('android.settings.SECURITY_SETTINGS');
+  } else {
+    await Linking.openSettings();
+  }
 }

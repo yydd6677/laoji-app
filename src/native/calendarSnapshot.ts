@@ -3,6 +3,7 @@ import type {
   NativeCalendarMutationRequest,
   NativeCalendarRangeSnapshot,
   NativeCalendarSettings,
+  NativeProjectionEnvelope,
 } from 'laoji-native-platform';
 import type { CalEvent } from '../types';
 import { timeToMinutes } from '../utils/calendarDate';
@@ -80,6 +81,7 @@ export function nativeCalendarEventSnapshot(
     sourceEventId: ref.sourceEventId,
     occurrenceDate: ref.occurrenceDate,
     title: event.title,
+    completed: event.status === 'completed',
     category: normalizeEventCategory(event.category),
     startEpochDay: calendarEpochDay(event.startDate),
     endEpochDay,
@@ -105,6 +107,7 @@ export function buildNativeCalendarRangeSnapshot({
   events,
   settings = { defaultEventDurationMinutes: 30, firstDayOfWeek: 0 },
   timeZoneId = deviceTimeZoneId(),
+  projection = null,
 }: {
   generation: number;
   rangeStart: string;
@@ -114,6 +117,7 @@ export function buildNativeCalendarRangeSnapshot({
   events: CalEvent[];
   settings?: NativeCalendarSettings;
   timeZoneId?: string;
+  projection?: NativeProjectionEnvelope | null;
 }): NativeCalendarRangeSnapshot {
   const rangeStartEpochDay = calendarEpochDay(rangeStart);
   const rangeEndEpochDayExclusive = calendarEpochDay(rangeEndExclusive);
@@ -129,5 +133,6 @@ export function buildNativeCalendarRangeSnapshot({
     todayEpochDay: calendarEpochDay(today),
     settings,
     events: events.map(event => nativeCalendarEventSnapshot(event, timeZoneId)),
+    projection,
   };
 }

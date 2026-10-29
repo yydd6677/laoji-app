@@ -23,11 +23,9 @@ import android.widget.Space
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
-import com.laoji.nativeplatform.NativeThemePreference
-import com.laoji.nativeplatform.evidence.FeishuEvidence
-import com.laoji.nativeplatform.evidence.FeishuEvidenceRuntime
 import com.laoji.nativeplatform.ui.ProfileEntryView
 import com.laoji.nativeplatform.ui.NativeUiTokens
+import com.laoji.nativeplatform.ui.LaojiThemeTypography
 import expo.modules.kotlin.AppContext
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -43,7 +41,6 @@ interface CalendarToolbarListener {
 }
 
 class CalendarToolbarView(context: Context, appContext: AppContext) : LinearLayout(context) {
-  private val palette = CalendarUi.palette(context)
   // [PRODUCT] Both main tabs use this shared global profile entry. Calendar
   // keeps ownership of its title/picker layout and pre-navigation behavior.
   private val profileView = ProfileEntryView(context, appContext)
@@ -62,8 +59,6 @@ class CalendarToolbarView(context: Context, appContext: AppContext) : LinearLayo
       CalendarUi.dp(context, 12f).toInt(),
       0
     )
-    setBackgroundColor(palette.surface)
-
     profileView.setOnClickListener { listener?.onProfileClicked() }
     addView(
       profileView,
@@ -83,8 +78,7 @@ class CalendarToolbarView(context: Context, appContext: AppContext) : LinearLayo
     }
     titleView.apply {
       textSize = 17f
-      setTextColor(palette.textPrimary)
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+      includeFontPadding = false
       gravity = Gravity.CENTER_VERTICAL
       maxLines = 1
       importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -106,7 +100,12 @@ class CalendarToolbarView(context: Context, appContext: AppContext) : LinearLayo
         CalendarUi.dp(context, CalendarShellContract.ICON_HIT_SIZE_DP).toInt()
       )
     )
-
+    NativeUiTokens.bindTheme(this) {
+      val palette = CalendarUi.palette(context)
+      setBackgroundColor(palette.surface)
+      titleView.setTextColor(palette.textPrimary)
+      titleView.typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
+    }
   }
 
   fun setListener(listener: CalendarToolbarListener?) {
@@ -129,31 +128,24 @@ class CalendarToolbarView(context: Context, appContext: AppContext) : LinearLayo
 }
 
 // UI-CALENDAR-INDICATOR-001: view_indicator.xml is a separate 50dp band with
-// one 32dp trailing mode entry. The removed Feishu sidebar is the approved
+// one 32dp trailing mode entry. This is the current
 // product replacement point for toggling the retained month/day modes.
-@FeishuEvidence("UI-CALENDAR-INDICATOR-001")
 class CalendarIndicatorView(context: Context) : FrameLayout(context) {
-  private val palette = CalendarUi.palette(context)
   private val label = TextView(context).apply {
     text = "日历"
     textSize = 14f
+    includeFontPadding = false
+    maxLines = 1
     gravity = Gravity.CENTER
-    setTextColor(palette.textPrimary)
-    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
   }
   private val modeEntry = CalendarViewModeIconView(context)
-  private val divider = View(context).apply { setBackgroundColor(palette.divider) }
+  private val divider = View(context)
   private var mode = CalendarMode.MONTH
   private var listener: CalendarToolbarListener? = null
 
   init {
-    setBackgroundColor(palette.surface)
     setPadding(0, 0, 0, CalendarUi.dp(context, 10f).roundToInt())
-    FeishuEvidenceRuntime.bind(this, "UI-CALENDAR-INDICATOR-001", "indicator", "calendar-view-indicator")
-    FeishuEvidenceRuntime.bind(label, "UI-CALENDAR-INDICATOR-001", "tab", "calendar-tab")
-    FeishuEvidenceRuntime.bind(modeEntry, "UI-CALENDAR-INDICATOR-001", "mode-entry", "calendar-mode-entry")
-    FeishuEvidenceRuntime.bind(divider, "UI-CALENDAR-INDICATOR-001", "divider", "calendar-indicator-divider")
     addView(
       label,
       LayoutParams(CalendarUi.dp(context, 60f).roundToInt(), LayoutParams.MATCH_PARENT).apply {
@@ -179,6 +171,13 @@ class CalendarIndicatorView(context: Context) : FrameLayout(context) {
       listener?.onModeClicked(if (mode == CalendarMode.MONTH) CalendarMode.DAY else CalendarMode.MONTH)
     }
     updateModeDescription()
+    NativeUiTokens.bindTheme(this) {
+      val palette = CalendarUi.palette(context)
+      setBackgroundColor(palette.surface)
+      label.setTextColor(palette.textPrimary)
+      label.typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
+      divider.setBackgroundColor(palette.divider)
+    }
   }
 
   fun setListener(listener: CalendarToolbarListener?) {
@@ -201,22 +200,24 @@ class CalendarIndicatorView(context: Context) : FrameLayout(context) {
 }
 
 private class CalendarViewModeIconView(context: Context) : View(context) {
-  private val palette = CalendarUi.palette(context)
   private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.textSecondary
     style = Paint.Style.STROKE
     strokeWidth = CalendarUi.dp(context, 1.5f)
     strokeCap = Paint.Cap.ROUND
     strokeJoin = Paint.Join.ROUND
   }
   private val cell = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.textSecondary
     style = Paint.Style.FILL
   }
 
   init {
     isClickable = true
     isFocusable = true
+    NativeUiTokens.bindTheme(this) {
+      val palette = CalendarUi.palette(context)
+      stroke.color = palette.textSecondary
+      cell.color = palette.textSecondary
+    }
   }
 
   override fun onDraw(canvas: Canvas) {
@@ -243,12 +244,8 @@ private class CalendarViewModeIconView(context: Context) : View(context) {
 
 // ShellView -> CalendarTitleProxyNewImpl -> TitleBarIconView continuously maps panel progress to 180 degrees.
 internal class CalendarTitleExpandIconView(context: Context) : View(context) {
-  private val palette = CalendarUi.palette(context)
-  private val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = (palette.textSecondary and 0x00ffffff) or 0x1a000000
-  }
+  private val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val trianglePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = palette.textSecondary
     style = Paint.Style.FILL
   }
   private val triangle = Path()
@@ -257,6 +254,11 @@ internal class CalendarTitleExpandIconView(context: Context) : View(context) {
     isClickable = false
     isFocusable = false
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    NativeUiTokens.bindTheme(this) {
+      val palette = CalendarUi.palette(context)
+      circlePaint.color = (palette.textSecondary and 0x00ffffff) or 0x1a000000
+      trianglePaint.color = palette.textSecondary
+    }
   }
 
   fun setExpandProgress(progress: Float) {
@@ -301,10 +303,7 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
   }
   private val dragBar = QuickChooseDragBarView(context)
   private val shadowTail = View(context).apply { alpha = 0f }
-  private val topDivider = View(context).apply {
-    setBackgroundColor(CalendarUi.palette(context).divider)
-    alpha = 0f
-  }
+  private val topDivider = View(context).apply { alpha = 0f }
   private var listener: CalendarPickerListener? = null
   private var expandAnimator: ValueAnimator? = null
   private var gestureIntercepted = false
@@ -323,7 +322,7 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
     get() = quickChooseContent.contentState
 
   init {
-    // Feishu keeps the panel in the measured tree while its content is translated
+    // Keep the panel in the measured tree while its content is translated
     // off-screen. INVISIBLE preserves that contract without accepting touches.
     visibility = INVISIBLE
     isClickable = true
@@ -380,6 +379,7 @@ class CalendarQuickChooseHostView(context: Context) : FrameLayout(context) {
         listener?.onPickerContentStateChanged(state)
       }
     })
+    NativeUiTokens.bindTheme(this) { topDivider.setBackgroundColor(CalendarUi.palette(context).divider) }
   }
 
   fun setListener(listener: CalendarPickerListener?) {
@@ -581,7 +581,7 @@ private interface CalendarQuickChooseContentListener {
 
 // CAL-PICKER-001: date and year/month owners coexist and transition by progress instead of replacement.
 private class CalendarQuickChooseContentView(context: Context) : LinearLayout(context) {
-  private val palette = CalendarUi.palette(context)
+  private var palette = CalendarUi.palette(context)
   private val header = LinearLayout(context)
   private val titleView = TextView(context)
   private val titleArrow = QuickChooseChevronView(context, QuickChooseChevron.RIGHT)
@@ -610,7 +610,6 @@ private class CalendarQuickChooseContentView(context: Context) : LinearLayout(co
 
   init {
     orientation = VERTICAL
-    setBackgroundColor(palette.surface)
 
     header.orientation = HORIZONTAL
     header.gravity = Gravity.CENTER_VERTICAL
@@ -630,8 +629,6 @@ private class CalendarQuickChooseContentView(context: Context) : LinearLayout(co
     }
     titleView.apply {
       textSize = 14f
-      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-      setTextColor(palette.textPrimary)
       gravity = Gravity.CENTER_VERTICAL
       maxLines = 1
       isClickable = true
@@ -690,6 +687,13 @@ private class CalendarQuickChooseContentView(context: Context) : LinearLayout(co
     nextMonth.setOnClickListener { shiftDateMonth(1) }
     yearWheel.setOnSettledListener { commitYearMonth(it, monthWheel.selectedValue) }
     monthWheel.setOnSettledListener { commitYearMonth(yearWheel.selectedValue, it) }
+    NativeUiTokens.bindTheme(this) {
+      palette = CalendarUi.palette(context)
+      setBackgroundColor(palette.surface)
+      titleView.typeface = LaojiThemeTypography.typeface(context, Typeface.BOLD)
+      // Restyle the current transition, without replaying it or changing its height.
+      titleView.setTextColor(ArgbEvaluator().evaluate(contentProgress, palette.textPrimary, palette.accent) as Int)
+    }
   }
 
   fun setListener(listener: CalendarQuickChooseContentListener?) {
@@ -919,7 +923,6 @@ data class QuickChooseWheelConfiguration(
 
 // CAL-PICKER-001 / CAL-PICKER-WHEEL-TAP-001: five visible 48dp rows implement
 // bounded year and looping month wheels; a short tap settles the touched row.
-@FeishuEvidence("CAL-PICKER-WHEEL-TAP-001")
 internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
   private val palette = CalendarUi.palette(context)
   private val centerPaint = CalendarUi.textPaint(context, palette.textPrimary, 17f)
@@ -955,7 +958,12 @@ internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
     isClickable = true
     isFocusable = true
     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-    FeishuEvidenceRuntime.bind(this, "CAL-PICKER-WHEEL-TAP-001", "wheel", "quick-choose-wheel")
+    NativeUiTokens.bindTheme(this) {
+      val current = CalendarUi.palette(context)
+      CalendarUi.restyleTextPaint(context, centerPaint, current.textPrimary)
+      CalendarUi.restyleTextPaint(context, outerPaint, current.textSecondary)
+      dividerPaint.color = current.divider
+    }
   }
 
   fun configure(minimum: Int, maximum: Int, loop: Boolean, suffix: String) {
@@ -1271,7 +1279,6 @@ internal class CalendarQuickChooseWheelView(context: Context) : View(context) {
 
 // QuickChooseDateMonthIndicator owns a real ViewPager2 with one source-derived month per page.
 internal class CalendarQuickChooseDateView(context: Context) : LinearLayout(context) {
-  private val palette = CalendarUi.palette(context)
   private var dateClickListener: ((Int) -> Unit)? = null
   private var pageMonthChangedListener: ((Int) -> Unit)? = null
   private var currentPosition = CalendarQuickChooseContract.DATE_PAGER_ANCHOR_POSITION
@@ -1301,7 +1308,10 @@ internal class CalendarQuickChooseDateView(context: Context) : LinearLayout(cont
           text = label
           textSize = 12f
           gravity = Gravity.CENTER
-          setTextColor(palette.textSecondary)
+          NativeUiTokens.bindTheme(this) { palette ->
+            setTextColor(palette.textSecondary)
+            typeface = LaojiThemeTypography.typeface(context)
+          }
           importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         },
         LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f),
@@ -1406,8 +1416,6 @@ private class CalendarQuickChooseMonthAdapter(
 }
 
 private class CalendarQuickChooseMonthPageView(context: Context) : LinearLayout(context) {
-  private val palette = CalendarUi.palette(context)
-
   init {
     orientation = VERTICAL
   }
@@ -1436,14 +1444,17 @@ private class CalendarQuickChooseMonthPageView(context: Context) : LinearLayout(
             text = date.day.toString()
             textSize = 14f
             gravity = Gravity.CENTER
-            setTextColor(
-              when {
+            NativeUiTokens.bindTheme(this) {
+              val palette = CalendarUi.palette(context)
+              typeface = LaojiThemeTypography.typeface(context)
+              setTextColor(when {
                 isSelected -> palette.accentText
                 isToday -> palette.accent
+                column == 0 || column == 6 -> palette.weekendDate
                 else -> palette.textPrimary
-              },
-            )
-            if (isSelected) background = CalendarUi.background(palette.accent, 15f, context)
+              })
+              background = if (isSelected) CalendarUi.background(palette.accent, 15f, context) else null
+            }
             isClickable = true
             isFocusable = true
             this.isSelected = isSelected
@@ -1482,7 +1493,6 @@ internal enum class QuickChooseChevron { LEFT, RIGHT }
 // CAL-PICKER-001 / CAL-PICKER-HOST-001: source icons are represented by semantic native chevrons.
 internal class QuickChooseChevronView(context: Context, private val chevron: QuickChooseChevron) : View(context) {
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = CalendarUi.palette(context).textSecondary
     style = Paint.Style.STROKE
     strokeWidth = CalendarUi.dp(context, 1.8f)
     strokeCap = Paint.Cap.ROUND
@@ -1492,6 +1502,7 @@ internal class QuickChooseChevronView(context: Context, private val chevron: Qui
   init {
     isClickable = true
     isFocusable = true
+    NativeUiTokens.bindTheme(this) { paint.color = CalendarUi.palette(context).textSecondary }
   }
 
   override fun onDraw(canvas: Canvas) {
@@ -1509,7 +1520,6 @@ internal class QuickChooseChevronView(context: Context, private val chevron: Qui
 // CAL-PICKER-HOST-001: the 28dp drag owner is separate from transparent outside-hit handling.
 internal class QuickChooseDragBarView(context: Context) : View(context) {
   private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-    color = CalendarUi.palette(context).divider
     style = Paint.Style.STROKE
     strokeWidth = CalendarUi.dp(context, 2f)
     strokeCap = Paint.Cap.ROUND
@@ -1517,7 +1527,11 @@ internal class QuickChooseDragBarView(context: Context) : View(context) {
   }
 
   init {
-    setBackgroundColor(CalendarUi.palette(context).surface)
+    NativeUiTokens.bindTheme(this) {
+      val palette = CalendarUi.palette(context)
+      paint.color = palette.divider
+      setBackgroundColor(palette.surface)
+    }
     contentDescription = "收起日期选择"
     isClickable = true
     isFocusable = true
@@ -1549,12 +1563,4 @@ internal class QuickChooseDragBarView(context: Context) : View(context) {
 fun calendarContentLayoutParams(context: Context): FrameLayout.LayoutParams = FrameLayout.LayoutParams(
   FrameLayout.LayoutParams.MATCH_PARENT,
   FrameLayout.LayoutParams.MATCH_PARENT,
-).apply {
-  if (NativeThemePreference.isVivid(context)) {
-    val inset = CalendarUi.dp(context, 8f).roundToInt()
-    marginStart = inset
-    marginEnd = inset
-    topMargin = inset
-    bottomMargin = inset
-  }
-}
+)

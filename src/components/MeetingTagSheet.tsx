@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -16,9 +16,9 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { MeetingTagRecord, RenameMeetingTagResult } from '../data/repositories';
+import type { MeetingTagRecord, RenameMeetingTagResult } from "../data/repositories/meetingNoteRepository";
 import { readableErrorMessage } from '../services/errors';
-import { getFeishuTokens } from '../theme/feishuTokens';
+import { useTheme } from '../theme/ThemeProvider';
 
 type Mode = 'assign' | 'manage';
 
@@ -47,7 +47,8 @@ export function MeetingTagSheet({
   onDelete: (tag: MeetingTagRecord) => void;
   onSave?: (tagIds: readonly string[]) => Promise<void>;
 }) {
-  const { colors } = getFeishuTokens();
+  const { tokens: { colors }, appearance } = useTheme();
+  const styles = React.useMemo(() => createStyles(appearance.fontFamily), [appearance.fontFamily]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const progress = useRef(new Animated.Value(0)).current;
@@ -458,35 +459,35 @@ export function MeetingTagSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (fontFamily: string) => StyleSheet.create({
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject },
   keyboardHost: { flex: 1, justifyContent: 'flex-end' },
   sheet: { borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' },
   titleBar: { height: 52, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   titleAction: { width: 72, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 6 },
-  titleActionText: { fontSize: 16, lineHeight: 24, fontWeight: '400' },
-  title: { flex: 1, textAlign: 'center', fontSize: 17, lineHeight: 24, fontWeight: '400' },
-  meetingTitle: { height: 34, paddingHorizontal: 16, paddingTop: 10, fontSize: 13, lineHeight: 18 },
+  titleActionText: { fontFamily, fontSize: 16, lineHeight: 24, fontWeight: '400' },
+  title: { flex: 1, textAlign: 'center', fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  meetingTitle: { height: 34, paddingHorizontal: 16, paddingTop: 10, fontFamily, fontSize: 13, lineHeight: 18 },
   inputRow: { height: 60, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center' },
   inputFrame: { height: 40, flex: 1, borderRadius: 6, flexDirection: 'row', alignItems: 'center' },
-  input: { height: 40, flex: 1, paddingHorizontal: 12, paddingVertical: 0, fontSize: 16, lineHeight: 22 },
+  input: { height: 40, flex: 1, paddingHorizontal: 12, paddingVertical: 0, fontFamily, fontSize: 16, lineHeight: 22 },
   inputClear: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   inputAction: { width: 76, height: 36, marginLeft: 8, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  inputActionText: { fontSize: 16, lineHeight: 22, fontWeight: '400' },
+  inputActionText: { fontFamily, fontSize: 16, lineHeight: 22, fontWeight: '400' },
   list: { flex: 1 },
   empty: { height: 84, alignItems: 'center', justifyContent: 'center' },
-  emptyText: { fontSize: 14, lineHeight: 20 },
+  emptyText: { fontFamily, fontSize: 14, lineHeight: 20 },
   row: { minHeight: 64, paddingLeft: 16, paddingRight: 8, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   rowBody: { flex: 1, paddingVertical: 8, paddingRight: 12 },
-  rowText: { fontSize: 16, lineHeight: 22, fontWeight: '400' },
-  rowMeta: { marginTop: 2, fontSize: 12, lineHeight: 18 },
+  rowText: { fontFamily, fontSize: 16, lineHeight: 22, fontWeight: '400' },
+  rowMeta: { marginTop: 2, fontFamily, fontSize: 12, lineHeight: 18 },
   checkbox: { width: 22, height: 22, marginRight: 8, borderWidth: 1.5, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   manageActions: { flexDirection: 'row', alignItems: 'center' },
   iconAction: { width: 44, height: 44, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   messageSlot: { height: 30, paddingHorizontal: 16, justifyContent: 'center' },
-  messageText: { fontSize: 12, lineHeight: 18 },
+  messageText: { fontFamily, fontSize: 12, lineHeight: 18 },
   footer: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 16, paddingTop: 12 },
   submit: { height: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
-  submitText: { fontSize: 17, lineHeight: 24, fontWeight: '400' },
+  submitText: { fontFamily, fontSize: 17, lineHeight: 24, fontWeight: '400' },
 });

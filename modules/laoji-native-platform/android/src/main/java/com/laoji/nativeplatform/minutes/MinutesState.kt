@@ -1,5 +1,7 @@
 package com.laoji.nativeplatform.minutes
 
+import com.laoji.nativeplatform.projection.ProjectionEnvelope
+
 // MIN-REC-STATE-001 / MIN-DETAIL-001 / MIN-DETAIL-PAGER-001 / MIN-DETAIL-STICKY-001:
 // normalized source-mapped Minutes state contracts.
 
@@ -287,7 +289,6 @@ data class MinutesActionItem(
   val sourceStartMs: Long = 0L,
   val updatedAtMs: Long = 0L,
   val updating: Boolean = false,
-  val syncConflict: Boolean = false,
   val canShare: Boolean = false,
 )
 
@@ -319,11 +320,14 @@ data class MinutesListState(
   val searching: Boolean = false,
   val query: String = "",
   val mediaImporting: Boolean = false,
+  val mediaImportStatusLabel: String = "",
   val phase: MinutesContentPhase = MinutesContentPhase.READY,
   val message: String = "",
   val showingCachedData: Boolean = false,
   val mode: MinutesListMode = MinutesListMode.MEETINGS,
   val canOpenRecycleBin: Boolean = false,
+  val canEmptyRecycleBin: Boolean = false,
+  val recycleBinEmptying: Boolean = false,
   val canReorder: Boolean = false,
   val meetings: List<MinutesMeeting> = emptyList(),
 )
@@ -339,8 +343,13 @@ enum class MinutesListMode(val wireName: String) {
   }
 }
 
+data class MinutesRecordingControlIdentity(val surfaceId: String, val sessionStartedAtMs: Long) {
+  fun toMap(): Map<String, Any> = mapOf("surfaceId" to surfaceId, "sessionStartedAtMs" to sessionStartedAtMs)
+}
+
 data class MinutesRecordingState(
   val meetingId: String = "",
+  val control: MinutesRecordingControlIdentity? = null,
   val title: String = "会议记录",
   val startedAtLabel: String = "",
   val location: String = "",
@@ -362,7 +371,6 @@ data class MinutesRecordingState(
   val manualNoteEnabled: Boolean = false,
   val manualNoteError: String = "",
   val manualNoteRetryable: Boolean = true,
-  val manualNoteConflict: Boolean = false,
   val transcript: List<MinutesTranscriptLine> = emptyList(),
 )
 
@@ -382,10 +390,7 @@ data class MinutesDetailState(
   val canShare: Boolean = false,
   val canManageSpeakers: Boolean = false,
   val canGenerateSummary: Boolean = false,
-  val canSelectSummaryTemplate: Boolean = false,
-  val summaryTemplateLabel: String = "",
   val canCreateAction: Boolean = false,
-  val canCreateClip: Boolean = false,
   val summaryGenerating: Boolean = false,
   val summaryActionLabel: String = "生成整理结果",
   val titleEditRequestId: Int = 0,
@@ -400,7 +405,6 @@ data class MinutesDetailState(
   val manualNoteEnabled: Boolean = false,
   val manualNoteError: String = "",
   val manualNoteRetryable: Boolean = true,
-  val manualNoteConflict: Boolean = false,
   val transcript: List<MinutesTranscriptLine> = emptyList(),
   val markers: List<MinutesMarker> = emptyList(),
   val summary: List<MinutesSummarySection> = emptyList(),
@@ -412,8 +416,6 @@ data class MinutesDetailState(
   val audioErrorMessage: String = "",
   val processingStatusLabel: String = "",
   val processingStatusTone: String = "neutral",
-  val rootSyncConflict: Boolean = false,
-  val summarySyncConflict: Boolean = false,
   val processingRetryStage: MinutesProcessingStage? = null,
   val processingRetrying: Boolean = false,
   val recordingMergeStatusLabel: String = "",
@@ -449,6 +451,8 @@ data class MinutesUiState(
   val list: MinutesListState = MinutesListState(),
   val recording: MinutesRecordingState = MinutesRecordingState(),
   val detail: MinutesDetailState = MinutesDetailState(),
+  val projection: ProjectionEnvelope? = null,
+  val projectionInvalid: Boolean = false,
 )
 
 sealed interface MinutesStateMutation {
@@ -460,6 +464,21 @@ sealed interface MinutesStateMutation {
 
 object MinutesStateReducer {
   fun reduce(current: MinutesUiState, mutation: MinutesStateMutation): MinutesUiState {
+    if (mutation is MinutesStateMutation.Replace) {
+      if (!acceptProjection(current, mutation.state)) return current
+      val currentProjection = current.projection
+      val incomingProjection = mutation.state.projection
+      if (
+        currentProjection != null
+        && incomingProjection != null
+        && currentProjection.payloadSha256 == incomingProjection.payloadSha256
+      ) {
+        // The authenticated payload hash is the render-body identity. Updating
+        // only its accepted envelope must not normalize, copy, compare, or
+        // re-render transcript/summary collections on the UI thread.
+        return current.copy(projection = incomingProjection, projectionInvalid = false)
+      }
+    }
     val next = when (mutation) {
       is MinutesStateMutation.Replace -> mergeReplace(current, mutation.state)
       is MinutesStateMutation.SelectSurface -> current.copy(surface = mutation.surface)
@@ -517,6 +536,12 @@ object MinutesStateReducer {
     )
   }
 
+  private fun acceptProjection(current: MinutesUiState, incoming: MinutesUiState): Boolean {
+    if (incoming.projectionInvalid) return false
+    if (current.projection == null) return true
+    return incoming.projection?.isAcceptableReplacement(current.projection) == true
+  }
+
   /** MIN-DETAIL-PAGER-001: stale page responses cannot replace newer page data. */
   private fun mergeReplace(current: MinutesUiState, incoming: MinutesUiState): MinutesUiState {
     val next = normalize(incoming)
@@ -557,28 +582,6 @@ object MinutesStateReducer {
       info = if (infoFresh) nextDetail.pageStates.info else currentDetail.pageStates.info,
     )
     val activeTab = if (tabFresh) nextDetail.activeTab else currentDetail.activeTab
-    fun summaryProcessing(detail: MinutesDetailState): Boolean =
-      detail.summaryGenerating
-        || detail.processingRetryStage == MinutesProcessingStage.SUMMARY
-        || detail.processingStatusLabel.contains("整理")
-        || detail.processingStatusLabel.contains("总结")
-        || detail.pageState(MinutesDetailTab.SUMMARY).phase == MinutesContentPhase.LOADING
-        || detail.pageState(MinutesDetailTab.SUMMARY).phase == MinutesContentPhase.ERROR
-    fun transcriptProcessing(detail: MinutesDetailState): Boolean =
-      detail.processingRetryStage == MinutesProcessingStage.TRANSCRIPT
-        || detail.processingStatusLabel.contains("文字")
-        || detail.processingStatusLabel.contains("转写")
-        || detail.pageState(MinutesDetailTab.TRANSCRIPT).phase == MinutesContentPhase.LOADING
-        || detail.pageState(MinutesDetailTab.TRANSCRIPT).phase == MinutesContentPhase.ERROR
-    // Aggregate processing text is derived from one of the page requests. If
-    // either snapshot is in that page's domain, apply the same freshness rule
-    // so a late page response cannot resurrect an obsolete global banner.
-    val processingFresh = when {
-      summaryProcessing(currentDetail) || summaryProcessing(nextDetail) -> summaryFresh
-      transcriptProcessing(currentDetail) || transcriptProcessing(nextDetail) -> transcriptFresh
-      else -> true
-    }
-
     return next.copy(
       detail = nextDetail.copy(
         activeTab = activeTab,
@@ -592,22 +595,22 @@ object MinutesStateReducer {
         } else {
           currentDetail.canGenerateSummary
         },
-        canSelectSummaryTemplate = if (summaryFresh) nextDetail.canSelectSummaryTemplate else currentDetail.canSelectSummaryTemplate,
-        summaryTemplateLabel = if (summaryFresh) nextDetail.summaryTemplateLabel else currentDetail.summaryTemplateLabel,
         summaryGenerating = if (summaryFresh) nextDetail.summaryGenerating else currentDetail.summaryGenerating,
         summaryActionLabel = if (summaryFresh) nextDetail.summaryActionLabel else currentDetail.summaryActionLabel,
-        summarySyncConflict = if (summaryFresh) nextDetail.summarySyncConflict else currentDetail.summarySyncConflict,
-        processingStatusLabel = if (processingFresh) nextDetail.processingStatusLabel else currentDetail.processingStatusLabel,
-        processingStatusTone = if (processingFresh) nextDetail.processingStatusTone else currentDetail.processingStatusTone,
-        processingRetryStage = if (processingFresh) nextDetail.processingRetryStage else currentDetail.processingRetryStage,
-        processingRetrying = if (processingFresh) nextDetail.processingRetrying else currentDetail.processingRetrying,
+        // Meeting processing belongs to the accepted whole-view projection,
+        // not a tab's content request. An unopened/retained page can have an
+        // older generation while the durable upload/transcript task advances.
+        // acceptProjection already rejects out-of-order global snapshots.
+        processingStatusLabel = nextDetail.processingStatusLabel,
+        processingStatusTone = nextDetail.processingStatusTone,
+        processingRetryStage = nextDetail.processingRetryStage,
+        processingRetrying = nextDetail.processingRetrying,
         manualNote = if (notesFresh) nextDetail.manualNote else currentDetail.manualNote,
         manualNoteLoading = if (notesFresh) nextDetail.manualNoteLoading else currentDetail.manualNoteLoading,
         manualNoteSaving = if (notesFresh) nextDetail.manualNoteSaving else currentDetail.manualNoteSaving,
         manualNoteEnabled = if (notesFresh) nextDetail.manualNoteEnabled else currentDetail.manualNoteEnabled,
         manualNoteError = if (notesFresh) nextDetail.manualNoteError else currentDetail.manualNoteError,
         manualNoteRetryable = if (notesFresh) nextDetail.manualNoteRetryable else currentDetail.manualNoteRetryable,
-        manualNoteConflict = if (notesFresh) nextDetail.manualNoteConflict else currentDetail.manualNoteConflict,
         transcript = if (transcriptFresh) nextDetail.transcript else currentDetail.transcript,
         markers = if (transcriptFresh) nextDetail.markers else currentDetail.markers,
         summary = if (summaryFresh) nextDetail.summary else currentDetail.summary,

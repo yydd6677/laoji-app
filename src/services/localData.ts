@@ -5,8 +5,15 @@ export async function clearLocalAppFiles(): Promise<void> {
   const paths = [
     FileSystem.documentDirectory ? `${FileSystem.documentDirectory}avatars/` : null,
     FileSystem.documentDirectory ? `${FileSystem.documentDirectory}meeting-audio/` : null,
+    FileSystem.documentDirectory ? `${FileSystem.documentDirectory}meeting-attachments/` : null,
     FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}meeting-shares/` : null,
     FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}meeting-playback/` : null,
+    FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}meeting-clip-downloads/` : null,
+    FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}meeting-clip-shares/` : null,
+    FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}r2-upload/` : null,
+    FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}device-upload/` : null,
+    FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}device-upload-probe/` : null,
+    FileSystem.cacheDirectory ? `${FileSystem.cacheDirectory}updates/` : null,
   ].filter((path): path is string => Boolean(path));
 
   const results = await Promise.allSettled(

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ESP32S3 voice memo BLE 1.3 control message",
+  "type": "object",
+  "required": ["schema_version", "op"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "purpose": { "enum": ["meeting", "schedule"] },
+    "capture_id": { "type": "string", "maxLength": 95 },
+    "time_zone": { "type": "string", "maxLength": 63 },
+    "op": { "enum": ["hello", "status.get", "time.sync", "diagnostics.ping", "capture.start", "capture.pause", "capture.resume", "capture.stop", "capture.request.resolve", "capture.audio.read", "capture.audio.read.cancel", "recording.list", "recording.get", "recording.rename", "recording.delete", "recording.audio.read", "recording.audio.read.cancel", "transport.wifi.offer", "transport.wifi.status", "transport.wifi.close", "capture.requested", "capture.started", "capture.paused", "capture.resumed", "capture.finished", "capture.interrupted", "transfer.finished", "transport.wifi.state_changed"] },
+    "command_id": { "type": "string", "minLength": 1 },
+    "ok": { "type": "boolean" },
+    "session_id": { "type": "string", "minLength": 1, "maxLength": 95 },
+    "stream_id": { "$ref": "#/$defs/streamId" },
+    "recording_id": { "$ref": "#/$defs/fileName" },
+    "new_recording_id": { "$ref": "#/$defs/fileName" },
+    "expected_generation": { "type": "string", "minLength": 1 },
+    "offset": { "type": "integer", "minimum": 0, "multipleOf": 2 },
+    "length": { "type": "integer", "minimum": 2, "multipleOf": 2 },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 32 },
+    "recordings": { "type": "array", "items": { "$ref": "#/$defs/fileName" } },
+    "include_previews": { "type": "boolean" },
+    "previews": { "type": "array", "maxItems": 4, "items": {
+      "type": "object", "required": ["recording_id", "generation", "file_bytes", "duration_ms", "created_epoch_ms"],
+      "properties": {
+        "recording_id": { "$ref": "#/$defs/fileName" },
+        "generation": { "type": "string", "minLength": 1 },
+        "file_bytes": { "type": "integer", "minimum": 44 },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "created_epoch_ms": { "type": "integer", "minimum": 0 },
+        "purpose": { "enum": ["meeting", "schedule"] },
+        "capture_id": { "type": "string", "maxLength": 95 }
+      }, "additionalProperties": false
+    } },
+    "next_cursor": { "type": ["string", "null"] }
+  },
+  "allOf": [
+    { "if": { "required": ["ok"] }, "then": { "required": ["command_id"] } },
+    { "if": { "properties": { "op": { "const": "capture.audio.read" } }, "not": { "required": ["ok"] } },
+      "then": { "required": ["command_id", "session_id", "stream_id", "offset", "length"], "properties": { "length": { "maximum": 32768 } } } },
+    { "if": { "properties": { "op": { "const": "capture.audio.read.cancel" } }, "not": { "required": ["ok"] } },
+      "then": { "required": ["command_id", "stream_id"] } },
+    { "if": { "required": ["ok"], "properties": { "op": { "const": "capture.audio.read" }, "ok": { "const": true } } },
+      "then": { "required": ["transfer"], "properties": { "transfer": { "$ref": "#/$defs/liveRepairTransfer" } } } }
+  ],
+  "$defs": {
+    "fileName": { "type": "string", "minLength": 1, "pattern": "^[^/\\\\<>:\"|?*\\u0000-\\u001f]+$", "not": { "enum": [".", ".."] } },
+    "streamId": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+    "liveRepairTransfer": {
+      "type": "object", "required": ["transport", "session_id", "source_stream_id", "stream_id", "offset_scope", "offset", "length", "chunk_size_bytes"],
+      "properties": {
+        "transport": { "const": "ble" },
+        "session_id": { "type": "string", "minLength": 1, "maxLength": 95 },
+        "source_stream_id": { "$ref": "#/$defs/streamId" }, "stream_id": { "$ref": "#/$defs/streamId" },
+        "offset_scope": { "const": "audio_payload" },
+        "offset": { "type": "integer", "minimum": 0, "maximum": 4294967295, "multipleOf": 2 },
+        "length": { "type": "integer", "minimum": 2, "maximum": 32768, "multipleOf": 2 },
+        "chunk_size_bytes": { "type": "integer", "minimum": 2, "maximum": 492, "multipleOf": 2 }
+      }
+    }
+  },
+  "additionalProperties": true
+}

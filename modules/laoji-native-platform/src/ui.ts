@@ -95,6 +95,7 @@ interface NativeUiModuleEvents {
 interface NativeUiModule extends NativeModule<NativeUiModuleEvents> {
   evidenceSchemaVersion: number;
   implementation: string;
+  readKeyboardFrame(): Promise<{ visible: boolean; top: number } | null>;
   presentOverlay(
     ownerId: string,
     kind: NativeWindowOverlayKind,
@@ -108,6 +109,10 @@ interface NativeUiModule extends NativeModule<NativeUiModuleEvents> {
 }
 
 const nativeModule = requireOptionalNativeModule<NativeUiModule>('LaojiUi');
+
+export function readNativeKeyboardFrame(): Promise<{ visible: boolean; top: number } | null> {
+  return nativeModule?.readKeyboardFrame() ?? Promise.resolve(null);
+}
 let overlayOwnerSequence = 0;
 
 export function createNativeOverlayOwnerId(prefix: string): string {

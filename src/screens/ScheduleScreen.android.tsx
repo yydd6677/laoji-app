@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { AppState, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
+import { useScheduleInputs, discardScheduleInput } from '../components/ScheduleInputProvider';
+import type { ScheduleInputJob } from '../services/scheduleInput';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   LaojiCalendarView,
@@ -10,6 +13,7 @@ import {
   type NativeCalendarCreateEvent,
   type NativeCalendarMutationRequest,
   type NativeCalendarMutationResolution,
+  type NativeProjectionEnvelope,
   type NativeCalendarSemanticEvent,
   type NativeCalendarVisibleRangeEvent,
   type NativeCalendarSearchAction,
@@ -34,9 +38,13 @@ import { recurrenceEditDialog } from '../services/recurrenceActions';
 import { readableErrorMessage } from '../services/errors';
 import { buildNativeCalendarSearchSnapshot } from '../native/nativeCalendarPages';
 import { useCurrentDate } from '../hooks/useCurrentDate';
-import { useAuth } from '../store/AuthStore';
+import { useLocalProfile } from '../store/LocalProfileStore';
 import { buildNativeProfileEntrySnapshot } from '../native/profileEntrySnapshot';
-import { Colors as C } from '../theme/colors';
+import type { ColorPalette } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
+import { useNativeProjection } from '../native/useNativeProjection';
+import { fenceNativeProjectionAction } from '../native/projectionActionFence';
+import { diagnosticAudit } from '../services/diagnostics';
 
 type ScheduleNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type Props = {
@@ -44,6 +52,7 @@ type Props = {
   onTabPress: (event: { nativeEvent: NativeTabPressEvent }) => void;
   // UI-SHELL-BOTTOM-MAIN-001: destination-change motion for the active native root.
   bottomBarSelectionCommand: number;
+  active?: boolean;
 };
 
 type EpochRange = { start: number; endExclusive: number };
@@ -81,14 +90,21 @@ export function ScheduleScreen({
   navigation,
   onTabPress,
   bottomBarSelectionCommand,
+  active = true,
 }: Props) {
+  const { colors: C } = useTheme();
+  const styles = useMemo(() => createStyles(C), [C]);
+  const isFocused = useIsFocused();
+  const inputs = useScheduleInputs();
+  const [input, setInput] = useState<ScheduleInputJob | null>(null);
+  const offered = useRef(new Set<string>());
   const {
     events,
     searchableEvents,
     refreshEvents,
     updateEvent,
   } = useEvents();
-  const { profile, isGuest } = useAuth();
+  const { profile } = useLocalProfile();
   const { showDialog } = useAppDialog();
   const currentDate = useCurrentDate();
   const today = useMemo(() => calendarEpochDay(localCalendarDate(currentDate)), [currentDate]);
@@ -98,13 +114,25 @@ export function ScheduleScreen({
   const [mutationResolution, setMutationResolution] = useState<NativeCalendarMutationResolution | null>(null);
   const [createMenuVisible, setCreateMenuVisible] = useState(false);
   const [voiceVisible, setVoiceVisible] = useState(false);
+  useEffect(() => {
+    if (!active || !isFocused || voiceVisible || AppState.currentState !== 'active') return;
+    const next = inputs.jobs.find(item => item.state === 'ready' && !offered.current.has(item.id));
+    if (next) { offered.current.add(next.id); setInput(next); setVoiceVisible(true); }
+  }, [active, inputs.jobs, isFocused, voiceVisible]);
+  const openInputs = () => {
+    showDialog({ title: '待确认日程', actions: [
+      ...inputs.jobs.filter(item => item.state !== 'pending').map(item => ({ text: item.draft?.title || '日程语音', onPress: () => { setInput(item); setVoiceVisible(true); } })),
+      { text: '取消', role: 'cancel' as const },
+    ] });
+  };
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const generationRef = useRef(0);
+  const currentProjectionRef = useRef<NativeProjectionEnvelope | null>(null);
   const searchOwnerId = useMemo(() => createNativeOverlayOwnerId('calendar-search'), []);
   const profileEntry = useMemo(
-    () => buildNativeProfileEntrySnapshot(profile, isGuest),
-    [isGuest, profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
+    () => buildNativeProfileEntrySnapshot(profile, true),
+    [profile.avatarLocalUri, profile.avatarUrl, profile.nickname],
   );
 
   useEffect(() => {
@@ -118,7 +146,7 @@ export function ScheduleScreen({
     return () => { active = false; };
   }, [refreshEvents, visibleRange.endExclusive, visibleRange.start]);
 
-  const snapshot = useMemo(() => {
+  const snapshotBody = useMemo(() => {
     generationRef.current += 1;
     return buildNativeCalendarRangeSnapshot({
       generation: generationRef.current,
@@ -129,6 +157,11 @@ export function ScheduleScreen({
       events,
     });
   }, [events, selectedEpochDay, today, visibleRange.endExclusive, visibleRange.start]);
+  const snapshot = useNativeProjection(snapshotBody, {
+    entityId: 'calendar',
+    surfaceKey: 'calendar',
+  });
+  currentProjectionRef.current = snapshot.projection ?? null;
 
   const chooseEditScope = useCallback((event: CalEvent): Promise<EventRecurrenceScope | null> => {
     if (!event.repeat || event.repeat === 'once') return Promise.resolve('series');
@@ -144,6 +177,23 @@ export function ScheduleScreen({
   }, [showDialog]);
 
   const handleMutation = useCallback(async (mutation: NativeCalendarMutationRequest) => {
+    const projectionFence = fenceNativeProjectionAction(
+      currentProjectionRef.current,
+      mutation.projection,
+    );
+    if (!projectionFence.accepted) {
+      diagnosticAudit('native_projection_action_rejected', {
+        surface: 'calendar',
+        action_type: 'mutation',
+        reason: projectionFence.reason,
+      });
+      setMutationResolution({
+        operationId: mutation.operationId,
+        accepted: false,
+        message: '日程页面已更新，请重新操作。',
+      });
+      return;
+    }
     const targetRef = {
       sourceEventId: mutation.sourceEventId,
       occurrenceDate: mutation.occurrenceDate,
@@ -192,6 +242,7 @@ export function ScheduleScreen({
         setCreateMenuVisible(true);
         break;
       case 'create-voice':
+        setInput(null);
         setVoiceVisible(true);
         break;
       case 'create-manual':
@@ -225,8 +276,8 @@ export function ScheduleScreen({
         setSearchQuery(action.query);
         break;
       case 'openEvent':
-        setSearchQuery('');
-        setSearchVisible(false);
+        // Opening a result is a detour within this search, not a new search.
+        // Focus below suspends the overlay while the detail owns the window.
         navigation.navigate('EventDetail', {
           eventRef: { sourceEventId: action.sourceEventId, occurrenceDate: action.occurrenceDate },
         });
@@ -245,12 +296,12 @@ export function ScheduleScreen({
   }, [handleSearchAction, searchOwnerId]);
 
   useEffect(() => {
-    if (searchVisible) {
+    if (searchVisible && active && isFocused) {
       void presentNativeWindowOverlay(searchOwnerId, 'calendar-search', searchSnapshot);
     } else {
       void dismissNativeWindowOverlay(searchOwnerId, 'calendar-search', 'closed');
     }
-  }, [searchOwnerId, searchSnapshot, searchVisible]);
+  }, [active, isFocused, searchOwnerId, searchSnapshot, searchVisible]);
 
   useEffect(() => () => {
     void dismissNativeWindowOverlay(searchOwnerId, 'calendar-search', 'screen-unmounted');
@@ -286,19 +337,34 @@ export function ScheduleScreen({
         title="新建日程"
         onClose={() => setCreateMenuVisible(false)}
         items={[
-          { key: 'voice', label: '语音输入', onPress: () => setVoiceVisible(true) },
+          { key: 'voice', label: '语音输入', onPress: () => { setInput(null); setVoiceVisible(true); } },
           { key: 'manual', label: '手动新建', onPress: () => openCreate() },
         ]}
       />
       <VoiceInputModal
         visible={voiceVisible}
+        input={input}
         onClose={() => setVoiceVisible(false)}
-        onSaved={() => setVoiceVisible(false)}
+        onSaved={() => { setVoiceVisible(false); setInput(null); inputs.refresh(); }}
       />
+      {active && inputs.jobs.length > 0 && !voiceVisible ? (
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="待确认日程" onPress={openInputs}
+          disabled={inputs.jobs.every(item => item.state === 'pending')}
+          onLongPress={() => {
+            const item = inputs.jobs[0];
+            showDialog({ title: '删除这条日程语音？', actions: [
+              { text: '取消', role: 'cancel' }, { text: '删除', role: 'destructive', onPress: async () => { await discardScheduleInput(item); inputs.refresh(); } },
+            ] });
+          }} style={styles.pendingInput}>
+          <Text style={{ color: C.primary, fontSize: 14 }}>{inputs.jobs.every(item => item.state === 'pending') ? '正在解析日程' : `待确认日程 ${inputs.jobs.filter(item => item.state !== 'pending').length}`}</Text>
+        </TouchableOpacity>
+      ) : null}
     </>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (C: ColorPalette) => StyleSheet.create({
   surface: { flex: 1, backgroundColor: C.appBg },
+  pendingInput: { position: 'absolute', bottom: 84, left: 16, paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: C.card, borderRadius: 16 },
 });

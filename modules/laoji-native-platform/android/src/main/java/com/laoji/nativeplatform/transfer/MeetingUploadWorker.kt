@@ -7,19 +7,10 @@ import android.net.Uri
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-import java.net.URI
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 internal class MeetingUploadWorker(
@@ -28,306 +19,139 @@ internal class MeetingUploadWorker(
 ) : CoroutineWorker(appContext, params) {
   override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
     val scope = inputData.getString(KEY_SCOPE) ?: return@withContext failure("invalid-input")
+    val credentialScope = inputData.getString(KEY_CREDENTIAL_SCOPE) ?: scope
     val generation = inputData.getLong(KEY_GENERATION, -1)
     val meetingId = inputData.getString(KEY_MEETING_ID) ?: return@withContext failure("invalid-input")
-    val remoteMeetingId = inputData.getString(KEY_REMOTE_MEETING_ID) ?: meetingId
     val operationId = inputData.getString(KEY_OPERATION_ID) ?: return@withContext failure("invalid-input")
+    val protocol = inputData.getString(KEY_PROTOCOL)
+    if (protocol != PROTOCOL_DEVICE_V2_R2) return@withContext failure("invalid-input", operationId)
     val fileUri = inputData.getString(KEY_FILE_URI) ?: return@withContext failure("invalid-input")
     val mimeType = inputData.getString(KEY_MIME_TYPE) ?: "audio/wav"
-    val fileName = inputData.getString(KEY_FILE_NAME) ?: "meeting.wav"
     val expectedBytes = inputData.getLong(KEY_EXPECTED_BYTES, -1).takeIf { it >= 0 }
-    val durationMs = inputData.getLong(KEY_DURATION_MS, -1).takeIf { it >= 0 }
     val checksumSha256 = inputData.getString(KEY_CHECKSUM_SHA256)?.trim()?.takeIf { it.isNotEmpty() }
-    val protocol = inputData.getString(KEY_PROTOCOL) ?: PROTOCOL_LEGACY
     val deletionStore = MeetingDeletionStore(applicationContext)
     if (deletionStore.isDeleted(scope, meetingId)) {
       return@withContext failure("meeting-deleted", operationId)
     }
-    val lease = CredentialLeaseStore(applicationContext).get(scope, generation)
+    val credentialStore = CredentialLeaseStore(applicationContext)
+    val lease = credentialStore.get(credentialScope, generation)
       ?: return@withContext failure("credential-expired", operationId)
     val uri = Uri.parse(fileUri)
     try {
       if (deletionStore.isDeleted(scope, meetingId)) {
         return@withContext failure("meeting-deleted", operationId)
       }
-      when (protocol) {
-        PROTOCOL_RECORDING_ASSETS_V2 -> uploadRecordingAssetV2(
-          lease.apiBaseUrl,
-          lease.accessToken,
-          scope,
-          meetingId,
-          remoteMeetingId,
-          operationId,
-          uri,
-          mimeType,
-          fileName,
-          expectedBytes,
-          durationMs,
-          checksumSha256,
-          deletionStore
-        )
-        PROTOCOL_LEGACY -> uploadLegacy(
-          lease.apiBaseUrl,
-          lease.accessToken,
-          scope,
-          meetingId,
-          remoteMeetingId,
-          operationId,
-          uri,
-          mimeType,
-          fileName,
-          expectedBytes,
-          deletionStore
-        )
-        else -> failure("invalid-input", operationId)
-      }
+      uploadDeviceV2R2(
+        lease,
+        credentialStore,
+        credentialScope,
+        generation,
+        scope,
+        meetingId,
+        operationId,
+        uri,
+        mimeType,
+        expectedBytes,
+        checksumSha256,
+        deletionStore,
+      )
+    } catch (error: CancellationException) {
+      // WorkManager cancellation is terminal for this attempt. Never turn a
+      // user delete/stop into a new retry that can resurrect the upload.
+      throw error
     } catch (_: Exception) {
       Result.retry()
     }
   }
 
-  private fun uploadLegacy(
-    baseUrl: String,
-    accessToken: String,
+  private suspend fun uploadDeviceV2R2(
+    lease: CredentialLease,
+    credentialStore: CredentialLeaseStore,
+    credentialScope: String,
+    generation: Long,
     scope: String,
     meetingId: String,
-    remoteMeetingId: String,
     operationId: String,
     uri: Uri,
     mimeType: String,
-    fileName: String,
     expectedBytes: Long?,
-    deletionStore: MeetingDeletionStore
+    checksumSha256: String?,
+    deletionStore: MeetingDeletionStore,
   ): Result {
-    val endpoint = runCatching { legacyUploadEndpoint(baseUrl, remoteMeetingId) }
-      .getOrElse { return failure("invalid-endpoint", operationId) }
-    val multipart = MultipartBody.Builder()
-      .setType(MultipartBody.FORM)
-      .addFormDataPart(
-        "file",
-        fileName,
-        ContentUriRequestBody(
-          applicationContext.contentResolver,
-          uri,
-          mimeType.toMediaType(),
-          expectedBytes
+    val deviceId = inputData.getString(KEY_DEVICE_ID)?.trim().orEmpty()
+    val deviceEpochId = inputData.getString(KEY_DEVICE_EPOCH_ID)?.trim().orEmpty()
+    val bindingId = inputData.getString(KEY_BINDING_ID)?.trim().orEmpty()
+    val bindingGeneration = inputData.getString(KEY_BINDING_GENERATION)?.trim().orEmpty()
+    val bindingRevision = inputData.getLong(KEY_BINDING_REVISION, -1)
+    val cancelRevision = inputData.getLong(KEY_CANCEL_REVISION, -1)
+    val assetId = inputData.getString(KEY_RECORDING_ASSET_ID)?.trim().orEmpty()
+    val assetGeneration = inputData.getString(KEY_ASSET_GENERATION)?.trim().orEmpty()
+    if (
+      deviceId.isEmpty()
+      || deviceEpochId.isEmpty()
+      || bindingId.isEmpty()
+      || !bindingGeneration.matches(Regex("^[0-9a-f]{32}$"))
+      || bindingRevision < 1
+      || cancelRevision < 0
+      || assetId.isEmpty()
+      || !assetGeneration.matches(Regex("^[0-9a-f]{32}$"))
+      || expectedBytes == null
+      || expectedBytes < 1
+      || checksumSha256 == null
+      || !checksumSha256.matches(Regex("^sha256:[0-9a-f]{64}$"))
+      || lease.deviceId != deviceId
+      || lease.deviceEpochId != deviceEpochId
+    ) return failure("invalid-input", operationId)
+    val outcome = DeviceV2R2Uploader(applicationContext, client, credentialStore).upload(
+      credentialScope,
+      generation,
+      DeviceV2R2UploadInput(
+        deviceId = deviceId,
+        deviceEpochId = deviceEpochId,
+        bindingId = bindingId,
+        bindingGeneration = bindingGeneration,
+        bindingRevision = bindingRevision,
+        cancelRevision = cancelRevision,
+        operationId = operationId,
+        assetId = assetId,
+        assetGeneration = assetGeneration,
+        uri = uri,
+        mimeType = mimeType,
+        byteSize = expectedBytes,
+        sourceSha256 = checksumSha256,
+      ),
+    )
+    if (deletionStore.isDeleted(scope, meetingId)) {
+      return failure("meeting-deleted", operationId)
+    }
+    return when (outcome) {
+      is DeviceV2R2UploadOutcome.Success -> Result.success(
+        output(
+          "uploaded",
+          operationId,
+          outcome.assetRevisionId,
+          outcome.objectRevision,
+          outcome.transcriptionTaskId,
         )
       )
-      .build()
-    val request = Request.Builder()
-      .url(endpoint)
-      .header("Authorization", "Bearer $accessToken")
-      .post(multipart)
-      .build()
-    client.newCall(request).execute().use { response ->
-      if (deletionStore.isDeleted(scope, meetingId)) return failure("meeting-deleted", operationId)
-      return when {
-        response.isSuccessful -> Result.success(output("uploaded", operationId))
-        isRetryableHttp(response.code) -> Result.retry()
-        response.code == 401 || response.code == 403 -> failure("unauthorized", operationId)
-        else -> failure("http-${response.code}", operationId)
-      }
+      is DeviceV2R2UploadOutcome.Failure -> failure(outcome.reason, operationId)
+      DeviceV2R2UploadOutcome.Retry -> Result.retry()
     }
-  }
-
-  private fun uploadRecordingAssetV2(
-    baseUrl: String,
-    accessToken: String,
-    scope: String,
-    meetingId: String,
-    remoteMeetingId: String,
-    operationId: String,
-    uri: Uri,
-    mimeType: String,
-    fileName: String,
-    expectedBytes: Long?,
-    durationMs: Long?,
-    checksumSha256: String?,
-    deletionStore: MeetingDeletionStore
-  ): Result {
-    val clientAssetId = inputData.getString(KEY_RECORDING_ASSET_ID)?.trim().orEmpty()
-    val role = inputData.getString(KEY_RECORDING_ROLE)?.trim().orEmpty()
-    val origin = inputData.getString(KEY_RECORDING_ORIGIN)?.trim().orEmpty()
-    if (
-      clientAssetId.isEmpty()
-      || role !in setOf("primary", "secondary")
-      || origin !in setOf("captured", "imported", "recovered")
-    ) return failure("invalid-input", operationId)
-    val mediaType = mimeType.toMediaTypeOrNull() ?: return failure("invalid-input", operationId)
-
-    val metadata = runCatching { resolveFileMetadata(uri, expectedBytes, checksumSha256) }
-      .getOrElse { return failure("file-missing", operationId) }
-    val registerEndpoint = runCatching { recordingRegisterEndpoint(baseUrl, remoteMeetingId) }
-      .getOrElse { return failure("invalid-endpoint", operationId) }
-    val registration = JSONObject()
-      .put("schema_version", 2)
-      .put("client_asset_id", clientAssetId)
-      .put("role", role)
-      .put("origin", origin)
-      .put("mime_type", mimeType)
-      .put("file_name", fileName)
-      .put("byte_size", metadata.byteSize)
-      .put("duration_ms", durationMs ?: JSONObject.NULL)
-      .put("checksum_sha256", metadata.checksumSha256)
-    val registerRequest = Request.Builder()
-      .url(registerEndpoint)
-      .header("Authorization", "Bearer $accessToken")
-      .header("Accept", "application/json")
-      .header("Content-Type", "application/json")
-      .header("Idempotency-Key", idempotencyKey(operationId, "register"))
-      .post(registration.toString().toRequestBody("application/json".toMediaType()))
-      .build()
-
-    val registered = client.newCall(registerRequest).execute().use { response ->
-      if (deletionStore.isDeleted(scope, meetingId)) return failure("meeting-deleted", operationId)
-      if (isRetryableHttp(response.code)) return Result.retry()
-      if (response.code == 401 || response.code == 403) return failure("unauthorized", operationId)
-      if (!response.isSuccessful) return failure("http-${response.code}", operationId)
-      runCatching { parseAssetResponse(response.body?.string(), remoteMeetingId, clientAssetId) }
-        .getOrElse { return failure("invalid-response", operationId) }
-    }
-    if (registered.uploaded) {
-      return Result.success(output("uploaded", operationId, registered.remoteAssetId, registered.revision))
-    }
-
-    val contentEndpoint = runCatching { recordingContentEndpoint(baseUrl, registered.remoteAssetId) }
-      .getOrElse { return failure("invalid-endpoint", operationId) }
-    val body = ContentUriRequestBody(
-      applicationContext.contentResolver,
-      uri,
-      mediaType,
-      metadata.byteSize
-    )
-    val multipart = MultipartBody.Builder()
-      .setType(MultipartBody.FORM)
-      .addFormDataPart("file", fileName, body)
-      .build()
-    val contentRequest = Request.Builder()
-      .url(contentEndpoint)
-      .header("Authorization", "Bearer $accessToken")
-      .header("Accept", "application/json")
-      .header("Idempotency-Key", idempotencyKey(operationId, "content"))
-      .header("If-Match", "\"${registered.revision}\"")
-      .put(multipart)
-      .build()
-    client.newCall(contentRequest).execute().use { response ->
-      if (deletionStore.isDeleted(scope, meetingId)) return failure("meeting-deleted", operationId)
-      if (isRetryableHttp(response.code)) return Result.retry()
-      if (response.code == 401 || response.code == 403) return failure("unauthorized", operationId)
-      if (!response.isSuccessful) return failure("http-${response.code}", operationId)
-      val uploaded = runCatching {
-        parseAssetResponse(response.body?.string(), remoteMeetingId, clientAssetId)
-      }.getOrElse { return failure("invalid-response", operationId) }
-      if (!uploaded.uploaded || uploaded.remoteAssetId != registered.remoteAssetId) {
-        return failure("invalid-response", operationId)
-      }
-      return Result.success(output("uploaded", operationId, uploaded.remoteAssetId, uploaded.revision))
-    }
-  }
-
-  private data class FileMetadata(val byteSize: Long, val checksumSha256: String)
-
-  private data class AssetResponse(
-    val remoteAssetId: String,
-    val revision: Long,
-    val uploaded: Boolean
-  )
-
-  private fun resolveFileMetadata(
-    uri: Uri,
-    expectedBytes: Long?,
-    expectedChecksum: String?
-  ): FileMetadata {
-    val normalizedChecksum = expectedChecksum?.lowercase()?.takeIf {
-      it.matches(Regex("^sha256:[0-9a-f]{64}$"))
-    }
-    if (expectedBytes != null && normalizedChecksum != null) {
-      return FileMetadata(expectedBytes, normalizedChecksum)
-    }
-    val digest = MessageDigest.getInstance("SHA-256")
-    var total = 0L
-    val input = applicationContext.contentResolver.openInputStream(uri)
-      ?: throw IllegalStateException("无法打开会议录音文件")
-    input.use { stream ->
-      val buffer = ByteArray(256 * 1024)
-      while (true) {
-        val count = stream.read(buffer)
-        if (count < 0) break
-        if (count == 0) continue
-        digest.update(buffer, 0, count)
-        total += count
-      }
-    }
-    if (total <= 0) throw IllegalStateException("会议录音文件为空")
-    if (expectedBytes != null && expectedBytes != total) {
-      throw IllegalStateException("会议录音文件大小发生变化")
-    }
-    val actualChecksum = "sha256:${digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }}"
-    if (normalizedChecksum != null && normalizedChecksum != actualChecksum) {
-      throw IllegalStateException("会议录音校验值发生变化")
-    }
-    return FileMetadata(total, actualChecksum)
-  }
-
-  private fun parseAssetResponse(raw: String?, meetingId: String, clientAssetId: String): AssetResponse {
-    val value = JSONObject(raw ?: throw IllegalStateException("服务器未返回有效响应"))
-    require(value.getInt("schema_version") == 2)
-    require(value.getString("meeting_id") == meetingId)
-    require(value.getString("client_asset_id") == clientAssetId)
-    val remoteAssetId = value.getString("id").trim()
-    val revision = value.getLong("revision")
-    val uploadState = value.getString("upload_state")
-    require(remoteAssetId.isNotEmpty() && revision >= 1)
-    require(uploadState == "registered" || uploadState == "uploaded")
-    return AssetResponse(remoteAssetId, revision, uploadState == "uploaded")
-  }
-
-  private fun idempotencyKey(operationId: String, stage: String): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-      .digest("$operationId:$stage".toByteArray(StandardCharsets.UTF_8))
-      .joinToString("") { "%02x".format(it.toInt() and 0xff) }
-    return "recording-asset-$stage-$digest"
-  }
-
-  private fun isRetryableHttp(code: Int): Boolean = code == 408 || code == 429 || code >= 500
-
-  private fun legacyUploadEndpoint(baseUrl: String, meetingId: String): String {
-    val base = URI(baseUrl.trim().trimEnd('/'))
-    requireValidBase(base)
-    val encoded = URLEncoder.encode(meetingId, StandardCharsets.UTF_8.toString())
-    return "${base.toASCIIString()}/api/laoji/meetings/$encoded/audio"
-  }
-
-  private fun recordingRegisterEndpoint(baseUrl: String, meetingId: String): String {
-    val base = URI(baseUrl.trim().trimEnd('/'))
-    requireValidBase(base)
-    val encoded = URLEncoder.encode(meetingId, StandardCharsets.UTF_8.toString())
-    return "${base.toASCIIString()}/api/laoji/v2/meeting-notes/$encoded/recording-assets"
-  }
-
-  private fun recordingContentEndpoint(baseUrl: String, assetId: String): String {
-    val base = URI(baseUrl.trim().trimEnd('/'))
-    requireValidBase(base)
-    val encoded = URLEncoder.encode(assetId, StandardCharsets.UTF_8.toString())
-    return "${base.toASCIIString()}/api/laoji/v2/recording-assets/$encoded/content"
-  }
-
-  private fun requireValidBase(base: URI) {
-    require(base.scheme == "https" || base.scheme == "http")
-    require(base.host?.isNotBlank() == true && base.userInfo == null && base.query == null && base.fragment == null)
   }
 
   private fun output(
     state: String,
     operationId: String,
     remoteAssetId: String? = null,
-    remoteRevision: Long? = null
+    remoteRevision: Long? = null,
+    transcriptionTaskId: String? = null,
   ): Data = Data.Builder()
     .putString(KEY_STATE, state)
     .putString(KEY_OPERATION_ID, operationId)
     .apply {
       if (remoteAssetId != null) putString(KEY_REMOTE_ASSET_ID, remoteAssetId)
       if (remoteRevision != null) putLong(KEY_REMOTE_REVISION, remoteRevision)
+      if (transcriptionTaskId != null) putString(KEY_TRANSCRIPTION_TASK_ID, transcriptionTaskId)
     }
     .build()
 
@@ -341,27 +165,30 @@ internal class MeetingUploadWorker(
 
   companion object {
     const val KEY_SCOPE = "scope"
+    const val KEY_CREDENTIAL_SCOPE = "credentialScope"
     const val KEY_GENERATION = "generation"
     const val KEY_MEETING_ID = "meetingId"
-    const val KEY_REMOTE_MEETING_ID = "remoteMeetingId"
     const val KEY_OPERATION_ID = "operationId"
     const val KEY_FILE_URI = "fileUri"
     const val KEY_MIME_TYPE = "mimeType"
-    const val KEY_FILE_NAME = "fileName"
     const val KEY_EXPECTED_BYTES = "expectedBytes"
-    const val KEY_DURATION_MS = "durationMs"
     const val KEY_CHECKSUM_SHA256 = "checksumSha256"
     const val KEY_PROTOCOL = "protocol"
     const val KEY_RECORDING_ASSET_ID = "recordingAssetId"
-    const val KEY_RECORDING_ROLE = "recordingRole"
-    const val KEY_RECORDING_ORIGIN = "recordingOrigin"
     const val KEY_REMOTE_ASSET_ID = "remoteAssetId"
     const val KEY_REMOTE_REVISION = "remoteRevision"
+    const val KEY_TRANSCRIPTION_TASK_ID = "transcriptionTaskId"
+    const val KEY_DEVICE_ID = "deviceId"
+    const val KEY_DEVICE_EPOCH_ID = "deviceEpochId"
+    const val KEY_BINDING_ID = "bindingId"
+    const val KEY_BINDING_GENERATION = "bindingGeneration"
+    const val KEY_BINDING_REVISION = "bindingRevision"
+    const val KEY_CANCEL_REVISION = "cancelRevision"
+    const val KEY_ASSET_GENERATION = "assetGeneration"
     const val KEY_STATE = "state"
     const val KEY_REASON = "reason"
 
-    const val PROTOCOL_LEGACY = "legacy"
-    const val PROTOCOL_RECORDING_ASSETS_V2 = "recording-assets-v2"
+    const val PROTOCOL_DEVICE_V2_R2 = "device-v2-r2"
 
     private val client = OkHttpClient.Builder()
       .connectTimeout(20, TimeUnit.SECONDS)

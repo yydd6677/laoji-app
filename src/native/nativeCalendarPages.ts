@@ -257,7 +257,7 @@ export function buildNativeCalendarDetailSnapshot(
     seriesMemory,
     event: {
       ...eventRefForEvent(event),
-      title: eventDetailTitle(event.title),
+      title: `${event.status === 'completed' ? '✓ ' : ''}${eventDetailTitle(event.title)}`,
       timeLabel: nativeCalendarDetailTimeLabel(event),
       repeatLabel: event.repeat && event.repeat !== 'once' ? repeatLabels[event.repeat] : undefined,
       location: event.location,

@@ -28,7 +28,7 @@ interface RecorderEngineHost {
 
 class RecorderEngine(
   context: Context,
-  private val config: RecorderStartConfig,
+  @Volatile private var config: RecorderStartConfig,
   private val repository: RecordingRepository,
   private val host: RecorderEngineHost,
 ) : RealtimeAsrSocketListener {
@@ -77,16 +77,56 @@ class RecorderEngine(
   private var errorMessage: String? = null
   private var providerErrorCode: String? = null
   private var providerErrorRetryable: Boolean? = null
+  private var firstPcmElapsedMs: Long? = null
+  private var captureStartedAtMs: Long? = null
+  private var asrConnectedElapsedMs: Long? = null
+  private var firstTranscriptElapsedMs: Long? = null
   private var audioRecord: AudioRecord? = null
   private var recordingThread: Thread? = null
   private var fileSession: RecordingFileSession? = null
-  private var asrSocket: RealtimeAsrSocket? = null
+  private var asrSocket: RealtimeAsrTransport? = null
   private var stopFuture: CompletableFuture<RecorderStopResult>? = null
   private var capturedAudioBars: List<Float>? = null
 
   fun start(): CompletableFuture<RecorderSnapshot> {
     commandExecutor.execute(::startInternal)
     return startFuture
+  }
+
+  fun attachRealtime(nextConfig: RecorderStartConfig): CompletableFuture<RecorderSnapshot> = submitCommand {
+    val current = config
+    if (
+      current.mode != RecorderMode.REALTIME ||
+      !current.realtimeAttachPending ||
+      nextConfig.realtimeAttachPending ||
+      nextConfig.mode != RecorderMode.REALTIME ||
+      nextConfig.sessionId != current.sessionId ||
+      nextConfig.purpose != current.purpose ||
+      nextConfig.storageScope != current.storageScope
+    ) {
+      throw RecorderRuntimeException(
+        RecorderErrorCode.SESSION_MISMATCH,
+        "realtime attachment does not match the active recording session",
+      )
+    }
+    if (state != RecorderState.RECORDING && state != RecorderState.PAUSED) {
+      throw RecorderRuntimeException(
+        RecorderErrorCode.SESSION_MISMATCH,
+        "recording session is not ready for realtime attachment",
+      )
+    }
+    config = nextConfig
+    try {
+      fileSession?.updateAsrState(JournalAsrState.CONNECTING)
+      startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
+      publishSnapshot()
+    } catch (_: Exception) {
+      markAsrUnavailable(
+        RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
+        "实时语音服务连接失败",
+      )
+      snapshot()
+    }
   }
 
   fun pause(): CompletableFuture<RecorderSnapshot> = submitCommand {
@@ -184,6 +224,9 @@ class RecorderEngine(
     }
   }
 
+  fun acknowledgePersistedTranscript(throughEventSequence: Long): Boolean =
+    asrSocket?.acknowledgePersistedTranscript(throughEventSequence) == true
+
   fun snapshot(): RecorderSnapshot = synchronized(stateLock) {
     RecorderSnapshot(
       sessionId = config.sessionId,
@@ -192,10 +235,22 @@ class RecorderEngine(
       storageScope = config.storageScope,
       state = state,
       startedAtMs = startedAtMs,
+      captureStartedAtMs = captureStartedAtMs,
       updatedAtMs = updatedAtMs,
       bytesRecorded = fileSession?.pcmBytes ?: 0L,
       localUri = localUri,
       asrConnected = asrConnected,
+      asrPhase = currentAsrPhase(),
+      asrConnectLatencyMs = if (firstPcmElapsedMs != null && asrConnectedElapsedMs != null) {
+        (asrConnectedElapsedMs!! - firstPcmElapsedMs!!).coerceAtLeast(0L)
+      } else {
+        null
+      },
+      firstTranscriptLatencyMs = if (firstPcmElapsedMs != null && firstTranscriptElapsedMs != null) {
+        (firstTranscriptElapsedMs!! - firstPcmElapsedMs!!).coerceAtLeast(0L)
+      } else {
+        null
+      },
       readyToStop = readyToStop,
       transcriptRecoveryRequired = transcriptRecoveryRequired,
       errorCode = errorCode,
@@ -262,6 +317,9 @@ class RecorderEngine(
     if (currentState == RecorderState.IDLE || currentState == RecorderState.FAILED) return
     val segmentId = AsrProtocol.transcriptIdentity(config.sessionId, transcript)
     val receivedAtMs = System.currentTimeMillis()
+    synchronized(stateLock) {
+      if (firstTranscriptElapsedMs == null) firstTranscriptElapsedMs = SystemClock.elapsedRealtime()
+    }
     if (config.purpose == AudioPurpose.SCHEDULE && transcript.isFinal) {
       synchronized(transcriptLock) {
         finalTranscriptSegments[segmentId] = RecorderTranscriptSegment(
@@ -288,6 +346,9 @@ class RecorderEngine(
         "startMs" to transcript.startMs?.toDouble(),
         "endMs" to transcript.endMs?.toDouble(),
         "source" to transcript.source,
+        "eventSequence" to transcript.eventSequence?.toDouble(),
+        "stableSegmentKey" to transcript.stableSegmentKey,
+        "revisionKey" to transcript.revisionKey,
         "purpose" to config.purpose.wireValue,
         "receivedAtMs" to receivedAtMs.toDouble(),
       ),
@@ -330,11 +391,6 @@ class RecorderEngine(
     try {
       transition(RecorderState.PREPARING)
       ensureRecordPermission()
-      val asrConnection = if (config.mode == RecorderMode.REALTIME) {
-        startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
-      } else {
-        null
-      }
       fileSession = repository.createSession(config, startedAtMs)
 
       val recorder = createAudioRecord()
@@ -349,6 +405,7 @@ class RecorderEngine(
       if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
         throw RecorderRuntimeException(RecorderErrorCode.AUDIO_UNAVAILABLE, "microphone did not start recording")
       }
+      captureStartedAtMs = System.currentTimeMillis()
       if (stopRequested) {
         throw RecorderRuntimeException(
           RecorderErrorCode.SERVICE_UNAVAILABLE,
@@ -356,7 +413,6 @@ class RecorderEngine(
         )
       }
       paused = false
-      fileSession?.updateState(JournalState.RECORDING, currentJournalAsrState())
       if (stopRequested) {
         throw RecorderRuntimeException(
           RecorderErrorCode.SERVICE_UNAVAILABLE,
@@ -365,12 +421,23 @@ class RecorderEngine(
       }
       transition(RecorderState.RECORDING)
       startRecordingThread(recorder)
+
+      // Local capture is the critical path. Start it before opening the
+      // realtime socket so the first PCM frame is journaled even when DNS,
+      // TLS, or device authentication is slow. sendOrQueueAsrFrame() keeps a
+      // bounded in-memory prefix until the asynchronous connection is ready.
+      if (config.mode == RecorderMode.REALTIME && !config.realtimeAttachPending) {
+        try {
+          startRealtimeAsrConnection().also(::observeRealtimeAsrConnection)
+        } catch (error: Exception) {
+          markAsrUnavailable(
+            RecorderErrorCode.WEBSOCKET_CONNECT_FAILED,
+            "实时语音服务连接失败",
+          )
+        }
+      }
+      fileSession?.updateState(JournalState.RECORDING, currentJournalAsrState())
       startFuture.complete(snapshot())
-      // Local capture and the realtime handshake start independently. PCM is
-      // journaled and queued until onOpen, so neither path waits for the other.
-      // Keeping this reference in scope also makes the parallel startup intent
-      // explicit even though completion is observed on its own daemon thread.
-      @Suppress("UNUSED_VARIABLE") val observedAsrConnection = asrConnection
     } catch (error: RecorderRuntimeException) {
       failStart(error)
     } catch (_: Exception) {
@@ -385,6 +452,11 @@ class RecorderEngine(
 
   private fun startRealtimeAsrConnection(): CompletableFuture<Unit> {
     asrConnectionHandled.set(false)
+    if (config.deviceV2 != null) {
+      val socket = DeviceV2RealtimeAsrSocket(applicationContext, config, this)
+      asrSocket = socket
+      return socket.connect()
+    }
     RealtimeAsrWarmPool.claim(config, this)?.let { (socket, connection) ->
       asrSocket = socket
       return connection
@@ -432,6 +504,9 @@ class RecorderEngine(
       return
     }
     asrConnected = true
+    synchronized(stateLock) {
+      if (asrConnectedElapsedMs == null) asrConnectedElapsedMs = SystemClock.elapsedRealtime()
+    }
     try {
       fileSession?.updateAsrState(JournalAsrState.CONNECTED)
     } catch (_: Exception) {
@@ -526,6 +601,9 @@ class RecorderEngine(
         break
       }
       if (append.bytesWritten > 0 && config.mode == RecorderMode.REALTIME) {
+        synchronized(stateLock) {
+          if (firstPcmElapsedMs == null) firstPcmElapsedMs = SystemClock.elapsedRealtime()
+        }
         sendOrQueueAsrFrame(buffer.copyOf(append.bytesWritten))
       }
 
@@ -809,8 +887,20 @@ class RecorderEngine(
   private fun currentJournalAsrState(): JournalAsrState = when {
     config.mode == RecorderMode.LOCAL_ONLY -> JournalAsrState.NOT_REQUIRED
     asrConnected -> JournalAsrState.CONNECTED
+    config.realtimeAttachPending -> JournalAsrState.CONNECTING
     asrSocket != null -> JournalAsrState.CONNECTING
     else -> JournalAsrState.FAILED
+  }
+
+  private fun currentAsrPhase(): RecorderAsrPhase = when {
+    config.mode == RecorderMode.LOCAL_ONLY -> RecorderAsrPhase.NOT_REQUIRED
+    state == RecorderState.LOCAL_SAVED && readyToStop && !transcriptRecoveryRequired && errorCode == null ->
+      RecorderAsrPhase.COMPLETED
+    asrConnected -> RecorderAsrPhase.CONNECTED
+    transcriptRecoveryRequired || errorCode != null -> RecorderAsrPhase.RECOVERY_REQUIRED
+    state == RecorderState.PREPARING || state == RecorderState.RECORDING || asrSocket != null ->
+      RecorderAsrPhase.CONNECTING
+    else -> RecorderAsrPhase.RECOVERY_REQUIRED
   }
 
   private fun sendOrQueueAsrFrame(frame: ByteArray) {

@@ -33,14 +33,7 @@ internal interface MinutesPlaybackRecoveryStore {
 
 internal fun normalizeMinutesSourceStorageScope(value: String?): String? {
   val scope = value?.trim().orEmpty()
-  if (scope == "guest") return scope
-  if (!scope.startsWith("user:")) return null
-  val userId = scope.removePrefix("user:")
-  return scope.takeIf {
-    userId.isNotBlank() &&
-      userId.length <= 128 &&
-      userId.all { character -> character.isLetterOrDigit() || character in "-_.@" }
-  }
+  return scope.takeIf { it == "guest" }
 }
 
 internal fun normalizeMinutesActiveStorageScope(value: String?): String? =

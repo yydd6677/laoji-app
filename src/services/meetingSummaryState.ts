@@ -1,31 +1,14 @@
-import { getFeatureFlags } from '../config/featureFlags';
-import {
-  sqliteMeetingNoteRepository,
-  type TranscriptSegmentRecord,
-} from '../data/repositories';
+import { sqliteMeetingNoteRepository } from "../data/repositories/sqliteMeetingNoteRepository";
+import { summaryTranscriptMeaning } from '../domain/meeting/summarySourceMeaning';
 import type { MeetingSummaryDocument, ScopeKey } from '../domain/meeting';
 import { transitionProcessingStage } from '../domain/meeting';
 import { summaryProjectionToDocument } from './meetingContentProjection';
+import { loadMeetingFactsRecordV3ForVersion } from '../data/repositories/meetingSummaryV3Repository';
 
 export interface CurrentMeetingSummaryState {
   canonicalMeetingId: string;
   document: MeetingSummaryDocument;
   stale: boolean;
-}
-
-function sameSummaryInputSegment(
-  left: TranscriptSegmentRecord,
-  right: TranscriptSegmentRecord,
-): boolean {
-  return left.ordinal === right.ordinal
-    && left.speakerClusterId === right.speakerClusterId
-    && left.speakerProfileId === right.speakerProfileId
-    && left.speakerLabel === right.speakerLabel
-    && left.speakerLabelOverride === right.speakerLabelOverride
-    && left.text === right.text
-    && left.startMs === right.startMs
-    && left.endMs === right.endMs
-    && left.confidence === right.confidence;
 }
 
 async function repairFalseSummaryStaleness(
@@ -48,10 +31,7 @@ async function repairFalseSummaryStaleness(
   );
   if (
     !sourceTranscript
-    || sourceTranscript.segments.length !== activeTranscript.segments.length
-    || sourceTranscript.segments.some((segment, index) => (
-      !sameSummaryInputSegment(segment, activeTranscript.segments[index])
-    ))
+    || summaryTranscriptMeaning(sourceTranscript.segments) !== summaryTranscriptMeaning(activeTranscript.segments)
   ) return false;
 
   let repaired = false;
@@ -78,10 +58,7 @@ async function repairFalseSummaryStaleness(
     );
     if (
       !currentSource
-      || currentSource.segments.length !== currentTranscript.segments.length
-      || currentSource.segments.some((segment, index) => (
-        !sameSummaryInputSegment(segment, currentTranscript.segments[index])
-      ))
+      || summaryTranscriptMeaning(currentSource.segments) !== summaryTranscriptMeaning(currentTranscript.segments)
     ) return;
     repaired = await transaction.restoreCurrentSummaryReady(
       canonicalMeetingId,
@@ -137,12 +114,11 @@ async function reconcileSummaryStageWithCurrentVersion(
   return reconciled;
 }
 
-/** Reads the current immutable summary version without enabling global canonical list cutover. */
+/** Reads the current immutable local summary version. */
 export async function loadCurrentMeetingSummaryState(
   scopeKey: ScopeKey,
   legacyMeetingId: string,
 ): Promise<CurrentMeetingSummaryState | null> {
-  if (!getFeatureFlags().localMeetingDbV1) return null;
   const aggregate = await sqliteMeetingNoteRepository.findByNativeSessionId(legacyMeetingId, scopeKey);
   if (!aggregate || aggregate.note.lifecycle === 'deleted') return null;
   await repairFalseSummaryStaleness(scopeKey, aggregate.note.id);
@@ -151,6 +127,9 @@ export async function loadCurrentMeetingSummaryState(
     aggregate.note.id,
     scopeKey,
   );
+  if (!projection) return null;
+  const facts = await loadMeetingFactsRecordV3ForVersion(projection.version.id);
+  if (!facts || facts.canonicalMeetingId !== aggregate.note.id) return null;
   const document = summaryProjectionToDocument(projection, legacyMeetingId);
   if (!document) return null;
   return {

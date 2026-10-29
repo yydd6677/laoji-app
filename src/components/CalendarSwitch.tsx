@@ -1,6 +1,7 @@
 import React from 'react';
 import { Animated, Easing, StyleSheet, TouchableOpacity, View } from 'react-native';
-import { Colors as C } from '../theme/colors';
+import type { ColorPalette } from '../theme/colors';
+import { useTheme } from '../theme/ThemeProvider';
 
 export const CALENDAR_SWITCH_GEOMETRY = {
   width: 36,
@@ -26,16 +27,18 @@ export function CalendarSwitch({
   disabled?: boolean;
   testID?: string;
 }) {
+  const { colors: C, reduceMotion } = useTheme();
+  const s = React.useMemo(() => createStyles(C), [C]);
   const progress = React.useRef(new Animated.Value(checked ? 1 : 0)).current;
 
   React.useEffect(() => {
     Animated.timing(progress, {
       toValue: checked ? 1 : 0,
-      duration: 120,
+      duration: reduceMotion ? 0 : 120,
       easing: Easing.inOut(Easing.ease),
       useNativeDriver: true,
     }).start();
-  }, [checked, progress]);
+  }, [checked, progress, reduceMotion]);
 
   return (
     <TouchableOpacity
@@ -74,7 +77,7 @@ export function CalendarSwitch({
   );
 }
 
-const s = StyleSheet.create({
+const createStyles = (C: ColorPalette) => StyleSheet.create({
   control: {
     width: CALENDAR_SWITCH_GEOMETRY.width,
     height: CALENDAR_SWITCH_GEOMETRY.height,

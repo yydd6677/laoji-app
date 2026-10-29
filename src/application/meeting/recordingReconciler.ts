@@ -1,13 +1,12 @@
 import type { ClientIdFactory, ScopeKey } from '../../domain/meeting';
 import {
   assertScopeKey,
+  createSecureAssetGeneration,
   secureClientIdFactory,
   transitionProcessingStage,
 } from '../../domain/meeting';
-import type {
-  MeetingNoteRepository,
-  RecordingAssetRecord,
-} from '../../data/repositories';
+import type { MeetingNoteRepository, RecordingAssetRecord } from "../../data/repositories/meetingNoteRepository";
+import { canonicalRecordingSourceSha256 } from "../../data/repositories/meetingNoteRepository";
 import { CreateMeetingNoteUseCase } from './createMeetingNote';
 
 export interface RecoveredMeetingRecording {
@@ -95,7 +94,7 @@ export class RecordingReconciler {
       let aggregate = await this.repository.findByNativeSessionId(sessionId, scopeKey);
       if (!aggregate) {
         // Old journals did not contain a scope. They may belong to a signed-out or
-        // different account scope, so an orphan can only be adopted when the
+        // different installation scope, so an orphan can only be adopted when the
         // journal itself proves its owner.
         if (recording.storageScope !== scopeKey) {
           result.ignoredOtherScopes += 1;
@@ -123,7 +122,7 @@ export class RecordingReconciler {
           },
           initialStageStatuses: {
             capture: 'local_ready',
-            upload: scopeKey === 'guest' ? 'not_required' : 'queued',
+            upload: 'queued',
             transcript: 'none',
             summary: 'none',
             speaker: 'none',
@@ -190,6 +189,7 @@ export class RecordingReconciler {
       const asset: RecordingAssetRecord = {
         id: existing?.id ?? this.idFactory.create(),
         meetingId,
+        assetGeneration: existing?.assetGeneration ?? createSecureAssetGeneration(),
         role: 'primary',
         origin: existing?.origin ?? (recording.recovered ? 'recovered' : 'captured'),
         nativeSessionId: sessionId,
@@ -200,8 +200,12 @@ export class RecordingReconciler {
         byteSize,
         durationMs,
         checksumSha256: existing?.checksumSha256 ?? null,
+        sourceSha256: existing?.sourceSha256
+          ?? canonicalRecordingSourceSha256(existing?.checksumSha256),
         waveformJson: existing?.waveformJson ?? null,
         localState: 'local_ready',
+        uploadOperationId: existing?.uploadOperationId ?? null,
+        remoteObjectRevision: existing?.remoteObjectRevision ?? null,
         createdAtMs: existing?.createdAtMs ?? nowMs,
         updatedAtMs: nowMs,
         lastVerifiedAtMs: nowMs,
@@ -220,7 +224,7 @@ export class RecordingReconciler {
       if (upload.status !== 'uploaded') {
         await transaction.upsertStage(transitionProcessingStage(upload, {
           stage: 'upload',
-          status: scopeKey === 'guest' ? 'not_required' : 'queued',
+          status: 'queued',
           progress: null,
         }, Math.max(nowMs, upload.updatedAtMs)), scopeKey);
       }

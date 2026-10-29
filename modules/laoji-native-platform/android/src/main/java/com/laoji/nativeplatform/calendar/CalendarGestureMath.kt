@@ -44,7 +44,7 @@ object CalendarGestureMath {
   // AbstractC150857e keeps movement and the end handle on a fixed 15-minute
   // grid. C150854b/C150859g choose 15 or 30 for creation and the start handle
   // from the configured default duration. There is no external precision prop
-  // in the Feishu source contract.
+  // in the current gesture contract.
   private const val SOURCE_FIXED_PRECISION_MINUTES = 15
 
   private fun sourceDurationPrecision(defaultDurationMinutes: Int): Int =
